@@ -36,6 +36,9 @@ def generate_chart(data):
     # Use fallback color cycle for others
     default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     
+    # Get unique countries from dataframe
+    countries = df['country'].unique()
+    
     for i, country in enumerate(countries):
         country_data = df[df['country'] == country]
         
