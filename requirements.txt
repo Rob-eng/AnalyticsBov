@@ -1,0 +1,10 @@
+sqlalchemy
+psycopg2-binary
+requests
+beautifulsoup4
+gspread
+oauth2client
+matplotlib
+pandas
+python-telegram-bot
+apscheduler

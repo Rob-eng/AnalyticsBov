@@ -1,0 +1,7 @@
+import os
+
+class Config:
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+    GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
+    SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
