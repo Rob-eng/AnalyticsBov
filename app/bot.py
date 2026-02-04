@@ -100,8 +100,10 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        print(f"Error in current_analysis: {e}")
-        await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
+        import traceback
+        error_msg = f"❌ Ocorreu um erro: {str(e)}"
+        print(f"Error in current_analysis: {traceback.format_exc()}")
+        await update.message.reply_text(error_msg)
 
 async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Iniciando importação do histórico da planilha... Isso pode levar alguns segundos.")
