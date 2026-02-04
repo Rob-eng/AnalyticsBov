@@ -21,7 +21,9 @@ class PriceHistory(Base):
     price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
 
+import os
 if not Config.DATABASE_URL:
+    print("Environment variables present:", list(os.environ.keys()))
     raise ValueError("A variável de ambiente DATABASE_URL não está definida. Verifique as configurações no Railway.")
 
 # Fix for SQLAlchemy requiring 'postgresql://' instead of 'postgres://'
