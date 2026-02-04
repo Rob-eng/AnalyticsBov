@@ -21,7 +21,15 @@ class PriceHistory(Base):
     price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
 
-engine = create_engine(Config.DATABASE_URL)
+if not Config.DATABASE_URL:
+    raise ValueError("A variável de ambiente DATABASE_URL não está definida. Verifique as configurações no Railway.")
+
+# Fix for SQLAlchemy requiring 'postgresql://' instead of 'postgres://'
+db_url = Config.DATABASE_URL
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(db_url)
 SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
