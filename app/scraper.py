@@ -101,12 +101,28 @@ def save_to_db(data):
     session = SessionLocal()
     try:
         for item in data:
-            record = PriceHistory(
-                country=item['country'],
-                price=item['price'],
-                date=item['date']
-            )
-            session.add(record)
+            # Check if record exists for this country on this specific day (ignoring time)
+            # We assume 'date' in item is a datetime object
+            start_of_day = item['date'].replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = item['date'].replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            exists = session.query(PriceHistory).filter(
+                PriceHistory.country == item['country'],
+                PriceHistory.date >= start_of_day,
+                PriceHistory.date <= end_of_day
+            ).first()
+            
+            if not exists:
+                record = PriceHistory(
+                    country=item['country'],
+                    price=item['price'],
+                    date=item['date']
+                )
+                session.add(record)
+                print(f"Added record for {item['country']}")
+            else:
+                print(f"Skipped duplicate for {item['country']} on {start_of_day.date()}")
+                
         session.commit()
     except Exception as e:
         print(f"Error saving to DB: {e}")
@@ -119,8 +135,14 @@ def run_scraping_cycle():
     data = fetch_data()
     if data:
         print(f"Found {len(data)} records.")
+        # Save to DB (with duplicate check now)
         save_to_db(data)
+        
+        # NOTE: We continue to append to the sheet in 'log' format (Country, Price, Date)
+        # Changing this to matched the wide format is complex without rewriting the whole sheet logic.
+        # For now, we ensure the DB is clean.
         update_sheet(data)
+        
         return data
     else:
         print("No data found.")
@@ -142,49 +164,103 @@ def import_history_from_sheet():
         sheet = client.open_by_key(Config.SPREADSHEET_ID).sheet1
         all_values = sheet.get_all_values()
         
-        # Assume first row is header if distinct, or just try to parse all
-        # Logic: If row 0 has 'País', skip it.
-        start_index = 0
-        if all_values and 'País' in all_values[0][0]:
-            start_index = 1
-            
-        for row in all_values[start_index:]:
-            if len(row) < 3:
+        if not all_values:
+            return "⚠️ Planilha vazia."
+
+        # Detect format based on Row 1 (Header)
+        # Wide format expectation: Col A blank/Date, B=Brasil, C=Argentina... etc.
+        header = all_values[0]
+        
+        # Mapping country name to column index based on the screenshot/user info
+        # Header: [Action, Brasil, Argentina, Uruguai, Paraguai, Australia, Irlanda, Estados Unidos, China]
+        # Or simple: Check if these names exist in the first row
+        country_map = {}
+        target_countries = ['Brasil', 'Argentina', 'Uruguai', 'Paraguai', 'Australia', 'Irlanda', 'Estados Unidos', 'China']
+        
+        for idx, col_name in enumerate(header):
+            clean_name = col_name.strip()
+            # Loose matching
+            for target in target_countries:
+                if target.lower() in clean_name.lower():
+                    country_map[idx] = target
+        
+        print(f"Detected columns: {country_map}")
+
+        # Iterate rows starting from 1 (skip header)
+        for row_idx, row in enumerate(all_values[1:], start=1):
+            # If row is less than parsing width, stop or skip
+            if not row:
                 continue
                 
-            country = row[0]
-            price_str = row[1]
-            date_str = row[2]
-            
-            try:
-                price = float(price_str.replace('US$', '').replace(',', '.').strip())
-            except:
+            # Column A (index 0) should be the date
+            date_str = row[0].strip()
+            if not date_str:
                 continue
                 
+            # Parse Date
             try:
-                # Try parsing the date format we use
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                date_obj = datetime.strptime(date_str, '%d/%m/%Y')
             except ValueError:
                 try:
-                    # Try simple date format
-                    date_obj = datetime.strptime(date_str, '%d/%m/%Y')
+                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
                 except:
-                    # Skip invalid dates
-                    continue
-            
-            # Check for duplicates to avoid re-importing distinct data
-            exists = session.query(PriceHistory).filter_by(
-                country=country, 
-                date=date_obj
-            ).first()
-            
-            if not exists:
-                record = PriceHistory(country=country, price=price, date=date_obj)
-                session.add(record)
-                count += 1
-        
+                    # If date parsing fails, it might be one of the 'log' rows at the bottom (Country, Price, Date)
+                    # Let's try to handle that format too to be robust
+                    if len(row) >= 3:
+                        try:
+                            # Try the format: Country, Price, Date-Time
+                            log_country = row[0]
+                            log_price = float(row[1].replace(',', '.'))
+                            log_date = datetime.strptime(row[2], '%Y-%m-%d %H:%M:%S')
+                            
+                            # Add this record
+                            start_day = log_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                            end_day = log_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                            
+                            exists = session.query(PriceHistory).filter(
+                                PriceHistory.country == log_country,
+                                PriceHistory.date >= start_day,
+                                PriceHistory.date <= end_day
+                            ).first()
+                            
+                            if not exists:
+                                record = PriceHistory(country=log_country, price=log_price, date=log_date)
+                                session.add(record)
+                                count += 1
+                            continue # Successfully handled as log row
+                        except:
+                            pass
+                    continue # Skip if neither format matches
+
+            # If we are here, it's likely a Wide Format row (Date in Col A)
+            # Iterate through mapped columns
+            for col_idx, country_name in country_map.items():
+                if col_idx < len(row):
+                    price_val_str = row[col_idx].strip()
+                    if not price_val_str:
+                        continue
+                        
+                    try:
+                        # Handle potential localized floats
+                        clean_price = price_val_str.replace('US$', '').replace(',', '.').strip()
+                        price = float(clean_price)
+                        
+                        # Check existance
+                        # Since wide format usually has Time=00:00:00, we check strict date or range
+                        exists = session.query(PriceHistory).filter(
+                            PriceHistory.country == country_name,
+                            PriceHistory.date == date_obj
+                        ).first()
+                        
+                        if not exists:
+                            record = PriceHistory(country=country_name, price=price, date=date_obj)
+                            session.add(record)
+                            count += 1
+                    except ValueError:
+                        continue
+
         session.commit()
-        return f"✅ Importação concluída! {count} registros históricos adicionados."
+        return f"✅ Importação concluída! {count} novos registros."
         
     except Exception as e:
         print(f"Error importing history: {e}")
