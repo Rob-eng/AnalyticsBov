@@ -65,4 +65,6 @@ async def broadcast_report(application, data):
         session.close()
 
 def create_bot_application():
+    if not Config.TELEGRAM_TOKEN:
+        raise ValueError("A variável de ambiente TELEGRAM_TOKEN não está definida. Adicione-a nas variáveis do Railway.")
     return Application.builder().token(Config.TELEGRAM_TOKEN).build()
