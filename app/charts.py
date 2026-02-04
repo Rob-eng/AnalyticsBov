@@ -26,7 +26,8 @@ def generate_chart(data):
     for country in countries:
         country_data = df[df['country'] == country]
         # Plot line
-        plt.plot(country_data['date'], country_data['price'], label=country, linewidth=2)
+        # Plot line with markers to ensure visibility even with few data points
+        plt.plot(country_data['date'], country_data['price'], label=country, linewidth=2, marker='o', markersize=4)
         
         # Add label at the end of the line (optional, but requested style has usage of space)
         # For now, standard legend is safer because lines might overlap

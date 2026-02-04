@@ -38,8 +38,8 @@ SessionLocal = sessionmaker(bind=engine)
 def init_db():
     Base.metadata.create_all(engine)
 
-def get_recent_prices(days=365):
-    """Retrieve price history for the last N days."""
+def get_recent_prices(days=1095):
+    """Retrieve price history for the last N days (default 3 years)."""
     session = SessionLocal()
     try:
         cutoff_date = datetime.utcnow() - pd.Timedelta(days=days)
