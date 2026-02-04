@@ -125,3 +125,70 @@ def run_scraping_cycle():
     else:
         print("No data found.")
         return []
+
+def import_history_from_sheet():
+    print("Starting history import from Google Sheets...")
+    session = SessionLocal()
+    count = 0
+    try:
+        if not Config.GOOGLE_SHEETS_CREDENTIALS:
+            return "❌ Credenciais do Google Sheets não configuradas."
+
+        creds_dict = json.loads(Config.GOOGLE_SHEETS_CREDENTIALS)
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        sheet = client.open_by_key(Config.SPREADSHEET_ID).sheet1
+        all_values = sheet.get_all_values()
+        
+        # Assume first row is header if distinct, or just try to parse all
+        # Logic: If row 0 has 'País', skip it.
+        start_index = 0
+        if all_values and 'País' in all_values[0][0]:
+            start_index = 1
+            
+        for row in all_values[start_index:]:
+            if len(row) < 3:
+                continue
+                
+            country = row[0]
+            price_str = row[1]
+            date_str = row[2]
+            
+            try:
+                price = float(price_str.replace('US$', '').replace(',', '.').strip())
+            except:
+                continue
+                
+            try:
+                # Try parsing the date format we use
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                try:
+                    # Try simple date format
+                    date_obj = datetime.strptime(date_str, '%d/%m/%Y')
+                except:
+                    # Skip invalid dates
+                    continue
+            
+            # Check for duplicates to avoid re-importing distinct data
+            exists = session.query(PriceHistory).filter_by(
+                country=country, 
+                date=date_obj
+            ).first()
+            
+            if not exists:
+                record = PriceHistory(country=country, price=price, date=date_obj)
+                session.add(record)
+                count += 1
+        
+        session.commit()
+        return f"✅ Importação concluída! {count} registros históricos adicionados."
+        
+    except Exception as e:
+        print(f"Error importing history: {e}")
+        session.rollback()
+        return f"❌ Erro na importação: {str(e)}"
+    finally:
+        session.close()

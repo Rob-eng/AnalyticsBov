@@ -103,6 +103,21 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error in current_analysis: {e}")
         await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
 
+async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Iniciando importação do histórico da planilha... Isso pode levar alguns segundos.")
+    
+    try:
+        from app.scraper import import_history_from_sheet
+        
+        loop = asyncio.get_running_loop()
+        result_message = await loop.run_in_executor(None, import_history_from_sheet)
+        
+        await update.message.reply_text(result_message)
+
+    except Exception as e:
+        print(f"Error in sync_history: {e}")
+        await update.message.reply_text("❌ Erro fatal ao tentar importar histórico.")
+
 def create_bot_application(post_init=None):
     if not Config.TELEGRAM_TOKEN:
         raise ValueError("A variável de ambiente TELEGRAM_TOKEN não está definida. Adicione-a nas variáveis do Railway.")
