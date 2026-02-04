@@ -86,16 +86,69 @@ def update_sheet(data):
         
         sheet = client.open_by_key(Config.SPREADSHEET_ID).sheet1
         
+        # Get header to determine column positions
+        header = sheet.row_values(1)
+        
+        # Map country names to column indices (1-indexed for gspread)
+        country_columns = {}
+        for idx, col_name in enumerate(header, start=1):
+            clean_name = col_name.strip()
+            # Match country names
+            if 'brasil' in clean_name.lower():
+                country_columns['Brasil'] = idx
+            elif 'argentina' in clean_name.lower():
+                country_columns['Argentina'] = idx
+            elif 'uruguai' in clean_name.lower():
+                country_columns['Uruguai'] = idx
+            elif 'paraguai' in clean_name.lower():
+                country_columns['Paraguai'] = idx
+            elif 'australia' in clean_name.lower() or 'austrália' in clean_name.lower():
+                country_columns['Australia'] = idx
+                country_columns['Austrália'] = idx
+            elif 'irlanda' in clean_name.lower():
+                country_columns['Irlanda'] = idx
+            elif 'estados unidos' in clean_name.lower():
+                country_columns['Estados Unidos'] = idx
+            elif 'china' in clean_name.lower():
+                country_columns['China'] = idx
+        
+        if not data:
+            return
+            
+        # Group data by date (assuming all data is from the same scrape/date)
+        date_obj = data[0]['date']
+        date_str = date_obj.strftime('%d/%m/%Y')
+        
+        # Find if this date already exists in the sheet
+        all_dates = sheet.col_values(1)  # Column A contains dates
+        
+        row_index = None
+        for idx, existing_date in enumerate(all_dates[1:], start=2):  # Skip header
+            if existing_date.strip() == date_str:
+                row_index = idx
+                break
+        
+        # If date doesn't exist, add new row
+        if row_index is None:
+            # Find next empty row
+            row_index = len(all_dates) + 1
+            # Write date in column A
+            sheet.update_cell(row_index, 1, date_str)
+        
+        # Update prices for each country
         for item in data:
-            row = [
-                item['country'],
-                item['price'],
-                item['date'].strftime('%Y-%m-%d %H:%M:%S')
-            ]
-            sheet.append_row(row)
+            country = item['country']
+            price = item['price']
+            
+            if country in country_columns:
+                col_index = country_columns[country]
+                sheet.update_cell(row_index, col_index, price)
+                print(f"Updated {country} price to {price} on row {row_index}")
             
     except Exception as e:
         print(f"Error updating sheet: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 def save_to_db(data):
     session = SessionLocal()
