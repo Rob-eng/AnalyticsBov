@@ -64,6 +64,36 @@ async def broadcast_report(application, data):
     finally:
         session.close()
 
+async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Buscando dados e gerando análise... Aguarde um momento.")
+    
+    try:
+        from app.scraper import run_scraping_cycle
+        
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, run_scraping_cycle)
+        
+        if not data:
+            await update.message.reply_text("⚠️ Não foi possível coletar dados no momento.")
+            return
+
+        chart_path = generate_chart(data)
+        if not chart_path:
+             await update.message.reply_text("⚠️ Erro ao gerar o gráfico.")
+             return
+
+        caption = "📊 *Relatório Solicitado (Sob Demanda)* \n\nConfira os valores coletados agora."
+        
+        await update.message.reply_photo(
+            photo=open(chart_path, 'rb'),
+            caption=caption,
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        print(f"Error in current_analysis: {e}")
+        await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
+
 def create_bot_application(post_init=None):
     if not Config.TELEGRAM_TOKEN:
         raise ValueError("A variável de ambiente TELEGRAM_TOKEN não está definida. Adicione-a nas variáveis do Railway.")

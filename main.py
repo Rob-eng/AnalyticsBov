@@ -1,6 +1,6 @@
 import asyncio
 from app.models import init_db
-from app.bot import create_bot_application, start, status
+from app.bot import create_bot_application, start, status, current_analysis
 from app.scheduler import setup_scheduler
 from telegram.ext import CommandHandler
 
@@ -21,6 +21,7 @@ def main():
     # Add Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("atual", current_analysis))
     
     # Run Bot
     print("Starting Bot...")
