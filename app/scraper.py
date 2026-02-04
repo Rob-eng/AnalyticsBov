@@ -89,9 +89,9 @@ def update_sheet(data):
         # Get header to determine column positions
         header = sheet.row_values(1)
         
-        # Map country names to column indices (1-indexed for gspread)
+        # Map country names to column indices (0-indexed for list building)
         country_columns = {}
-        for idx, col_name in enumerate(header, start=1):
+        for idx, col_name in enumerate(header):
             clean_name = col_name.strip()
             # Match country names
             if 'brasil' in clean_name.lower():
@@ -128,22 +128,29 @@ def update_sheet(data):
                 row_index = idx
                 break
         
-        # If date doesn't exist, add new row
+        # If date doesn't exist, find next empty row
         if row_index is None:
-            # Find next empty row
             row_index = len(all_dates) + 1
-            # Write date in column A
-            sheet.update_cell(row_index, 1, date_str)
         
-        # Update prices for each country
+        # Build the complete row with all values
+        # Initialize row with empty strings matching header length
+        row_data = [''] * len(header)
+        row_data[0] = date_str  # First column is the date
+        
+        # Fill in prices for each country
         for item in data:
             country = item['country']
             price = item['price']
             
             if country in country_columns:
                 col_index = country_columns[country]
-                sheet.update_cell(row_index, col_index, price)
-                print(f"Updated {country} price to {price} on row {row_index}")
+                row_data[col_index] = price
+                print(f"Preparing {country} price: {price}")
+        
+        # Update the entire row at once
+        cell_range = f'A{row_index}:{chr(65 + len(header) - 1)}{row_index}'
+        sheet.update(cell_range, [row_data])
+        print(f"Updated row {row_index} with date {date_str}")
             
     except Exception as e:
         print(f"Error updating sheet: {e}")
