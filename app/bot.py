@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from app.config import Config
-from app.models import SessionLocal, User
+from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart
 import asyncio
 
@@ -42,7 +42,13 @@ async def broadcast_report(application, data):
         print("No data to broadcast")
         return
 
-    chart_path = generate_chart(data)
+    # Use historical data for the chart instead of just the current scrape
+    history_data = get_recent_prices()
+    if not history_data:
+        # Fallback to current data if history fetch fails (though it should contain at least current)
+        history_data = data
+        
+    chart_path = generate_chart(history_data)
     if not chart_path:
         print("Failed to generate chart")
         return
@@ -77,7 +83,10 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Não foi possível coletar dados no momento.")
             return
 
-        chart_path = generate_chart(data)
+        # Use history for chart
+        history_data = get_recent_prices()
+        chart_path = generate_chart(history_data)
+        
         if not chart_path:
              await update.message.reply_text("⚠️ Erro ao gerar o gráfico.")
              return

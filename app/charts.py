@@ -1,33 +1,57 @@
 import matplotlib.pyplot as plt
-import os
+import matplotlib.dates as mdates
 import pandas as pd
+import os
 
 def generate_chart(data):
     if not data:
         return None
         
-    # Convert to DataFrame for easier handling
     df = pd.DataFrame(data)
     
-    # Sort by price
-    df = df.sort_values(by='price', ascending=True)
+    # Ensure date is datetime
+    df['date'] = pd.to_datetime(df['date'])
     
-    plt.figure(figsize=(10, 8))
-    plt.barh(df['country'], df['price'], color='skyblue')
+    # Sort by date
+    df = df.sort_values('date')
     
-    plt.xlabel('Preço (@) em US$')
-    plt.title('Cotação do Boi no Mundo')
-    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    plt.figure(figsize=(10, 6))
     
-    # Add value labels
-    for i, v in enumerate(df['price']):
-        plt.text(v, i, f' ${v:.2f}', va='center')
+    # Plot each country
+    countries = df['country'].unique()
+    
+    # Define a set of colors similar to the user's example if possible, or use default tab10
+    # The example has explicit colors but default cycle is fine for now
+    
+    for country in countries:
+        country_data = df[df['country'] == country]
+        # Plot line
+        plt.plot(country_data['date'], country_data['price'], label=country, linewidth=2)
         
-    output_path = '/tmp/chart.png'
-    # Ensure directory exists if we were using a subdirectory, but /tmp is standard
+        # Add label at the end of the line (optional, but requested style has usage of space)
+        # For now, standard legend is safer because lines might overlap
+    
+    plt.title('Preço da @ em Dólar', fontsize=16, loc='left', pad=20)
+    
+    # Y-Axis formatting
+    plt.grid(axis='y', linestyle='-', alpha=0.3)
+    
+    # X-Axis formatting
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
+    plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.xticks(rotation=45)
+    
+    # Remove top and right spines
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    
+    # Legend outside or best fit
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., frameon=False)
     
     plt.tight_layout()
-    plt.savefig(output_path)
+    
+    output_path = '/tmp/chart.png'
+    plt.savefig(output_path, dpi=100, bbox_inches='tight')
     plt.close()
     
     return output_path

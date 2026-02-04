@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+import pandas as pd
 from app.config import Config
 
 Base = declarative_base()
@@ -36,3 +37,21 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
+
+def get_recent_prices(days=365):
+    """Retrieve price history for the last N days."""
+    session = SessionLocal()
+    try:
+        cutoff_date = datetime.utcnow() - pd.Timedelta(days=days)
+        # We need pandas for this anyway in charts, might as well return list of dicts to keep it decoupled
+        # or just return the query objects
+        records = session.query(PriceHistory).filter(PriceHistory.date >= cutoff_date).order_by(PriceHistory.date).all()
+        return [
+            {'country': r.country, 'price': r.price, 'date': r.date}
+            for r in records
+        ]
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return []
+    finally:
+        session.close()
