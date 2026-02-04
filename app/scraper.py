@@ -148,8 +148,9 @@ def update_sheet(data):
                 print(f"Preparing {country} price: {price}")
         
         # Update the entire row at once
+        # Use USER_ENTERED to prevent apostrophe prefix on dates
         cell_range = f'A{row_index}:{chr(65 + len(header) - 1)}{row_index}'
-        sheet.update(cell_range, [row_data])
+        sheet.update(cell_range, [row_data], value_input_option='USER_ENTERED')
         print(f"Updated row {row_index} with date {date_str}")
             
     except Exception as e:
@@ -254,6 +255,11 @@ def import_history_from_sheet():
                 
             # Column A (index 0) should be the date
             date_str = row[0].strip()
+            
+            # Remove leading apostrophe if present (Google Sheets text formatting)
+            if date_str.startswith("'"):
+                date_str = date_str[1:]
+            
             if not date_str:
                 continue
                 
@@ -316,10 +322,13 @@ def import_history_from_sheet():
                             record = PriceHistory(country=country_name, price=price, date=date_obj)
                             session.add(record)
                             count += 1
-                    except ValueError:
+                            print(f"Imported: {country_name} - {price} on {date_obj.strftime('%d/%m/%Y')}")
+                    except ValueError as ve:
+                        print(f"ValueError parsing price for {country_name}: {price_val_str} - {ve}")
                         continue
 
         session.commit()
+        print(f"Total records imported: {count}")
         return f"✅ Importação concluída! {count} novos registros."
         
     except Exception as e:
