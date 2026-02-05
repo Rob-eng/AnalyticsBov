@@ -1,9 +1,31 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart
 import asyncio
+
+# Conversation states for feedback
+WAITING_FEEDBACK = 1
+
+def is_admin(chat_id):
+    """Check if user is admin"""
+    return chat_id == Config.ADMIN_CHAT_ID
+
+def get_keyboard(chat_id):
+    """Get appropriate keyboard based on user role"""
+    if is_admin(chat_id):
+        keyboard = [
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("📈 Status")],
+            [KeyboardButton("💬 Feedback"), KeyboardButton("📥 Importar Histórico")],
+            [KeyboardButton("👥 Lista de Usuários")]
+        ]
+    else:
+        keyboard = [
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("📈 Status")],
+            [KeyboardButton("💬 Feedback")]
+        ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -12,13 +34,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = SessionLocal()
     try:
         user = session.query(User).filter_by(chat_id=chat_id).first()
+        
+        welcome_msg = (
+            "🐂 *Bem-vindo ao Agro Analytics Bot!*\n\n"
+            "Seu assistente para acompanhar as cotações do boi no mundo.\n\n"
+            "*Comandos disponíveis:*\n"
+            "📊 /atual - Cotação atual\n"
+            "📈 /status - Seu status de cadastro\n"
+            "💬 /feedback - Enviar sugestões\n"
+        )
+        
+        if is_admin(chat_id):
+            welcome_msg += "\n*Comandos Admin:*\n👥 /usuarios - Lista de usuários\n📥 /importar - Importar histórico\n"
+        
+        welcome_msg += "\n_Desenvolvido por Robson Campos_ 👨‍💻"
+        
         if not user:
             new_user = User(chat_id=chat_id, username=username)
             session.add(new_user)
             session.commit()
-            await update.message.reply_text("Bem-vindo! Você foi registrado para receber as cotações semanais.")
+            
+            # Notify admin about new user
+            if not is_admin(chat_id):
+                try:
+                    await context.bot.send_message(
+                        chat_id=Config.ADMIN_CHAT_ID,
+                        text=f"🆕 *Novo usuário cadastrado!*\n\nNome: @{username or 'Sem username'}\nID: `{chat_id}`",
+                        parse_mode='Markdown'
+                    )
+                except:
+                    pass
+            
+            await update.message.reply_text(
+                welcome_msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
         else:
-            await update.message.reply_text("Você já está registrado.")
+            await update.message.reply_text(
+                welcome_msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
     except Exception as e:
         print(f"Error in start command: {e}")
         await update.message.reply_text("Ocorreu um erro ao registrar.")
@@ -132,6 +189,115 @@ async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error in sync_history: {e}")
         await update.message.reply_text("❌ Erro fatal ao tentar importar histórico.")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to list all registered users"""
+    chat_id = update.effective_chat.id
+    
+    if not is_admin(chat_id):
+        await update.message.reply_text("❌ Você não tem permissão para usar este comando.")
+        return
+    
+    session = SessionLocal()
+    try:
+        users = session.query(User).all()
+        
+        if not users:
+            await update.message.reply_text("Nenhum usuário cadastrado ainda.")
+            return
+        
+        user_list = "👥 *Lista de Usuários Cadastrados*\n\n"
+        for idx, user in enumerate(users, 1):
+            username_display = f"@{user.username}" if user.username else "Sem username"
+            created = user.created_at.strftime('%d/%m/%Y') if user.created_at else "N/A"
+            user_list += f"{idx}. {username_display}\n   ID: `{user.chat_id}`\n   Cadastro: {created}\n\n"
+        
+        user_list += f"*Total: {len(users)} usuários*"
+        
+        await update.message.reply_text(user_list, parse_mode='Markdown')
+    except Exception as e:
+        print(f"Error in list_users: {e}")
+        await update.message.reply_text("❌ Erro ao buscar lista de usuários.")
+    finally:
+        session.close()
+
+async def start_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start feedback conversation"""
+    await update.message.reply_text(
+        "💬 *Sistema de Feedback*\n\n"
+        "Por favor, envie sua mensagem com sugestões, dúvidas ou solicitações de funcionalidades.\n\n"
+        "Envie /cancelar para cancelar.",
+        parse_mode='Markdown'
+    )
+    return WAITING_FEEDBACK
+
+async def receive_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive and forward feedback to admin"""
+    chat_id = update.effective_chat.id
+    username = update.effective_chat.username
+    feedback_text = update.message.text
+    
+    # Don't process commands
+    if feedback_text.startswith('/'):
+        return WAITING_FEEDBACK
+    
+    try:
+        # Forward to admin
+        admin_message = (
+            f"💬 *Novo Feedback Recebido*\n\n"
+            f"De: @{username or 'Sem username'}\n"
+            f"ID: `{chat_id}`\n\n"
+            f"*Mensagem:*\n{feedback_text}"
+        )
+        
+        await context.bot.send_message(
+            chat_id=Config.ADMIN_CHAT_ID,
+            text=admin_message,
+            parse_mode='Markdown'
+        )
+        
+        await update.message.reply_text(
+            "✅ Obrigado pelo feedback! Sua mensagem foi enviada com sucesso.",
+            reply_markup=get_keyboard(chat_id)
+        )
+    except Exception as e:
+        print(f"Error sending feedback: {e}")
+        await update.message.reply_text("❌ Erro ao enviar feedback. Tente novamente mais tarde.")
+    
+    return ConversationHandler.END
+
+async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel feedback conversation"""
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(
+        "❌ Feedback cancelado.",
+        reply_markup=get_keyboard(chat_id)
+    )
+    return ConversationHandler.END
+
+async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle keyboard button presses"""
+    text = update.message.text
+    
+    if text == "📊 Cotação Atual":
+        await current_analysis(update, context)
+    elif text == "📈 Status":
+        await status(update, context)
+    elif text == "💬 Feedback":
+        await start_feedback(update, context)
+        return WAITING_FEEDBACK
+    elif text == "📥 Importar Histórico":
+        if is_admin(update.effective_chat.id):
+            await sync_history(update, context)
+        else:
+            await update.message.reply_text("❌ Comando apenas para administradores.")
+    elif text == "👥 Lista de Usuários":
+        if is_admin(update.effective_chat.id):
+            await list_users(update, context)
+        else:
+            await update.message.reply_text("❌ Comando apenas para administradores.")
+    
+    return ConversationHandler.END
 
 def create_bot_application(post_init=None):
     if not Config.TELEGRAM_TOKEN:
