@@ -25,15 +25,15 @@ def get_chart_from_sheet():
             # Add format parameter if not present
             chart_url += '&format=image' if '?' in chart_url else '?format=image'
         
-        # Add width parameter for higher resolution (Google Sheets supports up to 2048px)
-        # Default is around 600px, we'll use 1600px for much better quality
+        # Add width and height parameters for maximum resolution
+        # Google Sheets supports up to 2048px, we'll use maximum for best quality
         if 'w=' not in chart_url and 'width=' not in chart_url:
-            chart_url += '&w=1600'
+            chart_url += '&w=2048&h=1536'  # 4:3 aspect ratio for better quality
         
-        print(f"Fetching chart from: {chart_url}")
+        print(f"Fetching high-resolution chart from: {chart_url}")
         
         # Download the chart image (no authentication needed for published charts)
-        response = requests.get(chart_url, timeout=10)
+        response = requests.get(chart_url, timeout=15)
         
         if response.status_code == 200:
             output_path = '/tmp/sheet_chart.png'
