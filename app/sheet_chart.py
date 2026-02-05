@@ -1,92 +1,34 @@
 import requests
-import json
 from app.config import Config
-from oauth2client.service_account import ServiceAccountCredentials
-import gspread
 
 def get_chart_from_sheet():
     """
-    Fetch the chart image from Google Sheets.
+    Fetch the chart image from Google Sheets using the published chart URL.
     
-    This function retrieves the first chart from the spreadsheet and downloads it as an image.
-    The chart must exist in the Google Sheet for this to work.
+    The chart URL should be set in the CHART_URL environment variable.
+    Format: https://docs.google.com/spreadsheets/d/e/{PUBLISH_ID}/pubchart?oid={CHART_ID}&format=image
     
     Returns:
         str: Path to the downloaded chart image, or None if failed
     """
     try:
-        if not Config.GOOGLE_SHEETS_CREDENTIALS:
-            print("No Google Sheets credentials provided.")
-            return None
-
-        creds_dict = json.loads(Config.GOOGLE_SHEETS_CREDENTIALS)
-        scope = ['https://spreadsheets.google.com/feeds', 
-                 'https://www.googleapis.com/auth/drive',
-                 'https://www.googleapis.com/auth/spreadsheets']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        
-        # Open the spreadsheet
-        spreadsheet = client.open_by_key(Config.SPREADSHEET_ID)
-        sheet = spreadsheet.sheet1
-        
-        # Get spreadsheet metadata to find charts
-        # Note: gspread doesn't directly support chart retrieval, so we'll use the Sheets API
-        from googleapiclient.discovery import build
-        
-        service = build('sheets', 'v4', credentials=creds)
-        
-        # Get spreadsheet details including charts from all sheets
-        spreadsheet_data = service.spreadsheets().get(
-            spreadsheetId=Config.SPREADSHEET_ID,
-            fields='sheets(properties(title,sheetId),charts(chartId,position))'
-        ).execute()
-        
-        # Find charts, prioritizing a sheet named 'Gráfico' or similar
-        chart_id = None
-        chart_sheet_name = None
-        
-        # First pass: look for chart in a sheet named 'Gráfico', 'Grafico', 'Chart', etc.
-        for sheet_data in spreadsheet_data.get('sheets', []):
-            sheet_title = sheet_data.get('properties', {}).get('title', '').lower()
-            charts = sheet_data.get('charts', [])
-            
-            if charts and ('gráfico' in sheet_title or 'grafico' in sheet_title or 'chart' in sheet_title):
-                chart_id = charts[0]['chartId']
-                chart_sheet_name = sheet_data.get('properties', {}).get('title')
-                print(f"Found chart in dedicated sheet: {chart_sheet_name}")
-                break
-        
-        # Second pass: if not found, get first chart from any sheet
-        if not chart_id:
-            for sheet_data in spreadsheet_data.get('sheets', []):
-                charts = sheet_data.get('charts', [])
-                if charts:
-                    chart_id = charts[0]['chartId']
-                    chart_sheet_name = sheet_data.get('properties', {}).get('title')
-                    print(f"Found chart in sheet: {chart_sheet_name}")
-                    break
-        
-        if not chart_id:
-            print("No chart found in any sheet of the spreadsheet")
+        # Check if CHART_URL is configured
+        if not Config.CHART_URL:
+            print("CHART_URL not configured, cannot fetch chart from sheet")
             return None
         
-        print(f"Using chart ID: {chart_id}")
-        
-        # Construct the chart export URL
-        # Format: https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export/chart?id={CHART_ID}&format=image/png
-        chart_url = f"https://docs.google.com/spreadsheets/d/{Config.SPREADSHEET_ID}/export/chart?id={chart_id}&format=image/png"
+        # Convert the URL to PNG format if it's interactive
+        chart_url = Config.CHART_URL
+        if 'format=interactive' in chart_url:
+            chart_url = chart_url.replace('format=interactive', 'format=image')
+        elif 'format=' not in chart_url:
+            # Add format parameter if not present
+            chart_url += '&format=image' if '?' in chart_url else '?format=image'
         
         print(f"Fetching chart from: {chart_url}")
         
-        # Download the chart image with authentication
-        # We need to use the access token from credentials
-        creds.get_access_token()  # Refresh if needed
-        headers = {
-            'Authorization': f'Bearer {creds.access_token}'
-        }
-        
-        response = requests.get(chart_url, headers=headers)
+        # Download the chart image (no authentication needed for published charts)
+        response = requests.get(chart_url, timeout=10)
         
         if response.status_code == 200:
             output_path = '/tmp/sheet_chart.png'
@@ -96,7 +38,6 @@ def get_chart_from_sheet():
             return output_path
         else:
             print(f"Failed to download chart. Status code: {response.status_code}")
-            print(f"Response: {response.text}")
             return None
             
     except Exception as e:
