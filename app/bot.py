@@ -42,13 +42,19 @@ async def broadcast_report(application, data):
         print("No data to broadcast")
         return
 
-    # Use historical data for the chart instead of just the current scrape
-    history_data = get_recent_prices()
-    if not history_data:
-        # Fallback to current data if history fetch fails (though it should contain at least current)
-        history_data = data
-        
-    chart_path = generate_chart(history_data)
+    # Try to get chart from Google Sheets first
+    from app.sheet_chart import get_chart_from_sheet
+    chart_path = get_chart_from_sheet()
+    
+    # Fallback to matplotlib if sheet chart fails
+    if not chart_path:
+        print("Failed to get chart from sheet, falling back to matplotlib")
+        from app.models import get_recent_prices
+        history_data = get_recent_prices()
+        if not history_data:
+            history_data = data
+        chart_path = generate_chart(history_data)
+    
     if not chart_path:
         print("Failed to generate chart")
         return
@@ -75,6 +81,7 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         from app.scraper import run_scraping_cycle
+        from app.sheet_chart import get_chart_from_sheet
         
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, run_scraping_cycle)
@@ -83,9 +90,15 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Não foi possível coletar dados no momento.")
             return
 
-        # Use history for chart
-        history_data = get_recent_prices()
-        chart_path = generate_chart(history_data)
+        # Try to get chart from Google Sheets first
+        chart_path = await loop.run_in_executor(None, get_chart_from_sheet)
+        
+        # Fallback to matplotlib if sheet chart fails
+        if not chart_path:
+            print("Failed to get chart from sheet, falling back to matplotlib")
+            from app.models import get_recent_prices
+            history_data = get_recent_prices()
+            chart_path = generate_chart(history_data)
         
         if not chart_path:
              await update.message.reply_text("⚠️ Erro ao gerar o gráfico.")

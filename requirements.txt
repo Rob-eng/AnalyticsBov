@@ -4,6 +4,7 @@ requests
 beautifulsoup4
 gspread
 oauth2client
+google-api-python-client
 matplotlib
 pandas
 python-telegram-bot
