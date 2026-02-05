@@ -36,23 +36,42 @@ def get_chart_from_sheet():
         
         service = build('sheets', 'v4', credentials=creds)
         
-        # Get spreadsheet details including charts
+        # Get spreadsheet details including charts from all sheets
         spreadsheet_data = service.spreadsheets().get(
             spreadsheetId=Config.SPREADSHEET_ID,
-            fields='sheets(charts(chartId,position))'
+            fields='sheets(properties(title,sheetId),charts(chartId,position))'
         ).execute()
         
-        # Find the first chart
+        # Find charts, prioritizing a sheet named 'Gráfico' or similar
         chart_id = None
+        chart_sheet_name = None
+        
+        # First pass: look for chart in a sheet named 'Gráfico', 'Grafico', 'Chart', etc.
         for sheet_data in spreadsheet_data.get('sheets', []):
+            sheet_title = sheet_data.get('properties', {}).get('title', '').lower()
             charts = sheet_data.get('charts', [])
-            if charts:
+            
+            if charts and ('gráfico' in sheet_title or 'grafico' in sheet_title or 'chart' in sheet_title):
                 chart_id = charts[0]['chartId']
+                chart_sheet_name = sheet_data.get('properties', {}).get('title')
+                print(f"Found chart in dedicated sheet: {chart_sheet_name}")
                 break
         
+        # Second pass: if not found, get first chart from any sheet
         if not chart_id:
-            print("No chart found in the spreadsheet")
+            for sheet_data in spreadsheet_data.get('sheets', []):
+                charts = sheet_data.get('charts', [])
+                if charts:
+                    chart_id = charts[0]['chartId']
+                    chart_sheet_name = sheet_data.get('properties', {}).get('title')
+                    print(f"Found chart in sheet: {chart_sheet_name}")
+                    break
+        
+        if not chart_id:
+            print("No chart found in any sheet of the spreadsheet")
             return None
+        
+        print(f"Using chart ID: {chart_id}")
         
         # Construct the chart export URL
         # Format: https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export/chart?id={CHART_ID}&format=image/png
