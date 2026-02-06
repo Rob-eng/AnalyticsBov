@@ -38,6 +38,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         welcome_msg = (
             "🐂 *Bem-vindo ao Agro Analytics Bot!*\n\n"
             "Seu assistente para acompanhar as cotações do boi no mundo.\n\n"
+            "Vou te enviar as cotações atualizadas toda segunda-feira às 8h.\n\n"
             "*Comandos disponíveis:*\n"
             "📊 /atual - Cotação atual\n"
             "📈 /status - Seu status de cadastro\n"
@@ -94,6 +95,22 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         session.close()
 
+def format_chart_caption(data, title="Cotação do Boi no Mundo"):
+    """Helper to format chart caption with prices and feedback CTA"""
+    caption = f"📊 *{title}*\n\n"
+    
+    if data:
+        for item in data:
+            date_str = item['date'].strftime('%d/%m/%Y')
+            # Normalize price display
+            price = item['price']
+            caption += f"📍 {item['country']}: *US$ {price:.2f}* ({date_str})\n"
+    
+    caption += "\n💬 *Sua opinião é importante!* \n"
+    caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
+    
+    return caption
+
 async def broadcast_report(application, data):
     if not data:
         print("No data to broadcast")
@@ -119,9 +136,9 @@ async def broadcast_report(application, data):
     session = SessionLocal()
     try:
         users = session.query(User).all()
+        caption = format_chart_caption(data)
         for user in users:
             try:
-                caption = "📊 *Cotação do Boi no Mundo* \n\nConfira os valores atualizados desta semana."
                 await application.bot.send_photo(
                     chat_id=user.chat_id, 
                     photo=open(chart_path, 'rb'),
@@ -161,7 +178,7 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
              await update.message.reply_text("⚠️ Erro ao gerar o gráfico.")
              return
 
-        caption = "📊 *Relatório Solicitado (Sob Demanda)* \n\nConfira os valores coletados agora."
+        caption = format_chart_caption(data, title="Relatório Solicitado (Sob Demanda)")
         
         await update.message.reply_photo(
             photo=open(chart_path, 'rb'),
