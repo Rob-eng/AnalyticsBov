@@ -103,6 +103,9 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo"):
     date_str = data[0]['date'].strftime('%d/%m/%Y')
     caption = f"📊 *{title}* - {date_str}\n\n"
     
+    # Sort data by price (descending)
+    sorted_data = sorted(data, key=lambda x: x['price'], reverse=True)
+    
     # Color mapping for emojis
     country_emojis = {
         'Brasil': '🟢',
@@ -116,7 +119,7 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo"):
         'China': '🔴'
     }
     
-    for item in data:
+    for item in sorted_data:
         # Normalize price display
         price = item['price']
         country = item['country']
