@@ -103,10 +103,25 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo"):
     date_str = data[0]['date'].strftime('%d/%m/%Y')
     caption = f"📊 *{title}* - {date_str}\n\n"
     
+    # Color mapping for emojis
+    country_emojis = {
+        'Brasil': '🟢',
+        'Argentina': '🔵',
+        'Uruguai': '🟠',
+        'Paraguai': '🔴',
+        'Austrália': '⚫️',
+        'Australia': '⚫️',
+        'Irlanda': '🟣',
+        'Estados Unidos': '🟡',
+        'China': '🔴'
+    }
+    
     for item in data:
         # Normalize price display
         price = item['price']
-        caption += f"📍 {item['country']}: *US$ {price:.2f}*\n"
+        country = item['country']
+        emoji = country_emojis.get(country, '📍')
+        caption += f"{emoji} {country}: *US$ {price:.2f}*\n"
     
     caption += "\n💬 *Sua opinião é importante!* \n"
     caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
