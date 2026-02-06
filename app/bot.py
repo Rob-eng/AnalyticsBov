@@ -97,14 +97,16 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def format_chart_caption(data, title="Cotação do Boi no Mundo"):
     """Helper to format chart caption with prices and feedback CTA"""
-    caption = f"📊 *{title}*\n\n"
+    if not data:
+        return f"📊 *{title}*\n\n💬 *Sua opinião é importante!* \nClique aqui para enviar um /feedback ou sugerir melhorias."
+        
+    date_str = data[0]['date'].strftime('%d/%m/%Y')
+    caption = f"📊 *{title}* - {date_str}\n\n"
     
-    if data:
-        for item in data:
-            date_str = item['date'].strftime('%d/%m/%Y')
-            # Normalize price display
-            price = item['price']
-            caption += f"📍 {item['country']}: *US$ {price:.2f}* ({date_str})\n"
+    for item in data:
+        # Normalize price display
+        price = item['price']
+        caption += f"📍 {item['country']}: *US$ {price:.2f}*\n"
     
     caption += "\n💬 *Sua opinião é importante!* \n"
     caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
