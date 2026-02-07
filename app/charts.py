@@ -109,9 +109,29 @@ def generate_chart(data):
     ax.yaxis.grid(True, linestyle='-', color='#e5e5e5', alpha=0.8)
     ax.xaxis.grid(False)
     
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%y'))
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
-    plt.xticks(rotation=45, ha='right', fontsize=10, color='#444444')
+    # X-Axis formatting: Set to Quarters (Jan, Apr, Jul, Oct)
+    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+    
+    # Custom labels: "Year" for January, "T2, T3, T4" for others
+    def format_quarters(x, pos):
+        dt = mdates.num2date(x)
+        if dt.month == 1:
+            return f"{dt.year}"
+        elif dt.month == 4:
+            return "T2" 
+        elif dt.month == 7:
+            return "T3"
+        elif dt.month == 10:
+            return "T4"
+        return ""
+
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(format_quarters))
+    
+    # Grid: Horizontal lines + Light Vertical lines for quarters
+    ax.yaxis.grid(True, linestyle='-', color='#e5e5e5', alpha=0.8)
+    ax.xaxis.grid(True, linestyle='--', color='#f0f0f0', alpha=0.5)
+    
+    plt.xticks(rotation=0, ha='center', fontsize=10, color='#444444')
     
     max_val = df['price'].max()
     plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color='#444444')
