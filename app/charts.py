@@ -33,16 +33,16 @@ def generate_chart(data):
         'China': '#fa8072'         # Salmon
     }
     
-    # Brand / Theme Colors
-    BG_COLOR = '#FFFFFF'
-    TEXT_COLOR = '#333333'
-    CYAN_BRAND = '#00B4FF' # Keeping brand color for title
-    GRID_COLOR = '#EEEEEE'
+    # Brand / Theme Colors - NAVY THEME
+    BG_COLOR = '#001F3F' # Classic Navy Blue or #0a0e1c for more modern
+    TEXT_COLOR = '#FFFFFF'
+    CYAN_BRAND = '#00B4FF'
+    GRID_COLOR = '#112D4E'
     
-    # Reset country colors if needed (black back to black)
+    # Adjust specific colors for dark mode visibility
     for c, col in country_colors.items():
-        if col == '#E0E0E0':
-            country_colors[c] = '#000000'
+        if col == '#000000':
+            country_colors[c] = '#E0E0E0' # Light grey instead of black
     
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8), facecolor=BG_COLOR)
@@ -54,7 +54,7 @@ def generate_chart(data):
         try:
             logo_img = plt.imread(logo_path)
             newax = fig.add_axes([0.25, 0.2, 0.5, 0.5], zorder=0)
-            newax.imshow(logo_img, alpha=0.06) # Very subtle on white
+            newax.imshow(logo_img, alpha=0.12) # More visible on dark
             newax.axis('off')
         except Exception as e:
             print(f"Error adding watermark: {e}")
@@ -81,21 +81,21 @@ def generate_chart(data):
                 spl = make_interp_spline(x, y, k=3)
                 y_smooth = spl(x_new)
                 line, = ax.plot(mdates.num2date(x_new), y_smooth, 
-                         linewidth=2.2, 
+                         linewidth=2.8, # Thicker for dark background
                          color=color,
-                         alpha=0.9,
+                         alpha=0.95,
                          zorder=5)
             except:
                 line, = ax.plot(series.index, series.values, 
-                         linewidth=2.2, 
+                         linewidth=2.8, 
                          color=color,
-                         alpha=0.9,
+                         alpha=0.95,
                          zorder=5)
         else:
             line, = ax.plot(series.index, series.values, 
-                     linewidth=2.2, 
+                     linewidth=2.8, 
                      color=color,
-                     alpha=0.9,
+                     alpha=0.95,
                      zorder=5)
     
     # Sorting and Legend info gathering
@@ -120,8 +120,8 @@ def generate_chart(data):
     
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
-    ax.spines['right'].set_color('#DDDDDD')
-    ax.spines['bottom'].set_color('#DDDDDD')
+    ax.spines['right'].set_color('#112D4E')
+    ax.spines['bottom'].set_color('#112D4E')
     
     # X-Axis: Years as major ticks
     ax.xaxis.set_major_locator(mdates.YearLocator())
@@ -129,8 +129,8 @@ def generate_chart(data):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
     
     # Tick Styles
-    ax.tick_params(axis='x', which='major', length=10, width=1.5, color='#999999', labelsize=11, labelcolor=TEXT_COLOR)
-    ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#CCCCCC')
+    ax.tick_params(axis='x', which='major', length=10, width=1.5, color=CYAN_BRAND, labelsize=11, labelcolor=TEXT_COLOR)
+    ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#444444')
     
     # Y-Axis Ticks: Every 10 units
     max_val = df['price'].max()
@@ -138,8 +138,8 @@ def generate_chart(data):
     ax.set_ylim(0, max_val + 10)
     
     # Grid: Subtle horizontal at 10 units, sutil dotted at each year
-    ax.yaxis.grid(True, linestyle='-', color='#F5F5F5', alpha=0.9, zorder=1)
-    ax.xaxis.grid(True, which='major', linestyle=':', color='#E0E0E0', alpha=0.8, zorder=1)
+    ax.yaxis.grid(True, linestyle='-', color='#0a192f', alpha=0.5, zorder=1)
+    ax.xaxis.grid(True, which='major', linestyle=':', color='#0a192f', alpha=0.5, zorder=1)
     ax.xaxis.grid(False, which='minor') # Don't grid quarters
     
     plt.xticks(rotation=0, ha='center')
