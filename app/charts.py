@@ -109,29 +109,23 @@ def generate_chart(data):
     ax.yaxis.grid(True, linestyle='-', color='#e5e5e5', alpha=0.8)
     ax.xaxis.grid(False)
     
-    # X-Axis formatting: Set to Quarters (Jan, Apr, Jul, Oct)
-    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+    # X-Axis formatting: Set major locator to years and minor locator to quarters
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))
     
-    # Custom labels: "Year" for January, "T2, T3, T4" for others
-    def format_quarters(x, pos):
-        dt = mdates.num2date(x)
-        if dt.month == 1:
-            return f"{dt.year}"
-        elif dt.month == 4:
-            return "T2" 
-        elif dt.month == 7:
-            return "T3"
-        elif dt.month == 10:
-            return "T4"
-        return ""
-
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(format_quarters))
+    # Formatter: Only show the year on major ticks
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax.xaxis.set_minor_formatter(plt.NullFormatter()) # No text for quarters
     
-    # Grid: Horizontal lines + Light Vertical lines for quarters
+    # Tick Styles: Major (Years) are larger, Minor (Quarters) are smaller
+    ax.tick_params(axis='x', which='major', length=10, width=1.5, color='#aaaaaa', labelsize=11, labelcolor='#444444')
+    ax.tick_params(axis='x', which='minor', length=5, width=1, color='#cccccc')
+    
+    # Grid: Horizontal lines ONLY for a clean look
     ax.yaxis.grid(True, linestyle='-', color='#e5e5e5', alpha=0.8)
-    ax.xaxis.grid(True, linestyle='--', color='#f0f0f0', alpha=0.5)
+    ax.xaxis.grid(False, which='both')
     
-    plt.xticks(rotation=0, ha='center', fontsize=10, color='#444444')
+    plt.xticks(rotation=0, ha='center')
     
     max_val = df['price'].max()
     plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color='#444444')
