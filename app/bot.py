@@ -95,7 +95,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         session.close()
 
-def format_chart_caption(data, title="Cotação do Boi no Mundo"):
+def format_chart_caption(data, title="Cotação do Boi no Mundo", note=None):
     """Helper to format chart caption with prices and feedback CTA"""
     if not data:
         return f"📊 *{title}*\n\n💬 *Sua opinião é importante!* \nClique aqui para enviar um /feedback ou sugerir melhorias."
@@ -126,7 +126,10 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo"):
         emoji = country_emojis.get(country, '📍')
         caption += f"{emoji} {country}: *US$ {price:.2f}*\n"
     
-    caption += "\n💬 *Sua opinião é importante!* \n"
+    if note:
+        caption += f"\n_{note}_"
+        
+    caption += "\n\n💬 *Sua opinião é importante!* \n"
     caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
     
     return caption
@@ -171,6 +174,27 @@ async def broadcast_report(application, data):
         session.close()
 
 async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    first_name = update.effective_chat.first_name
+    username = update.effective_chat.username
+    
+    # Notify Admin if user is not the admin himself
+    try:
+        if not is_admin(chat_id):
+            admin_alert = (
+                f"👤 *Solicitação de Cotação*\n\n"
+                f"Usuário: {f'[{first_name}](tg://user?id={chat_id})'}\n"
+                f"Username: @{username or 'Sem username'}\n"
+                f"ID: `{chat_id}`"
+            )
+            await context.bot.send_message(
+                chat_id=Config.ADMIN_CHAT_ID,
+                text=admin_alert,
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        print(f"Error notifying admin: {e}")
+
     await update.message.reply_text("🔄 Buscando dados e gerando análise... Aguarde um momento.")
     
     try:
@@ -178,27 +202,28 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from app.sheet_chart import get_chart_from_sheet
         
         loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, run_scraping_cycle)
+        # Fetch data without saving to DB or Sheet (save=False)
+        data = await loop.run_in_executor(None, lambda: run_scraping_cycle(save=False))
         
         if not data:
             await update.message.reply_text("⚠️ Não foi possível coletar dados no momento.")
             return
 
-        # Try to get chart from Google Sheets first
+        # Try to get historical chart from Google Sheets
         chart_path = await loop.run_in_executor(None, get_chart_from_sheet)
         
         # Fallback to matplotlib if sheet chart fails
         if not chart_path:
-            print("Failed to get chart from sheet, falling back to matplotlib")
             from app.models import get_recent_prices
             history_data = get_recent_prices()
             chart_path = generate_chart(history_data)
         
         if not chart_path:
-             await update.message.reply_text("⚠️ Erro ao gerar o gráfico.")
+             await update.message.reply_text("⚠️ Erro ao acessar o gráfico.")
              return
 
-        caption = format_chart_caption(data, title="Relatório Solicitado (Sob Demanda)")
+        note = "Nota: O gráfico reflete os dados históricos da planilha. O texto acima contém os preços atuais coletados no site agora."
+        caption = format_chart_caption(data, title="Relatório Solicitado (Sob Demanda)", note=note)
         
         await update.message.reply_photo(
             photo=open(chart_path, 'rb'),

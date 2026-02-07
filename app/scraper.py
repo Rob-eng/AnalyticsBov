@@ -191,19 +191,20 @@ def save_to_db(data):
     finally:
         session.close()
 
-def run_scraping_cycle():
-    print("Starting scraping cycle...")
+def run_scraping_cycle(save=True):
+    print(f"Starting scraping cycle (save={save})...")
     data = fetch_data()
     if data:
         print(f"Found {len(data)} records.")
-        # Save to DB (with duplicate check now)
-        save_to_db(data)
         
-        # NOTE: We continue to append to the sheet in 'log' format (Country, Price, Date)
-        # Changing this to matched the wide format is complex without rewriting the whole sheet logic.
-        # For now, we ensure the DB is clean.
-        update_sheet(data)
-        
+        if save:
+            # Save to DB (with duplicate check now)
+            save_to_db(data)
+            # Update the sheet in wide format
+            update_sheet(data)
+        else:
+            print("Fetch-only mode: skipping database and sheet update.")
+            
         return data
     else:
         print("No data found.")
