@@ -3,82 +3,165 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import pandas as pd
+import numpy as np
+from scipy.interpolate import make_interp_spline
+import os
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+import numpy as np
+from scipy.interpolate import make_interp_spline
+import os
+
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import os
 
 def generate_chart(data):
-    if not data:
+    if not data or len(data) == 0:
         return None
         
+    # Convert to DataFrame and prepare data
     df = pd.DataFrame(data)
-    
-    # Ensure date is datetime
     df['date'] = pd.to_datetime(df['date'])
     
-    # Sort by date
-    df = df.sort_values('date')
+    # Pivot the data
+    df_pivot = df.pivot(index='date', columns='country', values='price')
+    df_pivot = df_pivot.sort_index()
     
-    plt.figure(figsize=(10, 6))
-    
-    # Plot each country
-    # Define colors based on user's spreadsheet reference
+    # Colors matching the Google Sheet exactly
     country_colors = {
         'Brasil': '#2ca02c',       # Green
         'Argentina': '#00ffff',    # Cyan
         'Uruguai': '#ff7f0e',      # Orange
         'Paraguai': '#d62728',     # Red
         'Australia': '#000000',    # Black
-        'Austrália': '#000000',    # Black (Normalization)
+        'Austrália': '#000000',    # Black
         'Irlanda': '#9467bd',      # Purple
         'Estados Unidos': '#ffff00', # Yellow
         'China': '#fa8072'         # Salmon
     }
     
-    # Use fallback color cycle for others
-    default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 8), facecolor='white')
+    ax.set_facecolor('white')
     
-    # Get unique countries from dataframe
-    countries = df['country'].unique()
+    # Store line colors and country names for the legend
+    legend_info = []
     
-    for i, country in enumerate(countries):
-        country_data = df[df['country'] == country]
+    # Iterate through countries
+    for country in df_pivot.columns:
+        series = df_pivot[country].dropna()
+        if len(series) < 2:
+            continue
+            
+        color = country_colors.get(country, '#7f7f7f')
         
-        # Determine color
-        color = country_colors.get(country, default_colors[i % len(default_colors)])
+        # Prepare for smoothing
+        x = mdates.date2num(series.index)
+        y = series.values
         
-        # Plot line (smooth style, no markers, thicker lines)
-        plt.plot(country_data['date'], country_data['price'], 
-                 label=country, 
-                 linewidth=2.5, 
-                 color=color,
-                 alpha=0.9)
+        line = None
+        if len(x) > 3:
+            x_new = np.linspace(x.min(), x.max(), 500)
+            try:
+                spl = make_interp_spline(x, y, k=3)
+                y_smooth = spl(x_new)
+                line, = ax.plot(mdates.num2date(x_new), y_smooth, 
+                         linewidth=2.2, 
+                         color=color,
+                         alpha=0.9)
+            except:
+                line, = ax.plot(series.index, series.values, 
+                         linewidth=2.2, 
+                         color=color,
+                         alpha=0.9)
+        else:
+            line, = ax.plot(series.index, series.values, 
+                     linewidth=2.2, 
+                     color=color,
+                     alpha=0.9)
+            
+        if not series.empty:
+            legend_info.append({
+                'country': country, 
+                'color': color, 
+                'last_price': series.iloc[-1]
+            })
     
-    plt.title('Preço da @ em Dólar', fontsize=18, loc='left', pad=20, color='#555555')
+    # Sort legend_info by last_price (descending)
+    legend_info = sorted(legend_info, key=lambda x: x['last_price'], reverse=True)
     
-    # Y-Axis formatting
-    plt.grid(axis='y', linestyle='-', alpha=0.5, color='#e0e0e0')
+    # --- STYLING ---
     
-    # X-Axis formatting
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%Y'))
-    plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
-    plt.xticks(rotation=45, fontsize=10)
-    plt.yticks(fontsize=10)
+    plt.title('Preço da @ em Dólar', fontsize=20, color='#666666', loc='left', pad=40)
     
-    # Remove top, right AND left spines (keep tick labels but remove box border)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['right'].set_visible(False)
-    plt.gca().spines['left'].set_visible(True) # Keep Y axis line if preferred, or False
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
     
-    # Move legend to the LEFT to match spreadsheet
-    # Spreadsheet has legend listed vertically on the side or inside top-left.
-    # Looking at the image, it's on the left, outside the chart area? 
-    # Actually, the user's reference image 1 has legend on the LEFT side of the canvas.
-    plt.legend(bbox_to_anchor=(-0.05, 1), loc='upper right', borderaxespad=0., frameon=False, fontsize=11)
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.spines['right'].set_color('#dddddd')
+    ax.spines['bottom'].set_color('#dddddd')
     
-    # Adjust layout to make room for legend on the left if necessary, 
-    # but standard bbox_to_anchor with 'upper right' relative to a negative x puts it on the left.
-    # Alternatively, use layout='constrained' or tight_layout with rect
+    ax.yaxis.grid(True, linestyle='-', color='#e5e5e5', alpha=0.8)
+    ax.xaxis.grid(False)
     
-    plt.tight_layout()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m/%y'))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+    plt.xticks(rotation=45, ha='right', fontsize=10, color='#444444')
+    
+    max_val = df['price'].max()
+    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color='#444444')
+    ax.set_ylim(0, max_val + 10)
+    
+    # --- CUSTOM LEGEND WITH FLAGS ---
+    # We'll place the flags vertically on the left side
+    
+    flags_dir = 'app/assets/flags'
+    start_y = 0.85 # Vertical position starting from top
+    step_y = 0.08  # Distance between legends
+    
+    for i, info in enumerate(legend_info):
+        country = info['country']
+        color = info['color']
+        
+        y_pos = start_y - (i * step_y)
+        
+        # 1. Draw the color bar (marker)
+        ax.plot([-0.18, -0.15], [y_pos, y_pos], transform=ax.transAxes, 
+                color=color, linewidth=4, clip_on=False)
+        
+        # 2. Add the flag icon with a colored border
+        flag_path = os.path.join(flags_dir, f"{country}.png")
+        if os.path.exists(flag_path):
+            try:
+                # Add a circular background/border with the country's color
+                border_circle = plt.Circle((-0.11, y_pos), 0.022, transform=ax.transAxes, 
+                                          color=color, zorder=3, clip_on=False)
+                ax.add_patch(border_circle)
+                
+                flag_img = plt.imread(flag_path)
+                imagebox = OffsetImage(flag_img, zoom=0.13) # Slightly smaller zoom to show border
+                ab = AnnotationBbox(imagebox, (-0.11, y_pos), 
+                                    xycoords='axes fraction',
+                                    frameon=False,
+                                    box_alignment=(0.5, 0.5),
+                                    zorder=4)
+                ax.add_artist(ab)
+            except Exception as e:
+                # Fallback to text if image fails
+                ax.text(-0.11, y_pos, country, transform=ax.transAxes, 
+                        fontsize=11, color='#333333', verticalalignment='center')
+        else:
+            # Fallback to text if flag missing
+            ax.text(-0.11, y_pos, country, transform=ax.transAxes, 
+                    fontsize=11, color='#333333', verticalalignment='center')
+    
+    # Adjust margins to leave space for legend on the left
+    plt.subplots_adjust(left=0.22, right=0.93, top=0.85, bottom=0.15)
     
     output_path = '/tmp/chart.png'
     plt.savefig(output_path, dpi=120, bbox_inches='tight')
