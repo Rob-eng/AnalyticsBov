@@ -33,17 +33,16 @@ def generate_chart(data):
         'China': '#fa8072'         # Salmon
     }
     
-    # Brand Colors from Logo
-    BG_COLOR = '#0B0D0F'
-    TEXT_COLOR = '#FFFFFF'
-    CYAN_BRAND = '#00B4FF'
-    GREEN_BRAND = '#2ECC71'
-    GRID_COLOR = '#1A1D21'
+    # Brand / Theme Colors
+    BG_COLOR = '#FFFFFF'
+    TEXT_COLOR = '#333333'
+    CYAN_BRAND = '#00B4FF' # Keeping brand color for title
+    GRID_COLOR = '#EEEEEE'
     
-    # Adjust specific colors for dark mode visibility if they are too dark
+    # Reset country colors if needed (black back to black)
     for c, col in country_colors.items():
-        if col == '#000000':
-            country_colors[c] = '#E0E0E0' # Light grey instead of black for visibility
+        if col == '#E0E0E0':
+            country_colors[c] = '#000000'
     
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8), facecolor=BG_COLOR)
@@ -54,10 +53,8 @@ def generate_chart(data):
     if os.path.exists(logo_path):
         try:
             logo_img = plt.imread(logo_path)
-            # Create a large, semi-transparent watermark in the background
-            # We use fig.figimage or add an axis
             newax = fig.add_axes([0.25, 0.2, 0.5, 0.5], zorder=0)
-            newax.imshow(logo_img, alpha=0.15)
+            newax.imshow(logo_img, alpha=0.06) # Very subtle on white
             newax.axis('off')
         except Exception as e:
             print(f"Error adding watermark: {e}")
@@ -84,67 +81,66 @@ def generate_chart(data):
                 spl = make_interp_spline(x, y, k=3)
                 y_smooth = spl(x_new)
                 line, = ax.plot(mdates.num2date(x_new), y_smooth, 
-                         linewidth=2.8, # Thicker lines for dark mode POP
+                         linewidth=2.2, 
                          color=color,
-                         alpha=0.95,
+                         alpha=0.9,
                          zorder=5)
             except:
                 line, = ax.plot(series.index, series.values, 
-                         linewidth=2.8, 
+                         linewidth=2.2, 
                          color=color,
-                         alpha=0.95,
+                         alpha=0.9,
                          zorder=5)
         else:
             line, = ax.plot(series.index, series.values, 
-                     linewidth=2.8, 
+                     linewidth=2.2, 
                      color=color,
-                     alpha=0.95,
+                     alpha=0.9,
                      zorder=5)
-            
+    
+    # Sorting and Legend info gathering
+    for country in df_pivot.columns:
+        series = df_pivot[country].dropna()
         if not series.empty:
             legend_info.append({
                 'country': country, 
-                'color': color, 
+                'color': country_colors.get(country, '#7f7f7f'), 
                 'last_price': series.iloc[-1]
             })
     
-    # Sort legend_info by last_price (descending)
     legend_info = sorted(legend_info, key=lambda x: x['last_price'], reverse=True)
     
     # --- STYLING ---
     
-    # Centered Title with Logo Colors
     plt.title('PREÇO DA @ EM DÓLAR', fontsize=26, fontweight='bold', 
-              color=CYAN_BRAND, loc='center', pad=50, family='sans-serif')
+              color=CYAN_BRAND, loc='center', pad=50)
     
     ax.yaxis.tick_right()
     ax.yaxis.set_label_position("right")
     
-    # Ax Spines
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
-    ax.spines['right'].set_color('#333333')
-    ax.spines['bottom'].set_color('#333333')
+    ax.spines['right'].set_color('#DDDDDD')
+    ax.spines['bottom'].set_color('#DDDDDD')
     
-    # X-Axis formatting
+    # X-Axis: Years as major ticks
     ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-    ax.xaxis.set_minor_formatter(plt.NullFormatter())
     
-    # Tick Styles: Major (Years) are larger
-    ax.tick_params(axis='x', which='major', length=12, width=2, color=CYAN_BRAND, labelsize=12, labelcolor=TEXT_COLOR)
-    ax.tick_params(axis='x', which='minor', length=6, width=1, color='#444444')
+    # Tick Styles
+    ax.tick_params(axis='x', which='major', length=10, width=1.5, color='#999999', labelsize=11, labelcolor=TEXT_COLOR)
+    ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#CCCCCC')
     
-    # Y-Axis Ticks
+    # Y-Axis Ticks: Every 10 units
     max_val = df['price'].max()
-    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=12, color=TEXT_COLOR)
-    ax.tick_params(axis='y', colors='#666666')
+    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color=TEXT_COLOR)
     ax.set_ylim(0, max_val + 10)
     
-    # Grid: Horizontal lines ONLY
-    ax.yaxis.grid(True, linestyle='-', color=GRID_COLOR, alpha=0.5, zorder=1)
-    ax.xaxis.grid(False)
+    # Grid: Subtle horizontal at 10 units, sutil dotted at each year
+    ax.yaxis.grid(True, linestyle='-', color='#F5F5F5', alpha=0.9, zorder=1)
+    ax.xaxis.grid(True, which='major', linestyle=':', color='#E0E0E0', alpha=0.8, zorder=1)
+    ax.xaxis.grid(False, which='minor') # Don't grid quarters
     
     plt.xticks(rotation=0, ha='center')
     
