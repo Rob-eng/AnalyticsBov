@@ -128,6 +128,8 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo", note=None):
     
     if note:
         caption += f"\n_{note}_"
+    
+    caption += "\n*Fonte: scot consultoria*"
         
     caption += "\n\n💬 *Sua opinião é importante!* \n"
     caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
