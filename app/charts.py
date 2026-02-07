@@ -113,7 +113,7 @@ def generate_chart(data):
     # --- STYLING ---
     
     plt.title('PREÇO DA @ EM DÓLAR', fontsize=26, fontweight='bold', 
-              color=CYAN_BRAND, loc='center', pad=50)
+              color='#FFFFFF', loc='center', pad=50) # TITLE TO WHITE
     
     ax.yaxis.tick_right()
     ax.yaxis.set_label_position("right")
@@ -128,13 +128,14 @@ def generate_chart(data):
     ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
     
-    # Tick Styles
-    ax.tick_params(axis='x', which='major', length=10, width=1.5, color=CYAN_BRAND, labelsize=11, labelcolor=TEXT_COLOR)
+    # Tick Styles - ALL TO WHITE
+    ax.tick_params(axis='x', which='major', length=10, width=1.5, color='#FFFFFF', labelsize=11, labelcolor='#FFFFFF')
     ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#444444')
     
-    # Y-Axis Ticks: Every 10 units
+    # Y-Axis Ticks: Every 10 units - ALL TO WHITE
     max_val = df['price'].max()
-    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color=TEXT_COLOR)
+    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color='#FFFFFF')
+    ax.tick_params(axis='y', colors='#FFFFFF')
     ax.set_ylim(0, max_val + 10)
     
     # Grid: Subtle horizontal at 10 units, sutil dotted at each year
