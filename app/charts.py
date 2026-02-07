@@ -16,6 +16,12 @@ def generate_chart(data):
     df = pd.DataFrame(data)
     df['date'] = pd.to_datetime(df['date'])
     
+    # Normalize country names to prevent duplicates (e.g., Australia vs Austrália)
+    df['country'] = df['country'].replace({'Australia': 'Austrália'})
+    
+    # Group by date and country to avoid duplicates before pivoting
+    df = df.groupby(['date', 'country'])['price'].mean().reset_index()
+    
     # Pivot the data
     df_pivot = df.pivot(index='date', columns='country', values='price')
     df_pivot = df_pivot.sort_index()
@@ -160,7 +166,9 @@ def generate_chart(data):
                 color=color, linewidth=5, clip_on=False, zorder=10)
         
         # 2. Flag with Border
-        flag_path = os.path.join(flags_dir, f"{country}.png")
+        # Normalize country name for filename (remove accents for file safety)
+        filename = country.replace('á', 'a').replace('ã', 'a').replace('é', 'e').replace('ú', 'u')
+        flag_path = os.path.join(flags_dir, f"{filename}.png")
         if os.path.exists(flag_path):
             try:
                 border_circle = plt.Circle((-0.11, y_pos), 0.024, transform=ax.transAxes, 
