@@ -118,7 +118,7 @@ def generate_chart(data):
     
     # --- STYLING ---
     
-    plt.title('PREÇO DA @ EM DÓLAR', fontsize=26, fontweight='bold', 
+    plt.title('🐂 Preço da @ em Dólar 📊', fontsize=26, fontweight='bold', 
               color='#FFFFFF', loc='center', pad=50) # TITLE TO WHITE
     
     ax.yaxis.tick_right()

@@ -16,14 +16,14 @@ def get_keyboard(chat_id):
     """Get appropriate keyboard based on user role"""
     if is_admin(chat_id):
         keyboard = [
-            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("📈 Status")],
-            [KeyboardButton("💬 Feedback"), KeyboardButton("📥 Importar Histórico")],
-            [KeyboardButton("👥 Lista de Usuários")]
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
+            [KeyboardButton("📈 Status"), KeyboardButton("💬 Feedback")],
+            [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")]
         ]
     else:
         keyboard = [
-            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("📈 Status")],
-            [KeyboardButton("💬 Feedback")]
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
+            [KeyboardButton("📈 Status"), KeyboardButton("💬 Feedback")]
         ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -42,6 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "*Comandos disponíveis:*\n"
             "📊 /atual - Cotação atual\n"
             "📈 /status - Seu status de cadastro\n"
+            "🔮 /futuro - Mercado Futuro (Scot)\n"
             "💬 /feedback - Enviar sugestões\n"
         )
         
@@ -129,7 +130,7 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo", note=None):
     if note:
         caption += f"\n_{note}_"
     
-    caption += "\n*Fonte: scot consultoria*"
+    caption += "\n*Fonte: Scot Consultoria*"
         
     caption += "\n\n💬 *Sua opinião é importante!* \n"
     caption += "Clique aqui para enviar um /feedback ou sugerir melhorias."
@@ -228,6 +229,36 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         error_msg = f"❌ Ocorreu um erro: {str(e)}"
         print(f"Error in current_analysis: {traceback.format_exc()}")
         await update.message.reply_text(error_msg)
+
+async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
+    
+    try:
+        from app.futures import get_mercado_futuro_screenshot
+        # We need to run this in a thread or just await if it's already async
+        chart_path = await get_mercado_futuro_screenshot()
+        
+        if not chart_path:
+             await update.message.reply_text("⚠️ Erro ao capturar a tabela do Mercado Futuro.")
+             return
+
+        caption = (
+            "🔮 *Mercado Futuro - Boi Gordo*\n\n"
+            "Valores para os próximos vencimentos obtidos agora.\n\n"
+            "*Fonte:* scot consultoria"
+        )
+        
+        await update.message.reply_photo(
+            photo=open(chart_path, 'rb'),
+            caption=caption,
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        print(f"Error in future_market: {e}")
+        await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
 
 async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Iniciando importação do histórico da planilha... Isso pode levar alguns segundos.")
@@ -340,6 +371,8 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "💬 Feedback":
         await start_feedback(update, context)
         return WAITING_FEEDBACK
+    elif text == "🔮 Mercado Futuro":
+        await future_market(update, context)
     elif text == "📥 Importar Histórico":
         if is_admin(update.effective_chat.id):
             await sync_history(update, context)
