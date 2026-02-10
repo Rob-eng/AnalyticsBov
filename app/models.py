@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, create_engine
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -10,7 +10,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     
-    chat_id = Column(Integer, primary_key=True)
+    chat_id = Column(BigInteger, primary_key=True)
     username = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 

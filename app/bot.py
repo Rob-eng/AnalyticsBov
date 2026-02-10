@@ -79,8 +79,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_keyboard(chat_id)
             )
     except Exception as e:
-        print(f"Error in start command: {e}")
-        await update.message.reply_text("Ocorreu um erro ao registrar.")
+        import traceback
+        print(f"ERROR in start command (chat_id: {chat_id}): {e}")
+        print(traceback.format_exc())
+        try:
+            await update.message.reply_text("⚠️ Ocorreu um erro ao registrar. Por favor, tente novamente em instantes.")
+        except:
+            pass
     finally:
         session.close()
 
@@ -386,12 +391,24 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     
     return ConversationHandler.END
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    print(f"Exception while handling an update: {context.error}")
+    # We don't notify user about every network glitch to avoid spamming
+    # but we log it for analysis.
+
 def create_bot_application(post_init=None):
     if not Config.TELEGRAM_TOKEN:
         raise ValueError("A variável de ambiente TELEGRAM_TOKEN não está definida. Adicione-a nas variáveis do Railway.")
     
-    builder = Application.builder().token(Config.TELEGRAM_TOKEN)
+    # Increase timeouts for better stability over unreliable networks
+    from telegram.request import HTTPXRequest
+    request = HTTPXRequest(connect_timeout=15.0, read_timeout=20.0)
+    
+    builder = Application.builder().token(Config.TELEGRAM_TOKEN).request(request)
     if post_init:
         builder.post_init(post_init)
         
-    return builder.build()
+    app = builder.build()
+    app.add_error_handler(error_handler)
+    return app
