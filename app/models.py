@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -37,6 +37,17 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Forced migration to BIGINT for Telegram IDs
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE BIGINT;"))
+            # Depending on SQLAlchemy version, commit might be needed
+            if hasattr(conn, 'commit'):
+                conn.commit()
+            print("✅ Database migration: users.chat_id is now BIGINT")
+        except Exception as e:
+            # Table/column might not exist yet or already be BIGINT
+            print(f"ℹ️ Migration notice: {e}")
 
 def get_recent_prices(days=1095):
     """Retrieve price history for the last N days (default 3 years)."""
