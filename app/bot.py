@@ -2,7 +2,7 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
-from app.charts import generate_chart
+from app.charts import generate_chart, generate_future_table
 import asyncio
 
 # Conversation states for feedback
@@ -241,18 +241,27 @@ async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
     
     try:
-        from app.futures import get_mercado_futuro_screenshot
-        # We need to run this in a thread or just await if it's already async
-        chart_path = await get_mercado_futuro_screenshot()
+        from app.scraper import scrape_mercado_futuro
+        
+        loop = asyncio.get_running_loop()
+        # 1. Scrape data
+        data_dict = await loop.run_in_executor(None, scrape_mercado_futuro)
+        
+        if not data_dict:
+             await update.message.reply_text("⚠️ Não foi possível coletar os dados do Mercado Futuro no momento.")
+             return
+
+        # 2. Generate table image
+        chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict))
         
         if not chart_path:
-             await update.message.reply_text("⚠️ Erro ao capturar a tabela do Mercado Futuro.")
+             await update.message.reply_text("⚠️ Erro ao gerar a tabela do Mercado Futuro.")
              return
 
         caption = (
             "🔮 *Mercado Futuro - Boi Gordo*\n\n"
             "Valores para os próximos vencimentos obtidos agora.\n\n"
-            "*Fonte:* scot consultoria"
+            "*Fonte:* Scot Consultoria"
         )
         
         await update.message.reply_photo(

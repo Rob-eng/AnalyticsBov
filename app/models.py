@@ -10,7 +10,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     
-    chat_id = Column(BigInteger, primary_key=True)
+    chat_id = Column(String, primary_key=True)
     username = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -40,7 +40,7 @@ def init_db():
     # Forced migration to BIGINT for Telegram IDs
     with engine.connect() as conn:
         try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE BIGINT;"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT;"))
             # Depending on SQLAlchemy version, commit might be needed
             if hasattr(conn, 'commit'):
                 conn.commit()

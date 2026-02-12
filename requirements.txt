@@ -10,4 +10,3 @@ pandas
 python-telegram-bot
 apscheduler
 scipy
-playwright

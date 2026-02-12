@@ -197,3 +197,78 @@ def generate_chart(data):
     plt.close()
     
     return output_path
+
+def generate_future_table(data_dict):
+    """
+    Generates a beautiful Matplotlib table image from the scraped future market data.
+    """
+    if not data_dict or not data_dict.get('rows'):
+        return None
+        
+    BG_COLOR = '#001F3F'
+    TEXT_COLOR = '#FFFFFF'
+    HEADER_COLOR = '#00B4FF' # Cyan brand
+    BORDER_COLOR = '#112D4E'
+    
+    rows = data_dict['rows']
+    headers = data_dict['headers']
+    date_info = data_dict.get('date_raw', '')
+    
+    # Create figure
+    # Adjust height based on number of rows
+    fig_height = 1.5 + (len(rows) * 0.6)
+    fig, ax = plt.subplots(figsize=(12, fig_height), facecolor=BG_COLOR)
+    ax.set_facecolor(BG_COLOR)
+    ax.axis('off')
+    
+    # Title
+    plt.title(f'🔮 Mercado Futuro do Boi Gordo 🐂\n{date_info}', 
+              fontsize=20, fontweight='bold', color=TEXT_COLOR, pad=20)
+    
+    # Create Table
+    table = ax.table(
+        cellText=rows,
+        colLabels=headers,
+        cellLoc='center',
+        loc='center',
+        cellColours=[[BG_COLOR]*len(headers)]*len(rows),
+        colColours=[HEADER_COLOR]*len(headers)
+    )
+    
+    # Styling Table
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1.2, 2.5) # Scale width and height
+    
+    # Iterate through cells to style them
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor(BORDER_COLOR)
+        if row == 0: # Header
+            cell.set_text_props(weight='bold', color=BG_COLOR) # Black on cyan
+        else:
+            cell.set_text_props(color=TEXT_COLOR)
+            # Alternate row coloring for readability
+            if row % 2 == 0:
+                cell.set_facecolor('#002b55')
+            
+    # Watermark (Smaller logo)
+    logo_path = 'app/assets/logo.jpg'
+    if os.path.exists(logo_path):
+        try:
+            logo_img = plt.imread(logo_path)
+            # Add small logo at the bottom right
+            logo_ax = fig.add_axes([0.8, 0.02, 0.15, 0.15], zorder=10)
+            logo_ax.imshow(logo_img, alpha=0.15)
+            logo_ax.axis('off')
+        except:
+            pass
+            
+    # Source Footnote
+    plt.figtext(0.5, 0.05, "Fonte: Scot Consultoria", 
+                ha='center', fontsize=10, color='#AAAAAA', style='italic')
+
+    output_path = '/tmp/future_table.png'
+    plt.savefig(output_path, dpi=140, facecolor=BG_COLOR, bbox_inches='tight')
+    plt.close()
+    
+    return output_path

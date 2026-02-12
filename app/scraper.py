@@ -338,3 +338,76 @@ def import_history_from_sheet():
         return f"❌ Erro na importação: {str(e)}"
     finally:
         session.close()
+
+def scrape_mercado_futuro():
+    """
+    Scrapes the 'Mercado Futuro' table from Scot Consultoria.
+    Returns: { 'date': str, 'data': list of dicts, 'headers': list }
+    """
+    url = "https://www.scotconsultoria.com.br/cotacoes/mercado-futuro/?ref=foo"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find the table after the 'Cotações - Mercado futuro' header or similar
+        # Based on structure: .conteudo table
+        container = soup.find('div', class_='conteudo')
+        if not container:
+            container = soup # Fallback
+            
+        target_table = None
+        # Look for table containing 'VENCIMENTOS' or 'MERCADO FUTURO'
+        for table in container.find_all('table'):
+            text = table.get_text()
+            if 'VENCIMENTOS' in text or 'MERCADO FUTURO' in text:
+                target_table = table
+                break
+        
+        if not target_table:
+            return None
+
+        # Extract date (usually in a span or paragraph above/below)
+        fechamento_text = ""
+        date_elements = soup.find_all(lambda tag: tag.name in ['span', 'p'] and 'Fechamento' in tag.get_text())
+        if date_elements:
+            fechamento_text = date_elements[0].get_text(strip=True)
+
+        rows = target_table.find_all('tr')
+        if not rows:
+            return None
+
+        # The table has multiple header rows. We'll try to find the data rows.
+        # Data rows start after the second or third row
+        table_data = []
+        headers_row = []
+        
+        for i, row in enumerate(rows):
+            cols = row.find_all(['td', 'th'])
+            row_vals = [c.get_text(strip=True) for c in cols]
+            
+            # Identify header row (contains VENCIMENTOS)
+            if 'VENCIMENTOS' in row_vals or 'Futuros' in row_vals:
+                headers_row = row_vals
+                continue
+            
+            # Skip rows that are clearly headers or empty
+            if not row_vals or len(row_vals) < 5 or 'MERCADO FUTURO' in row_vals[0]:
+                continue
+            
+            # Check if first col looks like a month (e.g., Fev/26)
+            if '/' in row_vals[0] or len(row_vals[0]) >= 5:
+                table_data.append(row_vals)
+
+        return {
+            'date_raw': fechamento_text,
+            'headers': headers_row if headers_row else ["VENCIMENTOS", "AJUSTE ANT.", "AJUSTE ATUAL", "C. ABERTOS", "VAR.", "CÂMBIO", "US$ VISTA"],
+            'rows': table_data
+        }
+
+    except Exception as e:
+        print(f"Error scraping mercado futuro: {e}")
+        return None
