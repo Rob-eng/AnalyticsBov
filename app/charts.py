@@ -240,16 +240,47 @@ def generate_future_table(data_dict):
     table.set_fontsize(12)
     table.scale(1.2, 2.5) # Scale width and height
     
+    # Find index of the variation column
+    var_col_idx = -1
+    for i, h in enumerate(headers):
+        if 'VAR' in h.upper():
+            var_col_idx = i
+            break
+
     # Iterate through cells to style them
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor(BORDER_COLOR)
         if row == 0: # Header
             cell.set_text_props(weight='bold', color=BG_COLOR) # Black on cyan
         else:
-            cell.set_text_props(color=TEXT_COLOR)
             # Alternate row coloring for readability
             if row % 2 == 0:
                 cell.set_facecolor('#002b55')
+            
+            # Special handling for variation column
+            if col == var_col_idx:
+                text_val = cell.get_text().get_text()
+                try:
+                    # Clean and parse value
+                    clean_val = text_val.replace(',', '.').replace('%', '').strip()
+                    val = float(clean_val)
+                    
+                    if val > 0:
+                        cell.get_text().set_color('#00FF00') # Vibrant Green
+                        if '%' not in text_val:
+                            cell.get_text().set_text(f"+{text_val}%")
+                    elif val < 0:
+                        cell.get_text().set_color('#FF4444') # Vibrant Red
+                        if '%' not in text_val:
+                            cell.get_text().set_text(f"{text_val}%")
+                    else:
+                        cell.get_text().set_color(TEXT_COLOR)
+                        if '%' not in text_val:
+                            cell.get_text().set_text(f"{text_val}%")
+                except:
+                    cell.get_text().set_color(TEXT_COLOR)
+            else:
+                cell.get_text().set_props(color=TEXT_COLOR)
             
     # Watermark (Smaller logo)
     logo_path = 'app/assets/logo.jpg'
