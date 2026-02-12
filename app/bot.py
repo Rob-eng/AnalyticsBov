@@ -545,14 +545,24 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         users = session.query(User).all()
+        if not users:
+            await status_msg.edit_text("⚠️ Nenhum usuário encontrado no banco de dados.")
+            session.close()
+            return ConversationHandler.END
+
         for user in users:
+            if not user.chat_id:
+                continue
+                
             try:
-                # Avoid sending to self if already in the list to not be redundant
-                # but usually admin wants to see it too
+                # Using HTML for better stability with special characters
+                # Escape HTML characters in user-provided text
+                safe_text = broadcast_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                
                 await context.bot.send_message(
                     chat_id=user.chat_id,
-                    text=f"📢 *AGRO ANALYTICS - INFORMA*\n\n{broadcast_text}",
-                    parse_mode='Markdown'
+                    text=f"📢 <b>AGRO ANALYTICS - INFORMA</b>\n\n{safe_text}",
+                    parse_mode='HTML'
                 )
                 success_count += 1
             except Exception as e:
@@ -563,18 +573,21 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(0.05)
             
         await status_msg.edit_text(
-            f"✅ *Transmissão Concluída!*\n\n"
+            f"✅ <b>Transmissão Concluída!</b>\n\n"
             f"📈 Sucesso: {success_count}\n"
             f"❌ Falhas: {failure_count}",
-            parse_mode='Markdown',
+            parse_mode='HTML',
             reply_markup=get_keyboard(chat_id)
         )
         
     except Exception as e:
-        print(f"Error in broadcast: {e}")
-        await status_msg.edit_text("❌ Ocorreu um erro ao processar a transmissão.")
+        print(f"CRITICAL Error in broadcast: {e}")
+        import traceback
+        print(traceback.format_exc())
+        await status_msg.edit_text(f"❌ Ocorreu um erro ao processar a transmissão: {str(e)[:50]}...")
     finally:
         session.close()
+
 
     return ConversationHandler.END
 
