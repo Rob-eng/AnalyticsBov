@@ -3,8 +3,10 @@ from app.models import init_db
 from app.bot import (
     create_bot_application, start, status, current_analysis, future_market,
     sync_history, list_users, start_feedback, receive_feedback, 
-    cancel_feedback, handle_keyboard_buttons, WAITING_FEEDBACK
+    cancel_feedback, start_weather, receive_weather_location, cancel_weather,
+    handle_keyboard_buttons, WAITING_FEEDBACK, WAITING_WEATHER_LOCATION
 )
+
 from app.scheduler import setup_scheduler
 from telegram.ext import CommandHandler, MessageHandler, filters, ConversationHandler
 
@@ -36,14 +38,31 @@ def main():
         fallbacks=[CommandHandler("cancelar", cancel_feedback)]
     )
     
+    # Weather Conversation Handler
+    weather_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("clima", start_weather),
+            MessageHandler(filters.Regex("^🌧️ Precipitação$"), start_weather)
+        ],
+        states={
+            WAITING_WEATHER_LOCATION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_weather_location)
+            ]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_weather)]
+    )
+    
     # Add Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("atual", current_analysis))
     application.add_handler(CommandHandler("futuro", future_market))
+    application.add_handler(CommandHandler("clima", start_weather))
     application.add_handler(CommandHandler("importar", sync_history))
     application.add_handler(CommandHandler("usuarios", list_users))
     application.add_handler(feedback_handler)
+    application.add_handler(weather_handler)
+
     
     # Keyboard button handler (must be last to not interfere with other handlers)
     application.add_handler(MessageHandler(

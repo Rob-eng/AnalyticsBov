@@ -3,10 +3,13 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart, generate_future_table
+from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates
 import asyncio
 
-# Conversation states for feedback
+
+# Conversation states
 WAITING_FEEDBACK = 1
+WAITING_WEATHER_LOCATION = 2
 
 def is_admin(chat_id):
     """Check if user is admin"""
@@ -17,15 +20,18 @@ def get_keyboard(chat_id):
     if is_admin(chat_id):
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("📈 Status"), KeyboardButton("💬 Feedback")],
-            [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")]
+            [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
+            [KeyboardButton("💬 Feedback")]
         ]
     else:
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("📈 Status"), KeyboardButton("💬 Feedback")]
+            [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("💬 Feedback")]
         ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
@@ -43,8 +49,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📊 /atual - Cotação atual\n"
             "📈 /status - Seu status de cadastro\n"
             "🔮 /futuro - Mercado Futuro (Scot)\n"
+            "🌧️ /clima - Precipitação (Chuvas)\n"
             "💬 /feedback - Enviar sugestões\n"
         )
+
         
         if is_admin(chat_id):
             welcome_msg += "\n*Comandos Admin:*\n👥 /usuarios - Lista de usuários\n📥 /importar - Importar histórico\n"
@@ -376,7 +384,99 @@ async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start weather conversation"""
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text(
+        "🌧️ *Consulta de Precipitação*\n\n"
+        "Por favor, envie o nome do **município** (ex: Bebedouro) ou as **coordenadas** (ex: -20.94, -48.48).\n\n"
+        "Envie /cancelar para sair.",
+        parse_mode='Markdown'
+    )
+    return WAITING_WEATHER_LOCATION
+
+async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process location and show weather data"""
+    chat_id = str(update.effective_chat.id)
+    query = update.message.text
+    
+    if query.startswith('/'):
+        return WAITING_WEATHER_LOCATION
+
+    status_msg = await update.message.reply_text("🔍 Buscando dados... Aguarde.")
+    
+    try:
+        # 1. Determine Lat/Lon
+        lat, lon, loc_name = None, None, query
+        
+        # Check if it's coordinates
+        coords = parse_coordinates(query)
+        if coords:
+            lat, lon = coords
+            loc_name = f"{lat:.4f}, {lon:.4f}"
+        else:
+            # Try geocoding
+            loc = geocode_location(query)
+            if loc:
+                lat, lon = loc['lat'], loc['lon']
+                loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
+        
+        if lat is None or lon is None:
+            await status_msg.edit_text("⚠️ Não consegui encontrar esse local. Tente o nome da cidade ou use coordenadas decimais.")
+            return WAITING_WEATHER_LOCATION
+
+        # 2. Get Weather Data
+        data = get_precipitation_data(lat, lon)
+        if not data:
+            await status_msg.edit_text("❌ Erro ao buscar dados meteorológicos para este local.")
+            return WAITING_WEATHER_LOCATION
+
+        # 3. Format Message
+        msg = f"🌧️ *Precipitação: {loc_name}*\n\n"
+        msg += f"🕒 *Últimas 24h:* {data['last_24h']:.1f} mm\n\n"
+        msg += "*Histórico (7 dias):*\n"
+        
+        for date_str, val in data['daily_history']:
+            # Format date: 2026-02-12 -> 12/02
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            date_fmt = dt.strftime('%d/%m')
+            msg += f"📅 {date_fmt}: {val:.1f} mm\n"
+            
+        msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
+        
+        # 4. Get Static Map
+        map_url = get_static_map_url(lat, lon)
+        
+        # 5. Send Photo
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=map_url,
+            caption=msg,
+            parse_mode='Markdown',
+            reply_markup=get_keyboard(chat_id)
+        )
+        
+        await status_msg.delete()
+        
+    except Exception as e:
+        print(f"Error in weather_info: {e}")
+        import traceback
+        print(traceback.format_exc())
+        await status_msg.edit_text("❌ Ocorreu um erro ao processar sua solicitação de clima.")
+
+    return ConversationHandler.END
+
+async def cancel_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel weather conversation"""
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text(
+        "❌ Consulta cancelada.",
+        reply_markup=get_keyboard(chat_id)
+    )
+    return ConversationHandler.END
+
 async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     """Handle keyboard button presses"""
     text = update.message.text
     
@@ -387,7 +487,11 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "💬 Feedback":
         await start_feedback(update, context)
         return WAITING_FEEDBACK
+    elif text == "🌧️ Precipitação":
+        await start_weather(update, context)
+        return WAITING_WEATHER_LOCATION
     elif text == "🔮 Mercado Futuro":
+
         await future_market(update, context)
     elif text == "📥 Importar Histórico":
         if is_admin(update.effective_chat.id):
