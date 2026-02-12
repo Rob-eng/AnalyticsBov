@@ -389,13 +389,25 @@ async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start weather conversation"""
     chat_id = str(update.effective_chat.id)
-    await update.message.reply_text(
+    help_text = (
         "🌧️ *Consulta de Precipitação*\n\n"
-        "Por favor, envie o nome do **município** (ex: Bebedouro) ou as **coordenadas** (ex: -20.94, -48.48).\n\n"
-        "Envie /cancelar para sair.",
-        parse_mode='Markdown'
+        "Você pode enviar a localização de várias formas:\n\n"
+        "🏙️ *Município*: Nome da cidade e estado.\n"
+        "_Ex: Bebedouro SP, Cuiabá, Campo Grande MS_\n\n"
+        "📍 *Coordenadas*: Decimais ou GMS.\n"
+        "_Ex: -20.94, -48.48_\n"
+        "_Ex: 20° 56' 58\" S, 48° 28' 45\" W_\n\n"
+        "🔗 *Links*: Cole um link do Google Maps.\n"
+        "_Ex: https://maps.app.goo.gl/...\n\n"
+        "Envie /cancelar para sair."
+    )
+    await update.message.reply_text(
+        help_text,
+        parse_mode='Markdown',
+        disable_web_page_preview=True
     )
     return WAITING_WEATHER_LOCATION
+
 
 async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process location and show weather data"""
