@@ -3,7 +3,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart, generate_future_table
-from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates
+from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url
+
 import asyncio
 
 
@@ -409,21 +410,28 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         # 1. Determine Lat/Lon
         lat, lon, loc_name = None, None, query
         
-        # Check if it's coordinates
-        coords = parse_coordinates(query)
-        if coords:
-            lat, lon = coords
-            loc_name = f"{lat:.4f}, {lon:.4f}"
+        # Priority 1: Google Maps URL
+        url_coords = extract_coords_from_url(query)
+        if url_coords:
+            lat, lon = url_coords
+            loc_name = f"Coordenadas do Link ({lat:.4f}, {lon:.4f})"
         else:
-            # Try geocoding
-            loc = geocode_location(query)
-            if loc:
-                lat, lon = loc['lat'], loc['lon']
-                loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
+            # Priority 2: Manual Coordinates (Decimal or DMS)
+            coords = parse_coordinates(query)
+            if coords:
+                lat, lon = coords
+                loc_name = f"Coordenadas: {lat:.4f}, {lon:.4f}"
+            else:
+                # Priority 3: Geocoding (Municipality Name)
+                loc = geocode_location(query)
+                if loc:
+                    lat, lon = loc['lat'], loc['lon']
+                    loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
         
         if lat is None or lon is None:
-            await status_msg.edit_text("⚠️ Não consegui encontrar esse local. Tente o nome da cidade ou use coordenadas decimais.")
+            await status_msg.edit_text("⚠️ Não consegui interpretar o local. Tente o nome da cidade (ex: Bebedouro), coordenadas decimais ou um link do Google Maps.")
             return WAITING_WEATHER_LOCATION
+
 
         # 2. Get Weather Data
         data = get_precipitation_data(lat, lon)

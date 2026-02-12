@@ -1,6 +1,6 @@
 import requests
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 def parse_coordinates(text):
     """
@@ -8,41 +8,69 @@ def parse_coordinates(text):
     Supported:
     - -20.94, -48.48
     - 20.94S, 48.48W
-    - 20° 56' S, 48° 29' W
+    - 20° 56' 58" S, 48° 28' 45" W (Full DMS)
+    - 20 56 S, 48 28 W (Simple space/letter)
     Returns: (lat, lon) or None
     """
-    # Try decimal format first: -20.94, -48.48
-    decimal_match = re.match(r"^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$", text)
+    text = text.strip()
+    
+    # 1. Decimal format: -20.94, -48.48
+    decimal_match = re.match(r"^\s*(-?\d+\.?\d*)\s*[,;\s]\s*(-?\d+\.?\d*)\s*$", text)
     if decimal_match:
-        return float(decimal_match.group(1)), float(decimal_match.group(2))
+        try:
+            return float(decimal_match.group(1)), float(decimal_match.group(2))
+        except ValueError:
+            pass
 
-    # Try format with N/S/E/W: 20.94S, 48.48W
-    nsew_match = re.match(r"^\s*(\d+\.?\d*)\s*([NSns])\s*,\s*(\d+\.?\d*)\s*([EWewOo])\s*$", text)
-    if nsew_match:
-        lat = float(nsew_match.group(1))
-        if nsew_match.group(2).upper() == 'S':
-            lat = -lat
-        lon = float(nsew_match.group(3))
-        if nsew_match.group(4).upper() in ['W', 'O']:
-            lon = -lon
-        return lat, lon
-
-    # Try DMS format roughly: 20° 56' S, 48° 29' W
-    dms_match = re.match(r"(\d+)[°\s]+(\d+)?['\s]*([NSns])\s*,\s*(\d+)[°\s]+(\d+)?['\s]*([EWewOo])", text)
-    if dms_match:
-        lat_d = float(dms_match.group(1))
-        lat_m = float(dms_match.group(2)) if dms_match.group(2) else 0
-        lat = lat_d + (lat_m / 60.0)
-        if dms_match.group(3).upper() == 'S':
-            lat = -lat
+    # 2. DMS/Letter format variations
+    # Regex to find two sets of numbers + directions
+    # Example: 20° 56' 58" S or 20 56 S
+    part_regex = r"(\d+\.?\d*)\s*[°\s]*\s*(\d+\.?\d*)?[\'\s]*\s*(\d+\.?\d*)?[\"\s]*\s*([NSnsEWewOo])"
+    matches = re.findall(part_regex, text)
+    
+    if len(matches) == 2:
+        results = []
+        for m in matches:
+            d = float(m[0])
+            m_val = float(m[1]) if m[1] else 0
+            s = float(m[2]) if m[2] else 0
+            dir = m[3].upper()
             
-        lon_d = float(dms_match.group(4))
-        lon_m = float(dms_match.group(5)) if dms_match.group(5) else 0
-        lon = lon_d + (lon_m / 60.0)
-        if dms_match.group(6).upper() in ['W', 'O']:
-            lon = -lon
-        return lat, lon
+            val = d + (m_val / 60.0) + (s / 3600.0)
+            if dir in ['S', 'W', 'O']:
+                val = -val
+            results.append(val)
+        return results[0], results[1]
 
+    return None
+
+def extract_coords_from_url(text):
+    """
+    Extracts coordinates from Google Maps URLs.
+    Supports:
+    - Long URLs: .../@-20.9481604,-48.4815467,15z...
+    - Short URLs: https://maps.app.goo.gl/XXXX via redirect
+    Returns: (lat, lon) or None
+    """
+    # 1. Check for long URL pattern
+    # Pattern: @lat,lon,
+    map_pattern = r"@(-?\d+\.\d+),(-?\d+\.\d+)"
+    match = re.search(map_pattern, text)
+    if match:
+        return float(match.group(1)), float(match.group(2))
+    
+    # 2. Check for shortened maps.app.goo.gl URL
+    if "maps.app.goo.gl" in text or "goo.gl/maps" in text:
+        url_match = re.search(r"(https?://[^\s,]+)", text)
+        if url_match:
+            try:
+                # Follow redirect
+                response = requests.head(url_match.group(1), allow_redirects=True, timeout=5)
+                # Check resolved URL
+                return extract_coords_from_url(response.url)
+            except:
+                pass
+                
     return None
 
 def geocode_location(query):
@@ -51,48 +79,67 @@ def geocode_location(query):
     Returns: { 'name': str, 'lat': float, 'lon': float, 'admin1': str } or None
     """
     # Clean query: "Bebedouro - SP" -> "Bebedouro"
+    # We still keep the original to try if cleaning fails
     clean_query = query.split('-')[0].split(',')[0].strip()
     
-    url = "https://geocoding-api.open-meteo.com/v1/search"
-    params = {
-        "name": clean_query,
-        "count": 5, # Get more to find best match if needed
-        "language": "pt"
-    }
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        if "results" in data and len(data["results"]) > 0:
-            # Try to find a match in Brazil if multiple results
-            results = data["results"]
-            res = results[0]
-            for r in results:
-                if r.get("country") == "Brasil":
-                    res = r
-                    break
-            
-            return {
-                "name": res.get("name"),
-                "lat": res.get("latitude"),
-                "lon": res.get("longitude"),
-                "admin1": res.get("admin1"), # State/Region
-                "country": res.get("country")
-            }
+    def fetch(q):
+        url = "https://geocoding-api.open-meteo.com/v1/search"
+        params = {
+            "name": q,
+            "count": 10,
+            "language": "pt",
+            "format": "json"
+        }
+        # Add country code restriction if searching in Brazil
+        params["countrycode"] = "BR"
 
-    except Exception as e:
-        print(f"Geocoding error: {e}")
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            data = response.json()
+            if "results" in data and len(data["results"]) > 0:
+                results = data["results"]
+                # Heuristic: 
+                # 1. Exact name match in Brazil
+                # 2. Any match in Brazil
+                # 3. First result
+                
+                # Priority 1: Brazil match
+                brazil_results = [r for r in results if r.get("country_code") == "BR" or r.get("country") == "Brasil"]
+                if brazil_results:
+                    return brazil_results[0]
+                
+                return results[0]
+        except:
+            pass
+        return None
+
+    # Try clean query first, then original
+    res = fetch(clean_query)
+    if not res and clean_query != query:
+        res = fetch(query)
+    
+    # Final fallback for "Campo Grande MS" -> "Campo Grande"
+    if not res and " " in clean_query:
+        fallback_query = " ".join(clean_query.split()[:-1])
+        if len(fallback_query) >= 3:
+            res = fetch(fallback_query)
+        
+    if res:
+
+        return {
+            "name": res.get("name"),
+            "lat": res.get("latitude"),
+            "lon": res.get("longitude"),
+            "admin1": res.get("admin1"),
+            "country": res.get("country")
+        }
     return None
 
 def get_precipitation_data(lat, lon):
     """
     Fetches precipitation data using Open-Meteo Weather API.
-    Returns: { 'last_24h': float, 'daily_7d': list of (date, value) } or None
+    Returns: { 'last_24h': float, 'daily_history': list of (date, value) } or None
     """
-    # Endpoints
-    # 1. Forecast for last 24h (current coverage)
-    # 2. Archive/Forecast for history
-    
-    # We'll use the combined forecast endpoint which includes 2 days of past data
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
@@ -111,20 +158,15 @@ def get_precipitation_data(lat, lon):
         if "hourly" not in data or "daily" not in data:
             return None
             
-        # Last 24h: Sum of last 24 hourly records
-        # Wait, 'past_days=7' means it includes the last 7 days + today.
-        # Find the index for the last 24 hours.
-        # The hourly data starts from 7 days ago.
         hourly_precip = data["hourly"]["precipitation"]
-        # Last 24 values
+        # Last 24 hourly records represent approximately the last 24h
         last_24h_sum = sum(hourly_precip[-24:])
         
-        # Daily 7d: last 7 days (excluding today if needed, but we'll show last 7 including today's current sum)
         daily_dates = data["daily"]["time"]
         daily_sums = data["daily"]["precipitation_sum"]
         
-        # Zip them and take the last 7
-        daily_history = list(zip(daily_dates, daily_sums))[-8:] # 7 past + today
+        # We want the last 7 completed days + today
+        daily_history = list(zip(daily_dates, daily_sums))
         
         return {
             "last_24h": last_24h_sum,
