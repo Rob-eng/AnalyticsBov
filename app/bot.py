@@ -12,6 +12,7 @@ from datetime import datetime
 # Conversation states
 WAITING_FEEDBACK = 1
 WAITING_WEATHER_LOCATION = 2
+WAITING_BROADCAST_MESSAGE = 3
 
 def is_admin(chat_id):
     """Check if user is admin"""
@@ -24,9 +25,10 @@ def get_keyboard(chat_id):
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
             [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
             [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
-            [KeyboardButton("💬 Feedback")]
+            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("💬 Feedback")]
         ]
     else:
+
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
             [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
@@ -57,7 +59,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         
         if is_admin(chat_id):
-            welcome_msg += "\n*Comandos Admin:*\n👥 /usuarios - Lista de usuários\n📥 /importar - Importar histórico\n"
+            welcome_msg += "\n*Comandos Admin:*\n👥 /usuarios - Lista de usuários\n📥 /importar - Importar histórico\n📢 /anunciar - Enviar anúncio\n"
+
         
         welcome_msg += "\n_Desenvolvido por Robson Campos_ 👨‍💻"
         
@@ -496,7 +499,81 @@ async def cancel_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start broadcast conversation (Admin only)"""
+    chat_id = str(update.effective_chat.id)
+    if not is_admin(chat_id):
+        await update.message.reply_text("🚫 Comando restrito ao administrador.")
+        return ConversationHandler.END
+        
+    await update.message.reply_text(
+        "📢 *Enviar Anúncio*\n\n"
+        "Por favor, envie a mensagem que deseja transmitir para todos os usuários.\n\n"
+        "Envie /cancelar para sair.",
+        parse_mode='Markdown'
+    )
+    return WAITING_BROADCAST_MESSAGE
+
+async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send message to all users"""
+    chat_id = str(update.effective_chat.id)
+    broadcast_text = update.message.text
+    
+    if broadcast_text.startswith('/'):
+        return WAITING_BROADCAST_MESSAGE
+
+    status_msg = await update.message.reply_text("🚀 Iniciando transmissão...")
+    
+    session = SessionLocal()
+    success_count = 0
+    failure_count = 0
+    
+    try:
+        users = session.query(User).all()
+        for user in users:
+            try:
+                # Avoid sending to self if already in the list to not be redundant
+                # but usually admin wants to see it too
+                await context.bot.send_message(
+                    chat_id=user.chat_id,
+                    text=f"📢 *AGRO ANALYTICS - INFORMA*\n\n{broadcast_text}",
+                    parse_mode='Markdown'
+                )
+                success_count += 1
+            except Exception as e:
+                print(f"Failed to send broadcast to {user.chat_id}: {e}")
+                failure_count += 1
+            
+            # Rate limiting / Anti-spam safety
+            await asyncio.sleep(0.05)
+            
+        await status_msg.edit_text(
+            f"✅ *Transmissão Concluída!*\n\n"
+            f"📈 Sucesso: {success_count}\n"
+            f"❌ Falhas: {failure_count}",
+            parse_mode='Markdown',
+            reply_markup=get_keyboard(chat_id)
+        )
+        
+    except Exception as e:
+        print(f"Error in broadcast: {e}")
+        await status_msg.edit_text("❌ Ocorreu um erro ao processar a transmissão.")
+    finally:
+        session.close()
+
+    return ConversationHandler.END
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel broadcast conversation"""
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text(
+        "❌ Transmissão cancelada.",
+        reply_markup=get_keyboard(chat_id)
+    )
+    return ConversationHandler.END
+
 async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
 
     """Handle keyboard button presses"""
     text = update.message.text
@@ -522,6 +599,11 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "👥 Lista de Usuários":
         if is_admin(update.effective_chat.id):
             await list_users(update, context)
+    elif text == "📢 Enviar Anúncio":
+        if is_admin(update.effective_chat.id):
+            await start_broadcast(update, context)
+            return WAITING_BROADCAST_MESSAGE
+
         else:
             await update.message.reply_text("❌ Comando apenas para administradores.")
     

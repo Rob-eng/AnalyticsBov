@@ -4,8 +4,10 @@ from app.bot import (
     create_bot_application, start, status, current_analysis, future_market,
     sync_history, list_users, start_feedback, receive_feedback, 
     cancel_feedback, start_weather, receive_weather_location, cancel_weather,
-    handle_keyboard_buttons, WAITING_FEEDBACK, WAITING_WEATHER_LOCATION
+    start_broadcast, send_broadcast, cancel_broadcast,
+    handle_keyboard_buttons, WAITING_FEEDBACK, WAITING_WEATHER_LOCATION, WAITING_BROADCAST_MESSAGE
 )
+
 
 from app.scheduler import setup_scheduler
 from telegram.ext import CommandHandler, MessageHandler, filters, ConversationHandler
@@ -52,23 +54,39 @@ def main():
         fallbacks=[CommandHandler("cancelar", cancel_weather)]
     )
     
+    # Broadcast Conversation Handler
+    broadcast_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("anunciar", start_broadcast),
+            MessageHandler(filters.Regex("^📢 Enviar Anúncio$"), start_broadcast)
+        ],
+        states={
+            WAITING_BROADCAST_MESSAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)
+            ]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_broadcast)]
+    )
+    
     # Add Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("atual", current_analysis))
     application.add_handler(CommandHandler("futuro", future_market))
     application.add_handler(CommandHandler("clima", start_weather))
+    application.add_handler(CommandHandler("anunciar", start_broadcast))
     application.add_handler(CommandHandler("importar", sync_history))
     application.add_handler(CommandHandler("usuarios", list_users))
     application.add_handler(feedback_handler)
     application.add_handler(weather_handler)
-
+    application.add_handler(broadcast_handler)
     
     # Keyboard button handler (must be last to not interfere with other handlers)
     application.add_handler(MessageHandler(
-        filters.Regex("^(📊 Cotação Atual|🔮 Mercado Futuro|📈 Status|📥 Importar Histórico|👥 Lista de Usuários)$"),
+        filters.Regex("^(📊 Cotação Atual|🔮 Mercado Futuro|🌧️ Precipitação|📢 Enviar Anúncio|📈 Status|📥 Importar Histórico|👥 Lista de Usuários|💬 Feedback)$"),
         handle_keyboard_buttons
     ))
+
     
     # Run Bot
     print("Starting Bot...")
