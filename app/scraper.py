@@ -372,9 +372,14 @@ def scrape_mercado_futuro():
 
         # Extract date (usually in a span or paragraph above/below)
         fechamento_text = ""
-        date_elements = soup.find_all(lambda tag: tag.name in ['span', 'p'] and 'Fechamento' in tag.get_text())
+        # Try finding "Fechamento" case-insensitive in common text tags
+        date_elements = soup.find_all(lambda tag: tag.name in ['span', 'p', 'div', 'b', 'strong'] and 'fechamento' in tag.get_text().lower())
         if date_elements:
             fechamento_text = date_elements[0].get_text(strip=True)
+        
+        # Fallback: Check if headers contain a date-like string (e.g. 10/Fev) if fechamento_text is still empty
+        # This is useful when the explicit 'Fechamento' label is missing but the table headers contain the date.
+
 
         rows = target_table.find_all('tr')
         if not rows:
@@ -402,7 +407,15 @@ def scrape_mercado_futuro():
             if '/' in row_vals[0] or len(row_vals[0]) >= 5:
                 table_data.append(row_vals)
 
+        if not fechamento_text and headers_row:
+             # Try to find something like 10/Fev in headers
+             for h in headers_row:
+                 if '/' in h and any(m in h.lower() for m in ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']):
+                     fechamento_text = f"Fechamento: {h}"
+                     break
+
         return {
+
             'date_raw': fechamento_text,
             'headers': headers_row if headers_row else ["VENCIMENTOS", "AJUSTE ANT.", "AJUSTE ATUAL", "C. ABERTOS", "VAR.", "CÂMBIO", "US$ VISTA"],
             'rows': table_data

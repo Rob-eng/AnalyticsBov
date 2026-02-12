@@ -280,7 +280,8 @@ def generate_future_table(data_dict):
                 except:
                     cell.get_text().set_color(TEXT_COLOR)
             else:
-                cell.get_text().set_props(color=TEXT_COLOR)
+                cell.get_text().set_color(TEXT_COLOR)
+
             
     # Watermark (Smaller logo)
     logo_path = 'app/assets/logo.jpg'
