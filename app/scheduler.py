@@ -18,10 +18,11 @@ def setup_scheduler(application):
         else:
             print("No data collected, skipping broadcast.")
 
-    # Schedule: Monday at 08:00 BRT
+    # Schedule: Monday at 06:30 BRT
     scheduler.add_job(
         scheduled_job,
-        CronTrigger(day_of_week='mon', hour=8, minute=0),
+        CronTrigger(day_of_week='mon', hour=6, minute=30),
+
         id='weekly_report',
         replace_existing=True
     )
