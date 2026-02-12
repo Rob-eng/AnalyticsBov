@@ -6,6 +6,7 @@ from app.charts import generate_chart, generate_future_table
 from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url
 
 import asyncio
+from datetime import datetime
 
 
 # Conversation states

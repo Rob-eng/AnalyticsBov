@@ -52,12 +52,18 @@ def extract_coords_from_url(text):
     - Short URLs: https://maps.app.goo.gl/XXXX via redirect
     Returns: (lat, lon) or None
     """
-    # 1. Check for long URL pattern
-    # Pattern: @lat,lon,
-    map_pattern = r"@(-?\d+\.\d+),(-?\d+\.\d+)"
-    match = re.search(map_pattern, text)
-    if match:
-        return float(match.group(1)), float(match.group(2))
+    # 1. Check for long URL patterns
+    # Pattern A: @lat,lon,
+    # Pattern B: q=lat,lon
+    patterns = [
+        r"@(-?\d+\.\d+),(-?\d+\.\d+)",
+        r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)"
+    ]
+    for p in patterns:
+        match = re.search(p, text)
+        if match:
+            return float(match.group(1)), float(match.group(2))
+
     
     # 2. Check for shortened maps.app.goo.gl URL
     if "maps.app.goo.gl" in text or "goo.gl/maps" in text:
