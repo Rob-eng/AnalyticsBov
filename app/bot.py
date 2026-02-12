@@ -456,15 +456,24 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             return WAITING_WEATHER_LOCATION
 
         # 3. Format Message
-        msg = f"🌧️ *Precipitação: {loc_name}*\n\n"
-        msg += f"🕒 *Últimas 24h:* {data['last_24h']:.1f} mm\n\n"
+        # Escape potential markdown chars in loc_name
+        safe_loc_name = loc_name.replace('*','').replace('_','').replace('`','')
+        
+        last_24h = data.get('last_24h') or 0.0
+        
+        msg = f"🌧️ *Precipitação: {safe_loc_name}*\n\n"
+        msg += f"🕒 *Últimas 24h:* {last_24h:.1f} mm\n\n"
         msg += "*Histórico (7 dias):*\n"
         
-        for date_str, val in data['daily_history']:
-            # Format date: 2026-02-12 -> 12/02
-            dt = datetime.strptime(date_str, '%Y-%m-%d')
-            date_fmt = dt.strftime('%d/%m')
-            msg += f"📅 {date_fmt}: {val:.1f} mm\n"
+        for date_str, val in data.get('daily_history', []):
+            try:
+                # Format date: 2026-02-12 -> 12/02
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                date_fmt = dt.strftime('%d/%m')
+                safe_val = val or 0.0
+                msg += f"📅 {date_fmt}: {safe_val:.1f} mm\n"
+            except Exception as de:
+                print(f"Error formatting date {date_str}: {de}")
             
         msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
         
@@ -472,15 +481,20 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         map_url = get_static_map_url(lat, lon)
         
         # 5. Send Photo
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=map_url,
-            caption=msg,
-            parse_mode='Markdown',
-            reply_markup=get_keyboard(chat_id)
-        )
-        
-        await status_msg.delete()
+        try:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=map_url,
+                caption=msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
+            await status_msg.delete()
+        except Exception as spe:
+            print(f"Error sending photo: {spe}")
+            # Fallback to just message
+            await status_msg.edit_text(msg, parse_mode='Markdown', reply_markup=get_keyboard(chat_id))
+
         
     except Exception as e:
         print(f"Error in weather_info: {e}")

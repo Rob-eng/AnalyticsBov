@@ -165,8 +165,10 @@ def get_precipitation_data(lat, lon):
             return None
             
         hourly_precip = data["hourly"]["precipitation"]
-        # Last 24 hourly records represent approximately the last 24h
-        last_24h_sum = sum(hourly_precip[-24:])
+        # Filter out None values and sum last 24 records
+        last_24_records = hourly_precip[-24:]
+        last_24h_sum = sum(v for v in last_24_records if v is not None)
+
         
         daily_dates = data["daily"]["time"]
         daily_sums = data["daily"]["precipitation_sum"]
