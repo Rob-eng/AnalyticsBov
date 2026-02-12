@@ -494,7 +494,9 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         except Exception as spe:
             print(f"Error sending photo: {spe}")
             # Fallback to just message
-            await status_msg.edit_text(msg, parse_mode='Markdown', reply_markup=get_keyboard(chat_id))
+            # edit_text doesn't support ReplyKeyboardMarkup, so we send a new message or just edit without markup
+            await status_msg.edit_text(msg, parse_mode='Markdown')
+            await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
         
     except Exception as e:
@@ -576,9 +578,10 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ <b>Transmissão Concluída!</b>\n\n"
             f"📈 Sucesso: {success_count}\n"
             f"❌ Falhas: {failure_count}",
-            parse_mode='HTML',
-            reply_markup=get_keyboard(chat_id)
+            parse_mode='HTML'
         )
+        # Restore keyboard via a new message
+        await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
         
     except Exception as e:
         print(f"CRITICAL Error in broadcast: {e}")
