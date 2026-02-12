@@ -10,7 +10,7 @@ WAITING_FEEDBACK = 1
 
 def is_admin(chat_id):
     """Check if user is admin"""
-    return chat_id == Config.ADMIN_CHAT_ID
+    return str(chat_id) == str(Config.ADMIN_CHAT_ID)
 
 def get_keyboard(chat_id):
     """Get appropriate keyboard based on user role"""
@@ -28,7 +28,7 @@ def get_keyboard(chat_id):
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     username = update.effective_chat.username
     
     session = SessionLocal()
@@ -90,7 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session.close()
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     session = SessionLocal()
     try:
         user = session.query(User).filter_by(chat_id=chat_id).first()
@@ -177,7 +177,7 @@ async def broadcast_report(application, data):
         session.close()
 
 async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     first_name = update.effective_chat.first_name
     username = update.effective_chat.username
     
@@ -236,7 +236,7 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(error_msg)
 
 async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     
     await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
     
@@ -275,6 +275,7 @@ async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
 
 async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
     await update.message.reply_text("⏳ Iniciando importação do histórico da planilha... Isso pode levar alguns segundos.")
     
     try:
@@ -291,7 +292,7 @@ async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to list all registered users"""
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     
     if not is_admin(chat_id):
         await update.message.reply_text("❌ Você não tem permissão para usar este comando.")
@@ -322,6 +323,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start feedback conversation"""
+    chat_id = str(update.effective_chat.id)
     await update.message.reply_text(
         "💬 *Sistema de Feedback*\n\n"
         "Por favor, envie sua mensagem com sugestões, dúvidas ou solicitações de funcionalidades.\n\n"
@@ -332,7 +334,7 @@ async def start_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def receive_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Receive and forward feedback to admin"""
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     username = update.effective_chat.username
     feedback_text = update.message.text
     
@@ -367,7 +369,7 @@ async def receive_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel feedback conversation"""
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
     await update.message.reply_text(
         "❌ Feedback cancelado.",
         reply_markup=get_keyboard(chat_id)

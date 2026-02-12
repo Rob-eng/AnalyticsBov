@@ -40,7 +40,7 @@ def init_db():
     # Forced migration to BIGINT for Telegram IDs
     with engine.connect() as conn:
         try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT;"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT USING chat_id::text;"))
             # Depending on SQLAlchemy version, commit might be needed
             if hasattr(conn, 'commit'):
                 conn.commit()
