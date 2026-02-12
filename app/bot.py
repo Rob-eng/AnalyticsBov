@@ -401,8 +401,9 @@ async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "_Ex: -20.94, -48.48_\n"
         "_Ex: 20° 56' 58\" S, 48° 28' 45\" W_\n\n"
         "🔗 *Links*: Cole um link do Google Maps.\n"
-        "_Ex: https://maps.app.goo.gl/...\n\n"
+        "_Ex: https://maps.app.goo.gl/..._\n\n"
         "Envie /cancelar para sair."
+
     )
     await update.message.reply_text(
         help_text,
@@ -596,16 +597,10 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         await current_analysis(update, context)
     elif text == "📈 Status":
         await status(update, context)
-    elif text == "💬 Feedback":
-        await start_feedback(update, context)
-        return WAITING_FEEDBACK
-    elif text == "🌧️ Precipitação":
-        await start_weather(update, context)
-        return WAITING_WEATHER_LOCATION
     elif text == "🔮 Mercado Futuro":
-
         await future_market(update, context)
     elif text == "📥 Importar Histórico":
+
         if is_admin(update.effective_chat.id):
             await sync_history(update, context)
         else:

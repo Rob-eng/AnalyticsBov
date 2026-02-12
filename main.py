@@ -73,13 +73,14 @@ def main():
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("atual", current_analysis))
     application.add_handler(CommandHandler("futuro", future_market))
-    application.add_handler(CommandHandler("clima", start_weather))
-    application.add_handler(CommandHandler("anunciar", start_broadcast))
     application.add_handler(CommandHandler("importar", sync_history))
     application.add_handler(CommandHandler("usuarios", list_users))
+    
+    # Conversation Handlers
     application.add_handler(feedback_handler)
     application.add_handler(weather_handler)
     application.add_handler(broadcast_handler)
+
     
     # Keyboard button handler (must be last to not interfere with other handlers)
     application.add_handler(MessageHandler(
