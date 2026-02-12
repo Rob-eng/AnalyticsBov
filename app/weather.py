@@ -184,6 +184,7 @@ def get_precipitation_data(lat, lon):
 
 def get_static_map_url(lat, lon):
     """
-    Generates a Yandex Static Map URL.
+    Generates a Yandex Static Map URL (Hybrid style: Satellite + Streets).
     """
-    return f"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&z=11&l=map&pt={lon},{lat},pm2rdm&size=600,400"
+    return f"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&z=13&l=sat,skl&pt={lon},{lat},pm2rdm&size=600,400"
+
