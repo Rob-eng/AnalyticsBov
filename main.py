@@ -102,9 +102,10 @@ def main():
     
     # Keyboard button handler (must be last to not interfere with other handlers)
     application.add_handler(MessageHandler(
-        filters.Regex("^(📊 Cotação Atual|🔮 Mercado Futuro|🌧️ Precipitação|📢 Enviar Anúncio|📈 Status|📥 Importar Histórico|👥 Lista de Usuários|💬 Feedback)$"),
+        filters.Regex("^(📊 Cotação Atual|🔮 Mercado Futuro|🌧️ Precipitação|🌿 Análise Ambiental|📢 Enviar Anúncio|📈 Status|📥 Importar Histórico|👥 Lista de Usuários|💬 Feedback)$"),
         handle_keyboard_buttons
     ))
+
 
     
     # Run Bot
