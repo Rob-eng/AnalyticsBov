@@ -14,6 +14,9 @@ class Config:
     SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
     CHART_URL = os.getenv('CHART_URL', '')
     
+    # Agromonitoring
+    AGROMONITORING_API_KEY = os.getenv('AGROMONITORING_API_KEY', '280441f10a0d93bfd62aae39fa4cdcaa')
+
     # Admin
     ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '1118914866')  # Default to Robson's ID
     if ADMIN_CHAT_ID:

@@ -4,8 +4,9 @@ from app.bot import (
     create_bot_application, start, status, current_analysis, future_market,
     sync_history, list_users, start_feedback, receive_feedback, 
     cancel_feedback, start_weather, receive_weather_location, cancel_weather,
+    start_env_analysis, receive_env_location, cancel_env,
     start_broadcast, send_broadcast, cancel_broadcast,
-    handle_keyboard_buttons, WAITING_FEEDBACK, WAITING_WEATHER_LOCATION, WAITING_BROADCAST_MESSAGE
+    handle_keyboard_buttons, WAITING_FEEDBACK, WAITING_WEATHER_LOCATION, WAITING_ENV_LOCATION, WAITING_BROADCAST_MESSAGE
 )
 
 
@@ -68,7 +69,22 @@ def main():
         fallbacks=[CommandHandler("cancelar", cancel_broadcast)]
     )
     
+    # Environmental Analysis Conversation Handler
+    env_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("ambiental", start_env_analysis),
+            MessageHandler(filters.Regex("^🌿 Análise Ambiental$"), start_env_analysis)
+        ],
+        states={
+            WAITING_ENV_LOCATION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_env_location)
+            ]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_env)]
+    )
+    
     # Add Handlers
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("atual", current_analysis))
@@ -79,7 +95,9 @@ def main():
     # Conversation Handlers
     application.add_handler(feedback_handler)
     application.add_handler(weather_handler)
+    application.add_handler(env_handler)
     application.add_handler(broadcast_handler)
+
 
     
     # Keyboard button handler (must be last to not interfere with other handlers)

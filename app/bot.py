@@ -4,6 +4,8 @@ from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart, generate_future_table
 from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url
+from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
+
 
 import asyncio
 from datetime import datetime
@@ -13,6 +15,8 @@ from datetime import datetime
 WAITING_FEEDBACK = 1
 WAITING_WEATHER_LOCATION = 2
 WAITING_BROADCAST_MESSAGE = 3
+WAITING_ENV_LOCATION = 4
+
 
 def is_admin(chat_id):
     """Check if user is admin"""
@@ -25,7 +29,9 @@ def get_keyboard(chat_id):
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
             [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
             [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
-            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("💬 Feedback")]
+            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("🌿 Análise Ambiental")],
+            [KeyboardButton("💬 Feedback")]
+
         ]
     else:
 
@@ -507,6 +513,99 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
 
     return ConversationHandler.END
 
+async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start environmental analysis conversation"""
+    chat_id = str(update.effective_chat.id)
+    help_text = (
+        "🌿 *Análise Ambiental (CAR + NDVI)*\n\n"
+        "Envie uma localização para analisar o vigor vegetativo e uso do solo.\n\n"
+        "📍 *Opções*:\n"
+        "- Coordenadas (ex: -21.43, -54.78)\n"
+        "- Link do Google Maps\n\n"
+        "Envie /cancelar para sair."
+    )
+    await update.message.reply_text(
+        help_text,
+        parse_mode='Markdown',
+        disable_web_page_preview=True
+    )
+    return WAITING_ENV_LOCATION
+
+async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process location for environmental analysis"""
+    chat_id = str(update.effective_chat.id)
+    query = update.message.text
+    
+    if query.startswith('/'):
+        return WAITING_ENV_LOCATION
+
+    status_msg = await update.message.reply_text("🛰️ Processando imagens de satélite... Aguarde.")
+    
+    try:
+        # 1. Determine Lat/Lon
+        lat, lon = None, None
+        url_coords = extract_coords_from_url(query)
+        if url_coords:
+            lat, lon = url_coords
+        else:
+            coords = parse_coordinates(query)
+            if coords:
+                lat, lon = coords
+        
+        if lat is None or lon is None:
+            await status_msg.edit_text("⚠️ Não consegui interpretar as coordenadas. Envie coordenadas decimais ou um link do Google Maps.")
+            return WAITING_ENV_LOCATION
+
+        # 2. Fetch CAR Perimeter
+        geometry = fetch_car_perimeter(lat, lon)
+        
+        # 3. Get NDVI Analysis
+        analysis = get_ndvi_analysis(geometry)
+        if not analysis:
+            await status_msg.edit_text("❌ Erro ao obter dados de satélite Agromonitoring.")
+            return WAITING_ENV_LOCATION
+
+        # 4. Format Message
+        ndvi_val = analysis.get('stats', {}).get('mean', 0)
+        dt_obj = datetime.fromtimestamp(analysis['dt'])
+        date_str = dt_obj.strftime('%d/%m/%Y')
+        
+        msg = f"🌿 *Análise Ambiental*\n\n"
+        msg += f"📅 *Data da Imagem:* {date_str}\n"
+        msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
+        msg += f"🚜 *Uso do Solo (Estimado):* Vegetação/Campo\n\n"
+        msg += "O NDVI varia de -1 a 1:\n"
+        msg += "- > 0.6: Vegetação densa/saudável\n"
+        msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
+        msg += "- < 0.1: Água ou rocha"
+
+        # 5. Send Photo
+        img_url = analysis['ndvi_img']
+        
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=img_url,
+            caption=msg,
+            parse_mode='Markdown',
+            reply_markup=get_keyboard(chat_id)
+        )
+        await status_msg.delete()
+        
+    except Exception as e:
+        print(f"Error in env_analysis: {e}")
+        await status_msg.edit_text("❌ Ocorreu um erro ao processar a análise ambiental.")
+
+    return ConversationHandler.END
+
+async def cancel_env(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel env conversation"""
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text(
+        "❌ Análise cancelada.",
+        reply_markup=get_keyboard(chat_id)
+    )
+    return ConversationHandler.END
+
 async def cancel_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel weather conversation"""
     chat_id = str(update.effective_chat.id)
@@ -613,7 +712,11 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         await current_analysis(update, context)
     elif text == "📈 Status":
         await status(update, context)
+    elif text == "🌿 Análise Ambiental":
+        await start_env_analysis(update, context)
+        return WAITING_ENV_LOCATION
     elif text == "🔮 Mercado Futuro":
+
         await future_market(update, context)
     elif text == "📥 Importar Histórico":
 
