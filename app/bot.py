@@ -557,7 +557,7 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
             return WAITING_ENV_LOCATION
 
         # 2. Fetch CAR Perimeter
-        geometry = fetch_car_perimeter(lat, lon)
+        geometry, is_real_car = fetch_car_perimeter(lat, lon)
         
         # 3. Get NDVI Analysis
         analysis = get_ndvi_analysis(geometry)
@@ -573,6 +573,13 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         msg = f"🌿 *Análise Ambiental*\n\n"
         msg += f"📅 *Data da Imagem:* {date_str}\n"
         msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
+        
+        if is_real_car:
+            msg += f"✅ *Perímetro:* CAR Oficial\n"
+        else:
+            msg += f"⚠️ *Perímetro:* Área Estimada (1km²)\n"
+            msg += f"_Servidor CAR indisponível_\n"
+        
         msg += f"🚜 *Uso do Solo (Estimado):* Vegetação/Campo\n\n"
         msg += "O NDVI varia de -1 a 1:\n"
         msg += "- > 0.6: Vegetação densa/saudável\n"
@@ -581,7 +588,7 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # 5. Generate composite image with CAR perimeter overlay
         img_url = analysis['ndvi_img']
-        composite_img = generate_environmental_image(img_url, geometry)
+        composite_img = generate_environmental_image(img_url, geometry, is_real_car)
         
         if composite_img:
             # Send processed image with overlay

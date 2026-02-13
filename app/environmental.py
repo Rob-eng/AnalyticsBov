@@ -12,6 +12,7 @@ def fetch_car_perimeter(lat, lon):
     """
     Attempts to fetch CAR perimeter using WFS.
     Falls back to a 1km bounding box if WFS fails.
+    Returns: (geometry, is_real_car)
     """
     # Fallback to 1km box
     offset = 0.005 # ~500m
@@ -46,11 +47,11 @@ def fetch_car_perimeter(lat, lon):
             if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
                 data = response.json()
                 if "features" in data and len(data["features"]) > 0:
-                    return data["features"][0]["geometry"]
+                    return (data["features"][0]["geometry"], True)
         except:
             continue
             
-    return bbox_polygon
+    return (bbox_polygon, False)
 
 def get_ndvi_analysis(geometry_geojson):
     """
@@ -144,7 +145,7 @@ def get_land_use_mapbiomas(lat, lon):
     # For now we return a placeholder or use a simpler logic
     return "Não identificado (MapBiomas offline)"
 
-def generate_environmental_image(ndvi_url, geometry):
+def generate_environmental_image(ndvi_url, geometry, is_real_car=False):
     """
     Downloads NDVI image and overlays CAR perimeter.
     Returns a BytesIO buffer with the composite image.
@@ -183,9 +184,20 @@ def generate_environmental_image(ndvi_url, geometry):
                 coords.append(normalized_ring)
         
         # 4. Draw polygon boundary
+        if is_real_car:
+            color = 'lime'
+            linestyle = '-'
+            label = '✓ Perímetro CAR Oficial'
+            linewidth = 3
+        else:
+            color = 'yellow'
+            linestyle = '--'
+            label = '⚠ Área Estimada (1km²)'
+            linewidth = 2
+            
         for ring in coords:
             xs, ys = zip(*ring)
-            ax.plot(xs, ys, color='yellow', linewidth=2, linestyle='-', label='Perímetro CAR')
+            ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle=linestyle, label=label)
         
         # 5. Styling
         ax.set_xlim(0, 1)
