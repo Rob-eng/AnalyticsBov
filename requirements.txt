@@ -10,3 +10,6 @@ pandas
 python-telegram-bot
 apscheduler
 scipy
+shapely
+geopandas
+pillow
