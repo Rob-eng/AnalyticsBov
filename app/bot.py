@@ -579,16 +579,29 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
         msg += "- < 0.1: Água ou rocha"
 
-        # 5. Send Photo
+        # 5. Generate composite image with CAR perimeter overlay
         img_url = analysis['ndvi_img']
+        composite_img = generate_environmental_image(img_url, geometry)
         
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=img_url,
-            caption=msg,
-            parse_mode='Markdown',
-            reply_markup=get_keyboard(chat_id)
-        )
+        if composite_img:
+            # Send processed image with overlay
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=composite_img,
+                caption=msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
+        else:
+            # Fallback to original image if processing fails
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=img_url,
+                caption=msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
+        
         await status_msg.delete()
         
     except Exception as e:

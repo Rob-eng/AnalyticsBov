@@ -146,20 +146,63 @@ def get_land_use_mapbiomas(lat, lon):
 
 def generate_environmental_image(ndvi_url, geometry):
     """
-    Downloads NDVI image and overlays perimeter.
+    Downloads NDVI image and overlays CAR perimeter.
+    Returns a BytesIO buffer with the composite image.
     """
     try:
-        resp = requests.get(ndvi_url)
+        # 1. Download NDVI image
+        resp = requests.get(ndvi_url, timeout=15)
+        if resp.status_code != 200:
+            return None
+            
         img = plt.imread(BytesIO(resp.content), format='png')
         
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.imshow(img)
-        ax.axis('off')
+        # 2. Create figure
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=100)
+        ax.imshow(img, extent=[0, 1, 0, 1])  # Normalize to 0-1 for overlay
         
+        # 3. Extract and normalize polygon coordinates
+        from shapely.geometry import shape as shapely_shape
+        from shapely.affinity import scale, translate
+        
+        poly = shapely_shape(geometry)
+        
+        # Get bounds
+        minx, miny, maxx, maxy = poly.bounds
+        width = maxx - minx
+        height = maxy - miny
+        
+        # Normalize coordinates to 0-1 range
+        coords = []
+        if geometry['type'] == 'Polygon':
+            for ring in geometry['coordinates']:
+                normalized_ring = [
+                    ((x - minx) / width, (y - miny) / height)
+                    for x, y in ring
+                ]
+                coords.append(normalized_ring)
+        
+        # 4. Draw polygon boundary
+        for ring in coords:
+            xs, ys = zip(*ring)
+            ax.plot(xs, ys, color='yellow', linewidth=2, linestyle='-', label='Perímetro CAR')
+        
+        # 5. Styling
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+        ax.legend(loc='upper right', fontsize=10, framealpha=0.8)
+        
+        # 6. Save to buffer
         buf = BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.1, dpi=150)
         buf.seek(0)
         plt.close(fig)
+        
         return buf
-    except:
+        
+    except Exception as e:
+        print(f"Error generating environmental image: {e}")
+        import traceback
+        traceback.print_exc()
         return None
