@@ -574,8 +574,11 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         msg += f"📅 *Data da Imagem:* {date_str}\n"
         msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
         
-        if is_real_car:
+        if is_real_car == 'OFFICIAL' or is_real_car is True:
             msg += f"✅ *Perímetro:* CAR Oficial\n"
+        elif is_real_car == 'NEARBY':
+            msg += f"⚠️ *Perímetro:* Propriedade Próxima (<11km)\n"
+            msg += f"_Nenhuma propriedade encontrada no ponto exato_\n"
         else:
             msg += f"⚠️ *Perímetro:* Área Estimada (1km²)\n"
             msg += f"_Servidor CAR indisponível_\n"

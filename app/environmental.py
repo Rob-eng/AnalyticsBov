@@ -7,12 +7,78 @@ import geopandas as gpd
 import pandas as pd
 import matplotlib.pyplot as plt
 from io import BytesIO
+import os
+from pathlib import Path
+
+def query_local_car_database(lat, lon):
+    """
+    Query local GeoJSON file for CAR perimeter containing the point.
+    If no exact match, returns the nearest property within 5km.
+    Returns: (geometry, status_type) where status_type is 'OFFICIAL' or 'NEARBY'
+    """
+    try:
+        # Path to local GeoJSON file
+        base_dir = Path(__file__).parent.parent
+        geojson_path = base_dir / "car_ms.geojson"
+        
+        if not geojson_path.exists():
+            print(f"Local CAR database not found: {geojson_path}")
+            return (None, False)
+        
+        # Load GeoJSON with GeoPandas
+        gdf = gpd.read_file(geojson_path)
+        
+        # Create point geometry
+        from shapely.geometry import Point
+        point = Point(lon, lat)
+        
+        # Helper to ensure Polygon (Agromonitoring doesn't support MultiPolygon)
+        def ensure_polygon(geom):
+            if geom.geom_type == 'MultiPolygon':
+                # Return the largest polygon by area
+                return max(geom.geoms, key=lambda p: p.area)
+            return geom
+        
+        # 1. Try exact match: find properties containing the point
+        matches = gdf[gdf.contains(point)]
+        
+        if len(matches) > 0:
+            geometry = ensure_polygon(matches.iloc[0].geometry)
+            print(f"Found exact match: {matches.iloc[0].get('cod_imovel', 'N/A')}")
+            return (mapping(geometry), 'OFFICIAL')
+        
+        # 2. Fallback: find nearest property by centroid distance
+        # Warning: Direct distance calculation on WGS84 is approximate but fast enough for this purpose
+        # To avoid projection errors, we calculate distance on centroids
+        gdf['centroid'] = gdf.geometry.centroid
+        gdf['dist'] = gdf.centroid.distance(point)
+        
+        nearest = gdf.nsmallest(1, 'dist')
+        
+        if len(nearest) > 0:
+            dist_deg = nearest.iloc[0]['dist']
+            # Approx conversion: 1 deg ~= 111km. 0.1 deg ~= 11km
+            if dist_deg < 0.1:
+                geometry = ensure_polygon(nearest.iloc[0].geometry)
+                cod = nearest.iloc[0].get('cod_imovel', 'N/A')
+                print(f"Found nearest property ({dist_deg:.4f} deg): {cod}")
+                return (mapping(geometry), 'NEARBY')
+        
+        return (None, None)
+        
+    except Exception as e:
+        print(f"Error querying local CAR database: {e}")
+        # import traceback
+        # traceback.print_exc()
+        return (None, None)
+
 
 def fetch_car_perimeter(lat, lon):
     """
     Attempts to fetch CAR perimeter using WFS.
-    Falls back to a 1km bounding box if WFS fails.
-    Returns: (geometry, is_real_car)
+    Falls back to local GeoJSON database, then to a 1km bounding box if both fail.
+    Returns: (geometry, status)
+    status can be: 'OFFICIAL', 'NEARBY', 'FALLBACK'
     """
     # Fallback to 1km box
     offset = 0.005 # ~500m
@@ -47,11 +113,20 @@ def fetch_car_perimeter(lat, lon):
             if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
                 data = response.json()
                 if "features" in data and len(data["features"]) > 0:
-                    return (data["features"][0]["geometry"], True)
+                    return (data["features"][0]["geometry"], 'OFFICIAL')
         except:
             continue
-            
-    return (bbox_polygon, False)
+    
+    # 2. Try local GeoJSON database
+    print("WFS servers unavailable, trying local database...")
+    local_result, status = query_local_car_database(lat, lon)
+    if status and local_result:
+        print(f"✓ CAR perimeter from local database ({status})")
+        return (local_result, status)
+    
+    # 3. Last resort: estimated area
+    print("⚠ Using estimated 1km² area")
+    return (bbox_polygon, 'FALLBACK')
 
 def get_ndvi_analysis(geometry_geojson):
     """
@@ -184,10 +259,15 @@ def generate_environmental_image(ndvi_url, geometry, is_real_car=False):
                 coords.append(normalized_ring)
         
         # 4. Draw polygon boundary
-        if is_real_car:
+        if is_real_car == 'OFFICIAL' or is_real_car is True:
             color = 'lime'
             linestyle = '-'
             label = '✓ Perímetro CAR Oficial'
+            linewidth = 3
+        elif is_real_car == 'NEARBY':
+            color = 'orange'
+            linestyle = '-.'
+            label = '⚠ Propriedade Próxima (<11km)'
             linewidth = 3
         else:
             color = 'yellow'
