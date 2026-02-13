@@ -60,8 +60,8 @@ def get_ndvi_analysis(geometry_geojson):
     if not api_key:
         return None
         
-    # 1. Create Polygon in Agromonitoring
-    poly_url = f"http://api.agromonitoring.com/agro/1.0/polygons?appid={api_key}"
+    # 1. Create Polygon in Agromonitoring (allow duplicates)
+    poly_url = f"http://api.agromonitoring.com/agro/1.0/polygons?duplicated=true&appid={api_key}"
     poly_data = {
         "name": f"Area_{int(time.time())}",
         "geo_json": {
@@ -72,39 +72,68 @@ def get_ndvi_analysis(geometry_geojson):
     }
     
     try:
-        res = requests.post(poly_url, json=poly_data)
+        res = requests.post(poly_url, json=poly_data, timeout=10)
         if res.status_code not in [201, 200]:
             print(f"Agro Poly Error: {res.text}")
             return None
         poly_id = res.json()["id"]
         
-        # 2. Get Search (Satellite Images)
-        # Search for last 30 days
+        # 2. Get historical satellite images
+        # Use the image search endpoint for historical data
         end = int(time.time())
-        start = end - (30 * 24 * 3600)
-        search_url = f"http://api.agromonitoring.com/agro/1.0/satellite/get?polyid={poly_id}&start={start}&end={end}&appid={api_key}"
+        start = end - (60 * 24 * 3600)  # Last 60 days
         
-        sres = requests.get(search_url)
+        search_url = f"http://api.agromonitoring.com/agro/1.0/image/search?start={start}&end={end}&polyid={poly_id}&appid={api_key}"
+        
+        sres = requests.get(search_url, timeout=10)
         if sres.status_code != 200:
+            print(f"Satellite search error: {sres.text}")
             return None
             
         images = sres.json()
-        if not images:
+        if not images or len(images) == 0:
+            print("No satellite images available for this area yet")
+            return None
+        
+        # Filter for images with low cloud coverage
+        clear_images = [img for img in images if img.get('cl', 100) < 30]
+        if not clear_images:
+            clear_images = images  # Fallback to any image
+            
+        # Get the most recent image
+        latest = sorted(clear_images, key=lambda x: x.get('dt', 0))[-1]
+        
+        # Get NDVI tile URL
+        tile = latest.get('tile')
+        if not tile:
+            print("No tile data in image")
             return None
             
-        # Get latest image with NDVI
-        latest = images[-1]
-        ndvi_url = latest.get("stats", {}).get("ndvi") # This is direct stats
-        ndvi_img_url = latest.get("ndvi") # Direct link to PNG
+        # Construct NDVI image URL
+        ndvi_img_url = latest.get('image', {}).get('ndvi')
+        
+        # Get stats if available
+        stats_url = latest.get('stats', {}).get('ndvi')
+        stats_data = None
+        if stats_url:
+            try:
+                stats_res = requests.get(stats_url, timeout=10)
+                if stats_res.status_code == 200:
+                    stats_data = stats_res.json()
+            except:
+                pass
         
         return {
             "poly_id": poly_id,
             "ndvi_img": ndvi_img_url,
-            "stats": latest.get("stats"),
-            "dt": latest.get("dt")
+            "stats": stats_data,
+            "dt": latest.get("dt"),
+            "cloud_coverage": latest.get("cl", 0)
         }
     except Exception as e:
         print(f"NDVI Analysis Error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_land_use_mapbiomas(lat, lon):
