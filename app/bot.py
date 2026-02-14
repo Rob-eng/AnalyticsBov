@@ -57,22 +57,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         welcome_msg = (
             "🐂 *Bem-vindo ao Agro Analytics Bot!*\n\n"
-            "Seu assistente para acompanhar as cotações do boi no mundo.\n\n"
-            "Vou te enviar as cotações atualizadas toda segunda-feira às 8h.\n\n"
-            "*Comandos disponíveis:*\n"
-            "📊 /atual - Cotação atual\n"
-            "📈 /status - Seu status de cadastro\n"
-            "🔮 /futuro - Mercado Futuro (Scot)\n"
-            "🌧️ /clima - Precipitação (Chuvas)\n"
-            "💬 /feedback - Enviar sugestões\n"
+            "Seu assistente completo para o agronegócio, focado em cotações e inteligência geoespacial.\n\n"
+            "🚀 *O que eu posso fazer por você:*\n\n"
+            "📊 *Cotações de Mercado:*\n"
+            "- Veja o preço do Boi no Mundo (/atual)\n"
+            "- Acompanhe o Mercado Futuro da Scot (/futuro)\n"
+            "- Receba relatórios automáticos toda segunda às 8h.\n\n"
+            "🌧️ *Clima e Chuvas:*\n"
+            "- Histórico de precipitação de qualquer local (/clima)\n"
+            "- Envie cidade, coordenadas ou link do Google Maps.\n\n"
+            "🌿 *Análise Ambiental (NDVI):*\n"
+            "- Veja o vigor da pastagem via satélite e o perímetro do CAR (/ambiental).\n\n"
+            "📌 *Minhas Propriedades:*\n"
+            "- Cadastre suas fazendas para consultas rápidas!\n"
+            "- Basta digitar o número correspondente quando eu pedir o local.\n\n"
+            "_Desenvolvido por Robson Campos_ 👨‍💻"
         )
-
-        
-        if is_admin(chat_id):
-            welcome_msg += "\n*Comandos Admin:*\n👥 /usuarios - Lista de usuários\n📥 /importar - Importar histórico\n📢 /anunciar - Enviar anúncio\n"
-
-        
-        welcome_msg += "\n_Desenvolvido por Robson Campos_ 👨‍💻"
         
         if not user:
             new_user = User(chat_id=chat_id, username=username)
@@ -404,17 +404,25 @@ async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     help_text = (
         "🌧️ *Consulta de Precipitação*\n\n"
-        "Você pode enviar a localização de várias formas:\n\n"
-        "🏙️ *Município*: Nome da cidade e estado.\n"
-        "_Ex: Bebedouro SP, Cuiabá, Campo Grande MS_\n\n"
-        "📍 *Coordenadas*: Decimais ou GMS.\n"
-        "_Ex: -20.94, -48.48_\n"
-        "_Ex: 20° 56' 58\" S, 48° 28' 45\" W_\n\n"
-        "🔗 *Links*: Cole um link do Google Maps.\n"
-        "_Ex: https://maps.app.goo.gl/..._\n\n"
-        "Envie /cancelar para sair."
-
+        "Envie a localização de uma das seguintes formas:\n\n"
+        "🏙️ *Município*: Ex: Bebedouro SP\n"
+        "📍 *Coordenadas/Links*: Ex: -20.94, -48.48 ou link do Maps\n"
     )
+    
+    # List properties
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if locs:
+            help_text += "\n📌 *Suas Propriedades (Digite o número):*\n"
+            for i, loc in enumerate(locs, 1):
+                help_text += f"{i}. {loc.name}\n"
+    finally:
+        session.close()
+
+    help_text += "\nEnvie /cancelar para sair."
+
     await update.message.reply_text(
         help_text,
         parse_mode='Markdown',
@@ -447,6 +455,7 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 if 0 <= idx < len(locs):
                     lat, lon = locs[idx].latitude, locs[idx].longitude
                     loc_name = locs[idx].name
+                    context.user_data['prop_name'] = loc_name
                 else:
                     await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada. Você tem {len(locs)} locais cadastrados.")
                     return WAITING_WEATHER_LOCATION
@@ -508,13 +517,15 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
         
         # 4. Get Static Map
-        map_url = get_static_map_url(lat, lon)
+        prop_name = context.user_data.pop('prop_name', None)
+        from app.weather import generate_weather_map_with_title
+        map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
         
         # 5. Send Photo
         try:
             await context.bot.send_photo(
                 chat_id=chat_id,
-                photo=map_url,
+                photo=map_image if map_image else get_static_map_url(lat, lon),
                 caption=msg,
                 parse_mode='Markdown',
                 reply_markup=get_keyboard(chat_id)
@@ -541,12 +552,26 @@ async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = str(update.effective_chat.id)
     help_text = (
         "🌿 *Análise Ambiental (CAR + NDVI)*\n\n"
-        "Envie uma localização para analisar o vigor vegetativo e uso do solo.\n\n"
+        "Envie uma localização para analisar o vigor vegetativo.\n\n"
         "📍 *Opções*:\n"
         "- Coordenadas (ex: -21.43, -54.78)\n"
-        "- Link do Google Maps\n\n"
-        "Envie /cancelar para sair."
+        "- Link do Google Maps\n"
     )
+
+    # List properties
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if locs:
+            help_text += "\n📌 *Suas Propriedades (Digite o número):*\n"
+            for i, loc in enumerate(locs, 1):
+                help_text += f"{i}. {loc.name}\n"
+    finally:
+        session.close()
+
+    help_text += "\nEnvie /cancelar para sair."
+
     await update.message.reply_text(
         help_text,
         parse_mode='Markdown',
@@ -574,6 +599,7 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
                 locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
                 if 0 <= idx < len(locs):
                     lat, lon = locs[idx].latitude, locs[idx].longitude
+                    context.user_data['prop_name'] = locs[idx].name
                 else:
                     await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada.")
                     return WAITING_ENV_LOCATION
@@ -635,7 +661,15 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         img_url = analysis['ndvi_img']
         # 4. Generate Image
         region_bbox = analysis.get('region_bbox')
-        image_buffer = generate_environmental_image(analysis['ndvi_img'], geometry, is_real_car, region_bbox=region_bbox)
+        prop_name = context.user_data.pop('prop_name', None)
+        image_buffer = generate_environmental_image(
+            analysis['ndvi_img'], 
+            geometry, 
+            is_real_car, 
+            region_bbox=region_bbox,
+            title=prop_name,
+            pin_coords=(lat, lon)
+        )
         
         if image_buffer:
             # Send processed image with overlay

@@ -190,3 +190,34 @@ def get_static_map_url(lat, lon):
     """
     return f"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&z=13&l=sat,skl&pt={lon},{lat},pm2rdm&size=600,400"
 
+def generate_weather_map_with_title(lat, lon, title=None):
+    """
+    Downloads static map and adds a title using Matplotlib.
+    """
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+    
+    map_url = get_static_map_url(lat, lon)
+    try:
+        resp = requests.get(map_url, timeout=15)
+        if resp.status_code != 200:
+            return None
+        img = plt.imread(BytesIO(resp.content), format='png')
+        
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
+        ax.imshow(img)
+        
+        if title:
+            ax.set_title(title, fontsize=14, fontweight='bold', pad=10)
+            
+        ax.axis('off')
+        
+        buf = BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.1)
+        buf.seek(0)
+        plt.close(fig)
+        return buf
+    except Exception as e:
+        print(f"Error generating weather map with title: {e}")
+        return None
+

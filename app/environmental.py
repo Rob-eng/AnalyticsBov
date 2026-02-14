@@ -183,11 +183,13 @@ def get_land_use_mapbiomas(lat, lon):
     # For now we return a placeholder or use a simpler logic
     return "Não identificado (MapBiomas offline)"
 
-def generate_environmental_image(ndvi_source, geometry, is_real_car=False, region_bbox=None):
+def generate_environmental_image(ndvi_source, geometry, is_real_car=False, region_bbox=None, title=None, pin_coords=None):
     """
     Visualizes NDVI image and overlays CAR perimeter.
     ndvi_source: URL string or BytesIO object
     region_bbox: Optional dict with min_lon, min_lat, max_lon, max_lat
+    title: Optional title for the map
+    pin_coords: Optional tuple (lat, lon) to draw a pin
     Returns a BytesIO buffer with the composite image.
     """
     try:
@@ -204,6 +206,9 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         # 2. Create figure
         fig, ax = plt.subplots(figsize=(10, 10), dpi=100)
         ax.imshow(img, extent=[0, 1, 0, 1])  # Normalize to 0-1 for overlay
+        
+        if title:
+            ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
         
         # 3. Extract and normalize polygon coordinates
         from shapely.geometry import shape as shapely_shape
@@ -258,6 +263,16 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
             xs, ys = zip(*ring)
             ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle=linestyle, label=label)
         
+        # 4.5 Draw Pin
+        if pin_coords and region_bbox:
+            p_lat, p_lon = pin_coords
+            # Normalize pin coordinates to 0-1 range
+            px = (p_lon - minx) / width
+            py = (p_lat - miny) / height
+            
+            # Draw a red pin (marker)
+            ax.plot(px, py, marker='v', color='red', markersize=12, markeredgecolor='white', label='Ponto de Consulta')
+
         # 5. Styling
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
