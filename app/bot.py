@@ -16,6 +16,10 @@ WAITING_FEEDBACK = 1
 WAITING_WEATHER_LOCATION = 2
 WAITING_BROADCAST_MESSAGE = 3
 WAITING_ENV_LOCATION = 4
+WAITING_LOCATION_MENU = 5
+WAITING_LOCATION_NAME = 6
+WAITING_LOCATION_COORDS = 7
+WAITING_LOCATION_DELETE = 8
 
 
 def is_admin(chat_id):
@@ -28,16 +32,16 @@ def get_keyboard(chat_id):
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
             [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
             [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
-            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("🌿 Análise Ambiental")],
-            [KeyboardButton("💬 Feedback")]
-
+            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("💬 Feedback")]
         ]
     else:
 
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
             [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
             [KeyboardButton("💬 Feedback")]
         ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -433,23 +437,42 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         # 1. Determine Lat/Lon
         lat, lon, loc_name = None, None, query
         
-        # Priority 1: Google Maps URL
-        url_coords = extract_coords_from_url(query)
-        if url_coords:
-            lat, lon = url_coords
-            loc_name = f"Coordenadas do Link ({lat:.4f}, {lon:.4f})"
-        else:
-            # Priority 2: Manual Coordinates (Decimal or DMS)
+        # Priority 1: Check for numerical shortcut
+        if query.isdigit():
+            session = SessionLocal()
+            try:
+                from app.models import FavoriteLocation
+                idx = int(query) - 1
+                locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+                if 0 <= idx < len(locs):
+                    lat, lon = locs[idx].latitude, locs[idx].longitude
+                    loc_name = locs[idx].name
+                else:
+                    await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada. Você tem {len(locs)} locais cadastrados.")
+                    return WAITING_WEATHER_LOCATION
+            finally:
+                session.close()
+
+        # Priority 2: Google Maps URL
+        if lat is None:
+            url_coords = extract_coords_from_url(query)
+            if url_coords:
+                lat, lon = url_coords
+                loc_name = f"Coordenadas do Link ({lat:.4f}, {lon:.4f})"
+        
+        # Priority 3: Manual Coordinates (Decimal or DMS)
+        if lat is None:
             coords = parse_coordinates(query)
             if coords:
                 lat, lon = coords
                 loc_name = f"Coordenadas: {lat:.4f}, {lon:.4f}"
-            else:
-                # Priority 3: Geocoding (Municipality Name)
-                loc = geocode_location(query)
-                if loc:
-                    lat, lon = loc['lat'], loc['lon']
-                    loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
+        
+        # Priority 4: Geocoding (Municipality Name)
+        if lat is None:
+            loc = geocode_location(query)
+            if loc:
+                lat, lon = loc['lat'], loc['lon']
+                loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
         
         if lat is None or lon is None:
             await status_msg.edit_text("⚠️ Não consegui interpretar o local. Tente o nome da cidade (ex: Bebedouro), coordenadas decimais ou um link do Google Maps.")
@@ -542,15 +565,29 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
     status_msg = await update.message.reply_text("🛰️ Processando imagens de satélite... Aguarde.")
     
     try:
-        # 1. Determine Lat/Lon
-        lat, lon = None, None
-        url_coords = extract_coords_from_url(query)
-        if url_coords:
-            lat, lon = url_coords
-        else:
-            coords = parse_coordinates(query)
-            if coords:
-                lat, lon = coords
+        # Priority 1: Check for numerical shortcut
+        if query.isdigit():
+            session = SessionLocal()
+            try:
+                from app.models import FavoriteLocation
+                idx = int(query) - 1
+                locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+                if 0 <= idx < len(locs):
+                    lat, lon = locs[idx].latitude, locs[idx].longitude
+                else:
+                    await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada.")
+                    return WAITING_ENV_LOCATION
+            finally:
+                session.close()
+
+        if lat is None:
+            url_coords = extract_coords_from_url(query)
+            if url_coords:
+                lat, lon = url_coords
+            else:
+                coords = parse_coordinates(query)
+                if coords:
+                    lat, lon = coords
         
         if lat is None or lon is None:
             await status_msg.edit_text("⚠️ Não consegui interpretar as coordenadas. Envie coordenadas decimais ou um link do Google Maps.")
@@ -733,8 +770,6 @@ async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
     """Handle keyboard button presses"""
     text = update.message.text
     
@@ -746,10 +781,8 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         await start_env_analysis(update, context)
         return WAITING_ENV_LOCATION
     elif text == "🔮 Mercado Futuro":
-
         await future_market(update, context)
     elif text == "📥 Importar Histórico":
-
         if is_admin(update.effective_chat.id):
             await sync_history(update, context)
         else:
@@ -761,11 +794,219 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         if is_admin(update.effective_chat.id):
             await start_broadcast(update, context)
             return WAITING_BROADCAST_MESSAGE
-
         else:
             await update.message.reply_text("❌ Comando apenas para administradores.")
+    elif text == "📌 Minhas Propriedades":
+        await start_locations(update, context)
+        return WAITING_LOCATION_MENU
+    elif text == "💬 Feedback":
+        await start_feedback(update, context)
+        return WAITING_FEEDBACK
+    elif text == "🌧️ Precipitação":
+        await start_weather(update, context)
+        return WAITING_WEATHER_LOCATION
     
     return ConversationHandler.END
+
+# Favorite Locations Management
+def get_location_keyboard():
+    keyboard = [
+        [KeyboardButton("📋 Listar Minhas Propriedades")],
+        [KeyboardButton("➕ Adicionar Nova"), KeyboardButton("❌ Excluir Propriedade")],
+        [KeyboardButton("🔙 Voltar ao Menu Principal")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+async def start_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text(
+        "📌 *Gerenciamento de Propriedades*\n\n"
+        "Aqui você pode cadastrar seus locais favoritos para consultas rápidas.",
+        parse_mode='Markdown',
+        reply_markup=get_location_keyboard()
+    )
+    return WAITING_LOCATION_MENU
+
+async def list_user_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        
+        if not locs:
+            await update.message.reply_text("Você ainda não tem propriedades cadastradas. Use 'Adicionar Nova'.")
+            return WAITING_LOCATION_MENU
+            
+        msg = "📋 *Suas Propriedades Cadastradas:*\n\n"
+        for i, loc in enumerate(locs, 1):
+            msg += f"*{i}. {loc.name}*\n"
+            msg += f"📍 `{loc.latitude:.4f}, {loc.longitude:.4f}`\n\n"
+        
+        msg += "_Ao consultar o clima ou análise ambiental, você pode apenas digitar o número correspondente._"
+        await update.message.reply_text(msg, parse_mode='Markdown')
+    finally:
+        session.close()
+    return WAITING_LOCATION_MENU
+
+async def start_add_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "➕ *Adicionar Nova Propriedade*\n\n"
+        "Qual o nome da propriedade/local?\n"
+        "(Ex: Fazenda Santa Maria)\n\n"
+        "Envie /cancelar para sair.",
+        parse_mode='Markdown',
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancelar")]], resize_keyboard=True)
+    )
+    return WAITING_LOCATION_NAME
+
+async def receive_location_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text
+    if name == "❌ Cancelar":
+        await update.message.reply_text("Cancelado.", reply_markup=get_location_keyboard())
+        return WAITING_LOCATION_MENU
+    context.user_data['temp_loc_name'] = name
+    await update.message.reply_text(
+        f"Ótimo! Agora envie as coordenadas ou o link do Google Maps para *{name}*.",
+        parse_mode='Markdown'
+    )
+    return WAITING_LOCATION_COORDS
+
+async def receive_location_coords(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    query = update.message.text
+    if query == "❌ Cancelar":
+        await update.message.reply_text("Cancelado.", reply_markup=get_location_keyboard())
+        return WAITING_LOCATION_MENU
+        
+    lat, lon = None, None
+    url_coords = extract_coords_from_url(query)
+    if url_coords:
+        lat, lon = url_coords
+    else:
+        coords = parse_coordinates(query)
+        if coords:
+            lat, lon = coords
+            
+    if lat is None or lon is None:
+        await update.message.reply_text("⚠️ Não consegui entender as coordenadas. Tente enviar no formato -20.45, -54.61 ou um link do Maps.")
+        return WAITING_LOCATION_COORDS
+        
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        new_loc = FavoriteLocation(
+            user_id=chat_id,
+            name=context.user_data.get('temp_loc_name', 'Sem nome'),
+            latitude=lat,
+            longitude=lon
+        )
+        session.add(new_loc)
+        session.commit()
+        await update.message.reply_text(
+            f"✅ *{new_loc.name}* cadastrada com sucesso!",
+            parse_mode='Markdown',
+            reply_markup=get_location_keyboard()
+        )
+    except Exception as e:
+        print(f"Error adding location: {e}")
+        await update.message.reply_text("❌ Erro ao salvar propriedade no banco de dados.")
+    finally:
+        session.close()
+    return WAITING_LOCATION_MENU
+
+async def start_delete_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if not locs:
+            await update.message.reply_text("Você não tem nada para excluir.")
+            return WAITING_LOCATION_MENU
+            
+        msg = "❌ *Excluir Propriedade*\n\n"
+        for i, loc in enumerate(locs, 1):
+            msg += f"{i}. {loc.name}\n"
+        msg += "\n*Digite o número* da propriedade que deseja excluir ou clique em Cancelar."
+        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Cancelar")]], resize_keyboard=True))
+    finally:
+        session.close()
+    return WAITING_LOCATION_DELETE
+
+async def confirm_delete_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    text = update.message.text
+    if text == "❌ Cancelar":
+        await update.message.reply_text("Exclusão cancelada.", reply_markup=get_location_keyboard())
+        return WAITING_LOCATION_MENU
+        
+    if not text.isdigit():
+        await update.message.reply_text("Por favor, digite apenas o número.")
+        return WAITING_LOCATION_DELETE
+        
+    idx = int(text) - 1
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if 0 <= idx < len(locs):
+            loc_to_del = locs[idx]
+            name = loc_to_del.name
+            session.delete(loc_to_del)
+            session.commit()
+            await update.message.reply_text(f"✅ Propriedade *{name}* excluída.", parse_mode='Markdown', reply_markup=get_location_keyboard())
+        else:
+            await update.message.reply_text("⚠️ Número inválido.")
+            return WAITING_LOCATION_DELETE
+    finally:
+        session.close()
+    return WAITING_LOCATION_MENU
+
+async def cancel_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    await update.message.reply_text("Voltando ao menu principal...", reply_markup=get_keyboard(chat_id))
+    return ConversationHandler.END
+
+async def handle_location_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "📋 Listar Minhas Propriedades":
+        return await list_user_locations(update, context)
+    elif text == "➕ Adicionar Nova":
+        return await start_add_location(update, context)
+    elif text == "❌ Excluir Propriedade":
+        return await start_delete_location(update, context)
+    elif text == "🔙 Voltar ao Menu Principal":
+        return await cancel_locations(update, context)
+    return WAITING_LOCATION_MENU
+
+async def list_all_locations_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin only: List all locations from all users"""
+    chat_id = str(update.effective_chat.id)
+    if not is_admin(chat_id):
+        return
+        
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation, User
+        # Join with User to show username
+        data = session.query(FavoriteLocation, User).join(User, FavoriteLocation.user_id == User.chat_id).all()
+        
+        if not data:
+            await update.message.reply_text("Nenhuma localização cadastrada no sistema.")
+            return
+            
+        msg = "🌎 *Todas as Localidades do Sistema (Admin)*\n\n"
+        for loc, user in data:
+            user_info = f"@{user.username}" if user.username else f"ID:{user.chat_id}"
+            msg += f"👤 {user_info}\n🏠 *{loc.name}*\n📍 `{loc.latitude:.4f}, {loc.longitude:.4f}`\n\n"
+            
+        await update.message.reply_text(msg, parse_mode='Markdown')
+    except Exception as e:
+        print(f"Error in admin list locations: {e}")
+        await update.message.reply_text("❌ Erro ao buscar localidades.")
+    finally:
+        session.close()
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""

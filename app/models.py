@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine, text
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine, text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import pandas as pd
 from app.config import Config
@@ -12,6 +12,17 @@ class User(Base):
     
     chat_id = Column(String, primary_key=True)
     username = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    locations = relationship("FavoriteLocation", back_ref="user", cascade="all, delete-orphan")
+
+class FavoriteLocation(Base):
+    __tablename__ = 'favorite_locations'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, ForeignKey('users.chat_id'))
+    name = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class PriceHistory(Base):
@@ -44,7 +55,7 @@ def init_db():
             # Depending on SQLAlchemy version, commit might be needed
             if hasattr(conn, 'commit'):
                 conn.commit()
-            print("✅ Database migration: users.chat_id is now BIGINT")
+            print("✅ Database migration components verified")
         except Exception as e:
             # Table/column might not exist yet or already be BIGINT
             print(f"ℹ️ Migration notice: {e}")
