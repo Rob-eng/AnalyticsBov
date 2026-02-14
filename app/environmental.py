@@ -161,7 +161,7 @@ def get_ndvi_analysis(geometry_geojson):
             "poly_id": "GEE_Sentinel2", # Placeholder
             "ndvi_img": img_bytes,      # Now returns BytesIO object
             "stats": result['stats'],
-            "dt": int(time.time()),     # Current time or image time
+            "dt": int(result.get('timestamp', time.time() * 1000) / 1000), 
             "date_str": result['date'], # formatted date
             "cloud_coverage": result['cloud_cover'],
             "region_bbox": result.get('region_bbox')

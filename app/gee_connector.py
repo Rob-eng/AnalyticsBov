@@ -94,12 +94,14 @@ def get_ndvi_image(geometry_geojson):
             # Fallback for debugging
             print(f"Error: Image has no time_start. Keys: {image.propertyNames().getInfo()}")
             return None
-        date_str = datetime.fromtimestamp(date_timestamp / 1000).strftime('%Y-%m-%d')
+        # Use UTC to avoid timezone shifts (e.g. showing tomorrow's date)
+        date_str = datetime.utcfromtimestamp(date_timestamp / 1000).strftime('%Y-%m-%d')
+        print(f"Image Date (UTC): {date_str} (Timestamp: {date_timestamp})")
         
         # 2. Calculate NDVI: (B8 - B4) / (B8 + B4)
         ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
         
-        # 3. Calculate Stats (Mean NDVI within geometry)
+        # 3. Calculate Stats
         stats = ndvi.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geom,
@@ -148,15 +150,14 @@ def get_ndvi_image(geometry_geojson):
         }
         
         url = ndvi.getThumbURL(vis_params)
-        
         return {
             "poly_id": "GEE_Sentinel2", 
-            "ndvi_img": url, # Return URL first, environmental.py handles download
+            "ndvi_img": url, # This will be the URL, not BytesIO object as per original function signature
             "image_url": url,
             "stats": {'mean': ndvi_mean},
             "date": date_str,
+            "timestamp": date_timestamp, # Return raw millis
             "cloud_cover": cloud_max,
-            # Return the region used so we can normalize correctly in plotting
             "region_bbox": {
                 "min_lon": center_lon - half_span,
                 "min_lat": center_lat - half_span,
