@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import os
 from pathlib import Path
+from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.cm import ScalarMappable
 
 def query_local_car_database(lat, lon):
     """
@@ -261,6 +263,33 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         ax.set_ylim(0, 1)
         ax.axis('off')
         ax.legend(loc='upper right', fontsize=10, framealpha=0.8)
+            
+        # Add NDVI Colorbar
+        # Reflect the GEE palette: Red (0.0) -> Yellow (0.4) -> Green (0.8) -> Green (1.0)
+        # We clamp at 0.8 in GEE, but usually show 0-1 scale.
+        # User asked for -1 to 1. But showing -1 (Red) to 1 (Green) is okay if we map correctly.
+        # GEE: 0->Red, 0.8->Green.
+        # Let's create a custom cmap that roughly matches:
+        # -1.0 -> Red
+        # 0.0 -> Red
+        # 0.4 -> Yellow
+        # 0.8 -> Green
+        # 1.0 -> Dark Green
+        
+        # Simpler: 0.0 to 1.0
+        colors = ["red", "yellow", "green"]
+        cmap = LinearSegmentedColormap.from_list("ndvi_custom", colors)
+        norm = Normalize(vmin=0.0, vmax=0.8) # Matches GEE visualization range
+        
+        # Create a dummy ScalarMappable
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        
+        cbar = plt.colorbar(sm, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+        cbar.set_label('NDVI (Estimado)')
+        
+        # Remove axes
+        ax.set_axis_off()
         
         # 6. Save to buffer
         buf = BytesIO()
