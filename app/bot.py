@@ -596,13 +596,15 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # 5. Generate composite image with CAR perimeter overlay
         img_url = analysis['ndvi_img']
-        composite_img = generate_environmental_image(img_url, geometry, is_real_car)
+        # 4. Generate Image
+        region_bbox = analysis.get('region_bbox')
+        image_buffer = generate_environmental_image(analysis['ndvi_img'], geometry, is_real_car, region_bbox=region_bbox)
         
-        if composite_img:
+        if image_buffer:
             # Send processed image with overlay
             await context.bot.send_photo(
                 chat_id=chat_id,
-                photo=composite_img,
+                photo=image_buffer,
                 caption=msg,
                 parse_mode='Markdown',
                 reply_markup=get_keyboard(chat_id)

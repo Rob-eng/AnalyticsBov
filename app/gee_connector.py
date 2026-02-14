@@ -110,23 +110,59 @@ def get_ndvi_image(geometry_geojson):
         ndvi_mean = stats.get('NDVI')
         
         # 4. Generate Thumbnail URL
-        # Visualization params
+        # Calculate a square region to avoid distortion when plotting in a square box
+        # Get bounds of the buffered geometry
+        bounds_poly = geom.buffer(100).bounds()
+        coords = bounds_poly.coordinates().get(0).getInfo()
+        # coords is list of [x, y]
+        lons = [c[0] for c in coords]
+        lats = [c[1] for c in coords]
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+        
+        center_lon = (min_lon + max_lon) / 2
+        center_lat = (min_lat + max_lat) / 2
+        
+        span_lon = max_lon - min_lon
+        span_lat = max_lat - min_lat
+        max_span = max(span_lon, span_lat)
+        
+        # Create square bounds (with slight padding)
+        half_span = max_span / 2 * 1.1 
+        
+        square_region = ee.Geometry.Polygon([[
+            [center_lon - half_span, center_lat - half_span],
+            [center_lon + half_span, center_lat - half_span],
+            [center_lon + half_span, center_lat + half_span],
+            [center_lon - half_span, center_lat + half_span],
+            [center_lon - half_span, center_lat - half_span]
+        ]])
+
         vis_params = {
             'min': 0.0,
             'max': 0.8,
             'palette': ['red', 'yellow', 'green'],
             'dimensions': 512,
-            'region': geom.buffer(100).bounds().getInfo(), # Buffer context
+            'region': square_region.getInfo(), 
             'format': 'png'
         }
         
         url = ndvi.getThumbURL(vis_params)
         
         return {
-            'image_url': url,
-            'stats': {'mean': ndvi_mean},
-            'date': date_str,
-            'cloud_cover': cloud_max
+            "poly_id": "GEE_Sentinel2", 
+            "ndvi_img": url, # Return URL first, environmental.py handles download
+            "image_url": url,
+            "stats": {'mean': ndvi_mean},
+            "date": date_str,
+            "cloud_cover": cloud_max,
+            # Return the region used so we can normalize correctly in plotting
+            "region_bbox": {
+                "min_lon": center_lon - half_span,
+                "min_lat": center_lat - half_span,
+                "max_lon": center_lon + half_span,
+                "max_lat": center_lat + half_span
+            }
         }
         
     except Exception as e:

@@ -163,7 +163,8 @@ def get_ndvi_analysis(geometry_geojson):
             "stats": result['stats'],
             "dt": int(time.time()),     # Current time or image time
             "date_str": result['date'], # formatted date
-            "cloud_coverage": result['cloud_cover']
+            "cloud_coverage": result['cloud_cover'],
+            "region_bbox": result.get('region_bbox')
         }
         
     except Exception as e:
@@ -180,10 +181,11 @@ def get_land_use_mapbiomas(lat, lon):
     # For now we return a placeholder or use a simpler logic
     return "Não identificado (MapBiomas offline)"
 
-def generate_environmental_image(ndvi_source, geometry, is_real_car=False):
+def generate_environmental_image(ndvi_source, geometry, is_real_car=False, region_bbox=None):
     """
     Visualizes NDVI image and overlays CAR perimeter.
     ndvi_source: URL string or BytesIO object
+    region_bbox: Optional dict with min_lon, min_lat, max_lon, max_lat
     Returns a BytesIO buffer with the composite image.
     """
     try:
@@ -207,8 +209,19 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False):
         
         poly = shapely_shape(geometry)
         
+        poly = shapely_shape(geometry)
+        
         # Get bounds
-        minx, miny, maxx, maxy = poly.bounds
+        if region_bbox:
+            # Use the square region bounds to align with the image
+            minx = region_bbox['min_lon']
+            miny = region_bbox['min_lat']
+            maxx = region_bbox['max_lon']
+            maxy = region_bbox['max_lat']
+        else:
+            # Fallback to polygon bounds (might distort if image is square)
+            minx, miny, maxx, maxy = poly.bounds
+            
         width = maxx - minx
         height = maxy - miny
         
