@@ -1,5 +1,4 @@
 affine==2.4.0
-altgraph @ file:///AppleInternal/Library/BuildRoots/4~CDlvugAeMYaHcTWIELyAQ2joHAecmlI0GAlKPsw/Library/Caches/com.apple.xbs/Sources/python3/altgraph-0.17.2-py2.py3-none-any.whl
 anyio==4.12.1
 APScheduler==3.11.2
 attrs==25.3.0
@@ -23,7 +22,6 @@ Flask==3.1.2
 Flask-SQLAlchemy==3.1.1
 folium==0.20.0
 fonttools==4.60.2
-future @ file:///AppleInternal/Library/BuildRoots/4~CDlvugAeMYaHcTWIELyAQ2joHAecmlI0GAlKPsw/Library/Caches/com.apple.xbs/Sources/python3/future-0.18.2-py3-none-any.whl
 GeoAlchemy2==0.17.1
 geopandas==1.0.1
 google-api-core==2.29.0
@@ -50,7 +48,6 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 kiwisolver==1.4.7
 lxml==6.0.1
-macholib @ file:///AppleInternal/Library/BuildRoots/4~CDlvugAeMYaHcTWIELyAQ2joHAecmlI0GAlKPsw/Library/Caches/com.apple.xbs/Sources/python3/macholib-1.15.2-py2.py3-none-any.whl
 MarkupSafe==3.0.2
 matplotlib==3.9.4
 mccabe==0.7.0
@@ -90,7 +87,6 @@ requests-oauthlib==2.0.0
 rsa==4.9.1
 scipy==1.13.1
 shapely==2.0.7
-six @ file:///AppleInternal/Library/BuildRoots/4~CDlvugAeMYaHcTWIELyAQ2joHAecmlI0GAlKPsw/Library/Caches/com.apple.xbs/Sources/python3/six-1.15.0-py2.py3-none-any.whl
 soupsieve==2.8.3
 SQLAlchemy==2.0.43
 tomli==2.2.1

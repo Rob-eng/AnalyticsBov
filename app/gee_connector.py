@@ -9,21 +9,35 @@ def initialize_gee(key_file="service_account.json"):
     key_file: Path to the JSON key file.
     """
     try:
-        # Load credentials from file or env
-        if not os.path.exists(key_file):
-            print(f"GEE Credentials file not found: {key_file}")
-            return False
-            
-        # Use the high-level authentication from earthengine-api
-        # For service accounts, we can use ServiceAccountCredentials
-        # But verify valid JSON first
-        with open(key_file) as f:
-            creds = json.load(f)
-            
-        credentials = ee.ServiceAccountCredentials(creds['client_email'], key_file)
-        ee.Initialize(credentials)
-        print("GEE Initialized successfully.")
-        return True
+        # 1. Try Loading from Environment Variable (Production)
+        env_creds = os.environ.get('GEE_CREDENTIALS_JSON')
+        if env_creds:
+            try:
+                creds = json.loads(env_creds)
+                # Ensure private_key is present
+                if 'private_key' not in creds:
+                    print("Error: GEE_CREDENTIALS_JSON matches JSON format but missing 'private_key'")
+                    return False
+                    
+                credentials = ee.ServiceAccountCredentials(creds['client_email'], key_data=creds['private_key'])
+                ee.Initialize(credentials)
+                print("GEE Initialized via Env Var.")
+                return True
+            except Exception as ex:
+                print(f"Error loading env creds: {ex}")
+                # Don't return False yet, try file
+        
+        # 2. Try Loading from File (Development)
+        if os.path.exists(key_file):
+            with open(key_file) as f:
+                creds = json.load(f)
+            credentials = ee.ServiceAccountCredentials(creds['client_email'], key_file)
+            ee.Initialize(credentials)
+            print("GEE Initialized via File.")
+            return True
+        
+        print(f"GEE Credentials not found (Env Var GEE_CREDENTIALS_JSON or file {key_file})")
+        return False
 
     except Exception as e:
         print(f"GEE Initialization Error: {e}")
