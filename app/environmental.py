@@ -128,6 +128,27 @@ def fetch_car_perimeter(lat, lon):
     print("⚠ Using estimated 1km² area")
     return (bbox_polygon, 'FALLBACK')
 
+def cleanup_old_polygons(api_key):
+    """
+    Deletes old polygons to free up quota.
+    """
+    try:
+        print("Cleaning up old polygons...")
+        list_url = f"http://api.agromonitoring.com/agro/1.0/polygons?appid={api_key}"
+        res = requests.get(list_url, timeout=10)
+        
+        if res.status_code == 200:
+            polygons = res.json()
+            # Sort by creation date (older first)
+            # Assuming 'created_at' or simple FIFO
+            # We'll just delete the oldest 5
+            for poly in polygons[:5]:
+                p_id = poly['id']
+                requests.delete(f"http://api.agromonitoring.com/agro/1.0/polygons/{p_id}?appid={api_key}", timeout=5)
+                print(f"Deleted old polygon: {p_id}")
+    except Exception as e:
+        print(f"Cleanup error: {e}")
+
 def get_ndvi_analysis(geometry_geojson):
     """
     Registers polygon in Agromonitoring and gets latest NDVI.
@@ -149,9 +170,29 @@ def get_ndvi_analysis(geometry_geojson):
     
     try:
         res = requests.post(poly_url, json=poly_data, timeout=10)
+        
+        # Handle Quota Limit (413 or sometimes 422)
+        if res.status_code == 413 or "polygons anymore" in res.text:
+            print("Quota limit reached. Cleaning up...")
+            cleanup_old_polygons(api_key)
+            # Retry
+            res = requests.post(poly_url, json=poly_data, timeout=10)
+            
+        # Handle Complexity Limit (Simplify and Retry)
+        if res.status_code != 200 and res.status_code != 201:
+             print(f"Agro Poly Error (First Try): {res.text}")
+             # Try simplifying
+             from shapely.geometry import shape, mapping
+             s_poly = shape(geometry_geojson).simplify(0.0001, preserve_topology=True)
+             poly_data['geo_json']['geometry'] = mapping(s_poly)
+             
+             print("Retrying with simplified geometry...")
+             res = requests.post(poly_url, json=poly_data, timeout=10)
+
         if res.status_code not in [201, 200]:
-            print(f"Agro Poly Error: {res.text}")
+            print(f"Agro Poly Error (Final): {res.text}")
             return None
+            
         poly_id = res.json()["id"]
         
         # 2. Get historical satellite images
