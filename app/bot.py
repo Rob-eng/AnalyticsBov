@@ -562,13 +562,10 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         # 3. Get NDVI Analysis
         analysis = get_ndvi_analysis(geometry)
         if not analysis:
-            # Check if it was a quota issue (we can't easily pass granular error from get_ndvi_analysis without refactoring return type, 
-            # but we can infer or simpler: just say "Erro ou Limite de Cota")
-            # Better: Update get_ndvi_analysis to return an error code/message on failure
             await status_msg.edit_text(
-                "⚠️ *Limite da API Atingido ou Erro*\n\n"
-                "A chave da API Agromonitoring atingiu o limite de área ou requisições.\n"
-                "Tente novamente mais tarde ou verifique sua conta no Agromonitoring.",
+                "⚠️ *Não foi possível realizar a análise*\n\n"
+                "Verifique se o local selecionado tem cobertura recente de satélite (sem nuvens) "
+                "ou tente novamente mais tarde.",
                 parse_mode='Markdown'
             )
             return WAITING_ENV_LOCATION
