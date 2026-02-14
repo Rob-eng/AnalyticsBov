@@ -13,7 +13,7 @@ class User(Base):
     chat_id = Column(String, primary_key=True)
     username = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
-    locations = relationship("FavoriteLocation", back_ref="user", cascade="all, delete-orphan")
+    locations = relationship("FavoriteLocation", backref="user", cascade="all, delete-orphan")
 
 class FavoriteLocation(Base):
     __tablename__ = 'favorite_locations'
