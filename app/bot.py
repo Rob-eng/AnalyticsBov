@@ -495,34 +495,55 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             return WAITING_WEATHER_LOCATION
 
         # 3. Format Message
-        # Escape potential markdown chars in loc_name
-        safe_loc_name = loc_name.replace('*','').replace('_','').replace('`','')
+        precip_val = data.get('last_24h', 0)
+        msg = f"🌧️ *Dados de Precipitação*\n"
+        msg += f"📍 *Local:* {loc_name}\n"
+        msg += f"🕒 *Últimas 24h:* {precip_val:.1f} mm\n\n"
+        msg += f"📅 *Histórico Recente (Últimos 7 dias):*\n"
         
-        last_24h = data.get('last_24h') or 0.0
+        # History is already reversed in weather.py (latest first)
+        for date, val in data.get('daily_history', []):
+            d_fmt = datetime.strptime(date, '%Y-%m-%d').strftime('%d/%m')
+            msg += f"• {d_fmt}: {val:.1f} mm\n"
         
-        msg = f"🌧️ *Precipitação: {safe_loc_name}*\n\n"
-        msg += f"🕒 *Últimas 24h:* {last_24h:.1f} mm\n\n"
-        msg += "*Histórico (7 dias):*\n"
-        
-        for date_str, val in data.get('daily_history', []):
-            try:
-                # Format date: 2026-02-12 -> 12/02
-                dt = datetime.strptime(date_str, '%Y-%m-%d')
-                date_fmt = dt.strftime('%d/%m')
-                safe_val = val or 0.0
-                msg += f"📅 {date_fmt}: {safe_val:.1f} mm\n"
-            except Exception as de:
-                print(f"Error formatting date {date_str}: {de}")
-            
         msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
         
-        # 4. Get Static Map
+        # 4. Get Regional Heatmap (GEE)
+        status_msg = await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
+        from app.gee_connector import get_precipitation_heatmap
+        heatmap = get_precipitation_heatmap(lat, lon)
+        
+        # 4.5. Get Static Map
         prop_name = context.user_data.pop('prop_name', None)
         from app.weather import generate_weather_map_with_title
         map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
         
-        # 5. Send Photo
+        # 5. Send Photos
         try:
+            # Send Regional Heatmap first if available
+            if heatmap:
+                from app.environmental import generate_environmental_image
+                # We reuse generate_environmental_image to overlay the pin on the heatmap
+                # We treat the heatmap as a "square" image
+                heatmap_buffer = generate_environmental_image(
+                    heatmap['image_url'],
+                    {"type": "Polygon", "coordinates": [[
+                        [lon-0.01, lat-0.01], [lon+0.01, lat-0.01], 
+                        [lon+0.01, lat+0.01], [lon-0.01, lat+0.01], [lon-0.01, lat-0.01]
+                    ]]}, # Dummy tiny polygon just to provide a center
+                    is_real_car=False,
+                    region_bbox=heatmap['region_bbox'],
+                    title="🔥 Variação Regional de Chuva (30 dias)",
+                    pin_coords=(lat, lon)
+                )
+                if heatmap_buffer:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=heatmap_buffer,
+                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados na região."
+                    )
+            
+            # Send Local Property Map
             await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=map_image if map_image else get_static_map_url(lat, lon),

@@ -173,8 +173,9 @@ def get_precipitation_data(lat, lon):
         daily_dates = data["daily"]["time"]
         daily_sums = data["daily"]["precipitation_sum"]
         
-        # We want the last 7 completed days + today
+        # We want the last 7 completed days + today, latest first
         daily_history = list(zip(daily_dates, daily_sums))
+        daily_history.reverse()
         
         return {
             "last_24h": last_24h_sum,

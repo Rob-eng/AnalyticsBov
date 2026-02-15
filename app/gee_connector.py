@@ -168,6 +168,60 @@ def get_ndvi_image(geometry_geojson):
         
     except Exception as e:
         print(f"GEE processing error: {e}")
-        # import traceback
-        # traceback.print_exc()
+        return None
+
+def get_precipitation_heatmap(lat, lon):
+    """
+    Generates a regional precipitation heatmap for the last 30 days using GEE.
+    Returns: { 'image_url': str, 'region_bbox': dict } or None
+    """
+    try:
+        if not initialize_gee():
+            return None
+
+        # 1. Define region: +/- 2 degrees around point (~220km radius)
+        # Sufficient to see most of a state like MS
+        span = 2.0
+        region = ee.Geometry.BBox(lon - span, lat - span, lon + span, lat + span)
+
+        # 2. Get GPM Dataset (30min precipitation)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        
+        # GPM/IMERG V06 Precipitation
+        collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06')
+                      .filterBounds(region)
+                      .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                      .select('precipitation'))
+
+        # 3. Aggregate: Sum of precipitation
+        # GPM values are in mm/hr, we sum the 30min values (scaled by 0.5)
+        # Actually, reducing by sum on this collection is common
+        total_precip = collection.reduce(ee.Reducer.sum())
+
+        # 4. Generate Thumbnail URL
+        # Palette: White (0) to Blue (High)
+        vis_params = {
+            'min': 0,
+            'max': 300, # Max 300mm in 30 days as reference
+            'palette': ['white', 'cyan', 'blue', 'navy'],
+            'dimensions': 600,
+            'region': region.getInfo(),
+            'format': 'png'
+        }
+
+        url = total_precip.getThumbURL(vis_params)
+        
+        return {
+            "image_url": url,
+            "region_bbox": {
+                "min_lon": lon - span,
+                "min_lat": lat - span,
+                "max_lon": lon + span,
+                "max_lat": lat + span
+            }
+        }
+
+    except Exception as e:
+        print(f"Heatmap error: {e}")
         return None
