@@ -542,6 +542,13 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                         photo=heatmap_buffer,
                         caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados na região."
                     )
+                else:
+                    # Fallback if processing failed
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=heatmap['image_url'],
+                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados."
+                    )
             
             # Send Local Property Map
             await context.bot.send_photo(

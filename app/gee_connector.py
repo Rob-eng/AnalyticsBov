@@ -190,11 +190,33 @@ def get_precipitation_heatmap(lat, lon):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
+        # 2. Get GPM Dataset (30min precipitation)
+        # Use UTC to avoid timezone issues with GEE
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=30)
+        
         # GPM/IMERG V06 LATE Precipitation (Low latency ~14h)
         collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06_LATE')
                       .filterBounds(region)
                       .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
                       .select('precipitation'))
+
+        # Check if we have data, if not try a slightly older range (GPM sometimes has gaps)
+        count = int(collection.size().getInfo())
+        if count == 0:
+            print("Heatmap collection empty, trying 60 day range...")
+            start_date = end_date - timedelta(days=60)
+            collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06_LATE')
+                          .filterBounds(region)
+                          .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                          .select('precipitation'))
+            count = int(collection.size().getInfo())
+            
+        if count == 0:
+            print("Heatmap collection still empty after fallback.")
+            return None
+
+        print(f"Heatmap collection has {count} images.")
 
         # 3. Aggregate: Sum of precipitation
         # Each image represents 30min, so real total = sum(mm/hr) * 0.5
