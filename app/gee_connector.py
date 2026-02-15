@@ -188,23 +188,22 @@ def get_precipitation_heatmap(lat, lon):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
-        # GPM/IMERG V06 Precipitation
-        collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06')
+        # GPM/IMERG V06 LATE Precipitation (Low latency ~14h)
+        collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06_LATE')
                       .filterBounds(region)
                       .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
                       .select('precipitation'))
 
         # 3. Aggregate: Sum of precipitation
-        # GPM values are in mm/hr, we sum the 30min values (scaled by 0.5)
-        # Actually, reducing by sum on this collection is common
-        total_precip = collection.reduce(ee.Reducer.sum())
+        # Each image represents 30min, so real total = sum(mm/hr) * 0.5
+        total_precip = collection.reduce(ee.Reducer.sum()).multiply(0.5)
 
         # 4. Generate Thumbnail URL
-        # Palette: White (0) to Blue (High)
+        # Palette: Light Gray (Dry) to Dark Blue/Purple (Wet)
         vis_params = {
-            'min': 0,
-            'max': 300, # Max 300mm in 30 days as reference
-            'palette': ['white', 'cyan', 'blue', 'navy'],
+            'min': 1,      # Min 1mm to show color
+            'max': 150,    # Max 150mm in 30 days for better sensitivity
+            'palette': ['#f0f0f0', '#99ccff', '#3366ff', '#000080', '#4b0082'],
             'dimensions': 600,
             'region': region.getInfo(),
             'format': 'png'
