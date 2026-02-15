@@ -210,11 +210,8 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         if title:
             ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
         
-        # 3. Extract and normalize polygon coordinates
+        # 3. Extract and normalize coordinates
         from shapely.geometry import shape as shapely_shape
-        from shapely.affinity import scale, translate
-        
-        poly = shapely_shape(geometry)
         
         poly = shapely_shape(geometry)
         
@@ -235,12 +232,18 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         # Normalize coordinates to 0-1 range
         coords = []
         if geometry['type'] == 'Polygon':
-            for ring in geometry['coordinates']:
-                normalized_ring = [
-                    ((x - minx) / width, (y - miny) / height)
-                    for x, y in ring
-                ]
-                coords.append(normalized_ring)
+            rings = geometry['coordinates']
+        elif geometry['type'] == 'MultiPolygon':
+            rings = [ring for poly_coords in geometry['coordinates'] for ring in poly_coords]
+        else:
+            rings = []
+
+        for ring in rings:
+            normalized_ring = [
+                ((x - minx) / width, (y - miny) / height)
+                for x, y in ring
+            ]
+            coords.append(normalized_ring)
         
         # 4. Draw polygon boundary
         if is_real_car == 'OFFICIAL' or is_real_car is True:
@@ -264,14 +267,15 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
             ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle=linestyle, label=label)
         
         # 4.5 Draw Pin
-        if pin_coords and region_bbox:
+        if pin_coords and all(c is not None for c in pin_coords) and region_bbox:
             p_lat, p_lon = pin_coords
             # Normalize pin coordinates to 0-1 range
             px = (p_lon - minx) / width
             py = (p_lat - miny) / height
             
-            # Draw a red pin (marker)
-            ax.plot(px, py, marker='v', color='red', markersize=12, markeredgecolor='white', label='Ponto de Consulta')
+            # Draw a red pin (marker) only if within 0-1 range (safety)
+            if 0 <= px <= 1 and 0 <= py <= 1:
+                ax.plot(px, py, marker='v', color='red', markersize=12, markeredgecolor='white', label='Ponto de Consulta')
 
         # 5. Styling
         ax.set_xlim(0, 1)

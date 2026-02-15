@@ -590,6 +590,9 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
     status_msg = await update.message.reply_text("🛰️ Processando imagens de satélite... Aguarde.")
     
     try:
+        # 1. Determine Lat/Lon
+        lat, lon = None, None
+        
         # Priority 1: Check for numerical shortcut
         if query.isdigit():
             session = SessionLocal()
