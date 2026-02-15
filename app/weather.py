@@ -195,6 +195,8 @@ def generate_weather_map_with_title(lat, lon, title=None):
     """
     Downloads static map and adds a title using Matplotlib.
     """
+    import matplotlib
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from io import BytesIO
     

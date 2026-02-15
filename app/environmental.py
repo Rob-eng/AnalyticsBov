@@ -5,6 +5,8 @@ from app.config import Config
 from shapely.geometry import shape, Point, mapping
 import geopandas as gpd
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from io import BytesIO
 import os
@@ -157,6 +159,11 @@ def get_ndvi_analysis(geometry_geojson):
             img_bytes = BytesIO(resp.content)
         except Exception as e:
             print(f"Download error: {e}")
+            # The following lines were part of the user's provided "Code Edit" but appear to be
+            # misplaced from a different function (e.g., get_precipitation_heatmap)
+            # and would cause a NameError if inserted here.
+            # url = total_precip.getThumbURL(vis_params)
+            # print(f"Heatmap URL generated: {url}")
             return None
             
         return {

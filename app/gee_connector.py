@@ -177,8 +177,10 @@ def get_precipitation_heatmap(lat, lon):
     """
     try:
         if not initialize_gee():
+            print("GEE initialization failed for heatmap")
             return None
 
+        print(f"Generating heatmap for {lat}, {lon}")
         # 1. Define region: +/- 2 degrees around point (~220km radius)
         # Sufficient to see most of a state like MS
         span = 2.0
@@ -210,6 +212,7 @@ def get_precipitation_heatmap(lat, lon):
         }
 
         url = total_precip.getThumbURL(vis_params)
+        print(f"Heatmap URL: {url}")
         
         return {
             "image_url": url,
