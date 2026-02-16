@@ -26,6 +26,14 @@ def is_admin(chat_id):
     """Check if user is admin"""
     return str(chat_id) == str(Config.ADMIN_CHAT_ID)
 
+def escape_markdown(text):
+    """Helper to escape specialized characters for Telegram MarkdownV1"""
+    if not text:
+        return ""
+    # Characters that need escaping: _ * [ `
+    # Note: Telegram MarkdownV1 is quite picky. 
+    return text.replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("`", "\\`").replace("@", "\\@")
+
 def get_keyboard(chat_id):
     """Get appropriate keyboard based on user role"""
     if is_admin(chat_id):
@@ -323,6 +331,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session = SessionLocal()
     try:
+        print(f"Admin {chat_id} is listing users...")
         users = session.query(User).all()
         
         if not users:
@@ -331,9 +340,16 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         user_list = "👥 *Lista de Usuários Cadastrados*\n\n"
         for idx, user in enumerate(users, 1):
-            username_display = f"@{user.username}" if user.username else "Sem username"
+            username_clean = escape_markdown(user.username) if user.username else "Sem username"
+            username_display = f"@{username_clean}" if user.username else "Sem username"
             created = user.created_at.strftime('%d/%m/%Y') if user.created_at else "N/A"
-            user_list += f"{idx}. {username_display}\n   ID: `{user.chat_id}`\n   Cadastro: {created}\n\n"
+            line = f"{idx}. {username_display}\n   ID: `{user.chat_id}`\n   Cadastro: {created}\n\n"
+            
+            # Check for Telegram message limit (4096)
+            if len(user_list) + len(line) > 3900:
+                user_list += "...\n*Lista truncada devido ao limite do Telegram*"
+                break
+            user_list += line
         
         user_list += f"*Total: {len(users)} usuários*"
         
@@ -851,16 +867,18 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         if is_admin(update.effective_chat.id):
             await sync_history(update, context)
         else:
-            await update.message.reply_text("❌ Comando apenas para administradores.")
+            await update.message.reply_text("❌ Comando reservado para administradores.")
     elif text == "👥 Lista de Usuários":
         if is_admin(update.effective_chat.id):
             await list_users(update, context)
+        else:
+            await update.message.reply_text("❌ Comando reservado para administradores.")
     elif text == "📢 Enviar Anúncio":
         if is_admin(update.effective_chat.id):
             await start_broadcast(update, context)
             return WAITING_BROADCAST_MESSAGE
         else:
-            await update.message.reply_text("❌ Comando apenas para administradores.")
+            await update.message.reply_text("❌ Comando reservado para administradores.")
     elif text == "📌 Minhas Propriedades":
         await start_locations(update, context)
         return WAITING_LOCATION_MENU
@@ -1063,8 +1081,14 @@ async def list_all_locations_admin(update: Update, context: ContextTypes.DEFAULT
             
         msg = "🌎 *Todas as Localidades do Sistema (Admin)*\n\n"
         for loc, user in data:
-            user_info = f"@{user.username}" if user.username else f"ID:{user.chat_id}"
-            msg += f"👤 {user_info}\n🏠 *{loc.name}*\n📍 `{loc.latitude:.4f}, {loc.longitude:.4f}`\n\n"
+            username_clean = escape_markdown(user.username) if user.username else None
+            user_info = f"@{username_clean}" if username_clean else f"ID:{user.chat_id}"
+            loc_name_clean = escape_markdown(loc.name)
+            msg += f"👤 {user_info}\n🏠 *{loc_name_clean}*\n📍 `{loc.latitude:.4f}, {loc.longitude:.4f}`\n\n"
+            
+            if len(msg) > 3900:
+                msg += "...\n*Lista truncada*"
+                break
             
         await update.message.reply_text(msg, parse_mode='Markdown')
     except Exception as e:
