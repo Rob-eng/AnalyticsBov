@@ -14,6 +14,47 @@ from pathlib import Path
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
 
+def get_state_from_coords(lat, lon):
+    """
+    Approximate bounding boxes for Brazilian states.
+    Returns the UF abbreviation in lowercase.
+    """
+    states_bbox = {
+        "ac": {"min_lat": -11.14, "max_lat": -7.11, "min_lon": -73.99, "max_lon": -66.62},
+        "al": {"min_lat": -10.50, "max_lat": -8.81, "min_lon": -38.22, "max_lon": -35.15},
+        "am": {"min_lat": -9.81, "max_lat": 2.24, "min_lon": -73.80, "max_lon": -56.09},
+        "ap": {"min_lat": -1.24, "max_lat": 4.43, "min_lon": -54.83, "max_lon": -49.88},
+        "ba": {"min_lat": -18.34, "max_lat": -8.53, "min_lon": -46.61, "max_lon": -37.33},
+        "ce": {"min_lat": -7.85, "max_lat": -2.78, "min_lon": -41.41, "max_lon": -37.24},
+        "df": {"min_lat": -16.05, "max_lat": -15.49, "min_lon": -48.28, "max_lon": -47.30},
+        "es": {"min_lat": -21.31, "max_lat": -17.89, "min_lon": -41.88, "max_lon": -39.67},
+        "go": {"min_lat": -19.49, "max_lat": -12.39, "min_lon": -53.24, "max_lon": -45.92},
+        "ma": {"min_lat": -10.26, "max_lat": -1.04, "min_lon": -48.75, "max_lon": -41.79},
+        "mg": {"min_lat": -22.92, "max_lat": -14.23, "min_lon": -51.01, "max_lon": -39.86},
+        "ms": {"min_lat": -24.06, "max_lat": -17.13, "min_lon": -58.16, "max_lon": -50.93},
+        "mt": {"min_lat": -18.04, "max_lat": -7.36, "min_lon": -61.63, "max_lon": -50.15},
+        "pa": {"min_lat": -9.84, "max_lat": 2.58, "min_lon": -58.89, "max_lon": -46.06},
+        "pb": {"min_lat": -8.30, "max_lat": -6.02, "min_lon": -38.77, "max_lon": -34.79},
+        "pe": {"min_lat": -9.48, "max_lat": -7.03, "min_lon": -41.35, "max_lon": -34.80},
+        "pi": {"min_lat": -10.92, "max_lat": -2.74, "min_lon": -45.99, "max_lon": -40.37},
+        "pr": {"min_lat": -26.71, "max_lat": -22.51, "min_lon": -54.62, "max_lon": -48.02},
+        "rj": {"min_lat": -23.36, "max_lat": -20.76, "min_lon": -44.88, "max_lon": -40.95},
+        "rn": {"min_lat": -6.98, "max_lat": -4.83, "min_lon": -38.58, "max_lon": -34.96},
+        "ro": {"min_lat": -13.69, "max_lat": -7.94, "min_lon": -66.81, "max_lon": -59.77},
+        "rr": {"min_lat": -1.58, "max_lat": 5.27, "min_lon": -64.81, "max_lon": -58.88},
+        "rs": {"min_lat": -33.75, "max_lat": -27.08, "min_lon": -57.64, "max_lon": -49.69},
+        "sc": {"min_lat": -29.35, "max_lat": -25.92, "min_lon": -53.83, "max_lon": -48.32},
+        "se": {"min_lat": -11.56, "max_lat": -9.51, "min_lon": -38.24, "max_lon": -36.36},
+        "sp": {"min_lat": -25.31, "max_lat": -19.77, "min_lon": -53.11, "max_lon": -44.16},
+        "to": {"min_lat": -13.46, "max_lat": -5.16, "min_lon": -50.74, "max_lon": -45.69}
+    }
+    
+    for uf, bbox in states_bbox.items():
+        if bbox['min_lat'] <= lat <= bbox['max_lat'] and bbox['min_lon'] <= lon <= bbox['max_lon']:
+            return uf
+            
+    return "ms" # Defaulting if no match found
+
 def query_local_car_database(lat, lon):
     """
     Query local GeoJSON file for CAR perimeter containing the point.
@@ -21,13 +62,22 @@ def query_local_car_database(lat, lon):
     Returns: (geometry, status_type) where status_type is 'OFFICIAL' or 'NEARBY'
     """
     try:
-        # Path to local GeoJSON file
         base_dir = Path(__file__).parent.parent
-        geojson_path = base_dir / "car_ms.geojson"
+        
+        # 1. Determine which state file to use
+        # We can iterate through available flags/files or use a simple heuristic
+        uf = get_state_from_coords(lat, lon)
+        geojson_path = base_dir / f"car_{uf}.geojson"
         
         if not geojson_path.exists():
+            # Fallback: check if any car_*.geojson contains the point
+            # (though this is slow, so we'll just check if we have the file)
             print(f"Local CAR database not found: {geojson_path}")
-            return (None, False)
+            # Try to find any car_*.geojson as fallback
+            available_files = list(base_dir.glob("car_*.geojson"))
+            if not available_files:
+                return (None, False)
+            geojson_path = available_files[0] # Just use the first one if we only have one
         
         # Load GeoJSON with GeoPandas
         gdf = gpd.read_file(geojson_path)
