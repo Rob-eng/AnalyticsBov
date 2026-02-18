@@ -128,8 +128,15 @@ else:
             if project_id and project_id not in current_user:
                 new_user = f"{current_user}.{project_id}"
             
-            # List of regions to try (Priority: SA -> US -> EU)
-            regions = ['sa-east-1', 'us-east-1', 'eu-central-1']
+            # List of regions to try (Priority: SA -> US East -> US West -> EU)
+            regions = [
+                'sa-east-1', 
+                'us-east-1', 
+                'us-west-1', 
+                'us-west-2', # Oregon (Likely location based on IP)
+                'eu-central-1',
+                'ap-southeast-1'
+            ]
             connected = False
             
             for region in regions:
