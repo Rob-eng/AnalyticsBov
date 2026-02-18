@@ -15,6 +15,7 @@ from app.models import init_db
 # Bot imports
 from app.bot import create_bot_application
 from app.scheduler import setup_scheduler
+import migrate_ms # Import master migration script
 
 def run_api_process():
     """Runs the FastAPI service in a separate process."""
@@ -92,6 +93,10 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     
     print("🚀 Main: Launching services...", flush=True)
+
+    # Database Migration (Optional via Env Var)
+    import migrate_ms
+    migrate_ms.run_migration()
 
     # Create processes
     api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")

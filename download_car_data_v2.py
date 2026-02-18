@@ -6,9 +6,7 @@ import time
 def download_car_data_paginated():
     base_url = "https://geoserver.car.gov.br/geoserver/sicar/ows"
     ufs = [
-        "ac", "al", "am", "ap", "ba", "ce", "df", "es", "go", "ma", 
-        "mg", "ms", "mt", "pa", "pb", "pe", "pi", "pr", "rj", "rn", 
-        "ro", "rr", "rs", "sc", "se", "sp", "to"
+        "ms" 
     ]
     
     output_dir = os.path.dirname(os.path.abspath(__file__))
