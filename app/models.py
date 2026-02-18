@@ -89,7 +89,7 @@ else:
             # addr_info returns list of (family, type, proto, canonname, sockaddr)
             # sockaddr is (address, port) for AF_INET
             ipv4 = addr_info[0][4][0]
-            print(f"DEBUG: Resolved {hostname} to {ipv4}")
+            print(f"DEBUG: Resolved {hostname} to {ipv4} (System DNS)")
             
             # Reconstruct URL with IPv4
             new_netloc = parsed.netloc.replace(hostname, ipv4)
@@ -97,32 +97,52 @@ else:
             
             car_engine = create_engine(car_db_url_ipv4, pool_pre_ping=True, connect_args={'connect_timeout': 10})
         else:
-             print(f"DEBUG: No IPv4 address found for {hostname}")
-             car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+            raise ValueError("No IPv4 from System DNS")
 
     except Exception as e:
-        print(f"DEBUG: Failed to force IPv4 resolution: {e}")
+        print(f"DEBUG: System DNS failed for IPv4: {e}")
         
-        # Fallback Strategy: Use Supabase Connection Pooler (Port 6543 supports IPv4)
-        if "supabase.co" in car_db_url and ":5432" in car_db_url:
-            print("DEBUG: Switching to Supabase Connection Pooler (Port 6543) for IPv4 support.")
-            car_db_url_pooler = car_db_url.replace(":5432", ":6543")
-            
-            # Disable prepared statements for transaction pooler compatibility (REQUIRED for Supabase port 6543)
-            # 'prepare_threshold': None disables server-side prepared statements in psycopg2
-            # Note: 'options' is NOT supported by Supabase Transaction Pooler, so we remove it.
-            car_engine = create_engine(
-                car_db_url_pooler, 
-                pool_pre_ping=True, 
-                connect_args={'connect_timeout': 10}
-            )
-            # Note: SQLAlchemy 1.4/2.0+ with psycopg2 might need different handling for prepare_threshold
-            # But usually it's passed in connect_args if using pure psycopg2, or handled by dialect.
-            # For robustness, we'll assume the URL change helps connectivity first. 
-            # Ideally we pass execution_options={"isolation_level": "AUTOCOMMIT"} if strictly needed but let's stick to port.
-        else:
-            # Standard fallback
-            car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+        # Fallback 1: Try to resolve using 'host' command (force IPv4)
+        # This bypasses python's socket.getaddrinfo if it's misbehaving
+        try:
+            import subprocess
+            import re
+            print(f"DEBUG: Attempting to resolve {hostname} via 'host -t A'...")
+            result = subprocess.check_output(["host", "-t", "A", hostname], timeout=5).decode()
+            # Output format: "domain has address X.X.X.X"
+            match = re.search(r'has address (\d+\.\d+\.\d+\.\d+)', result)
+            if match:
+                ipv4 = match.group(1)
+                print(f"DEBUG: Resolved {hostname} to {ipv4} (Command Line)")
+                new_netloc = parsed.netloc.replace(hostname, ipv4)
+                car_db_url_ipv4 = urlunparse(parsed._replace(netloc=new_netloc))
+                car_engine = create_engine(car_db_url_ipv4, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+            else:
+                 raise ValueError("No IPv4 found in host output")
+        except Exception as e2:
+             print(f"DEBUG: Command line resolution failed: {e2}")
+
+             # Fallback 2: Use Supabase Connection Pooler (Port 6543)
+             # But we MUST try to resolve IT to IPv4 too, effectively recursive?
+             # Or just hope the pooler port works with system DNS?
+             # The system DNS failed for the hostname. Switching port won't change the IP returned (IPv6).
+             # UNLESS we rely on Supabase's global pooler alias?
+             # Supabase doesn't expose a global IPv4 alias easily.
+             # However, failing all else, we assume the environment is IPv6-only or broken.
+             
+             if "supabase.co" in car_db_url and ":5432" in car_db_url:
+                print("DEBUG: Switching to Supabase Connection Pooler (Port 6543).")
+                car_db_url_pooler = car_db_url.replace(":5432", ":6543")
+                
+                # Disable prepared statements for transaction pooler
+                car_engine = create_engine(
+                    car_db_url_pooler, 
+                    pool_pre_ping=True, 
+                    connect_args={'connect_timeout': 10}
+                )
+             else:
+                # Standard fallback
+                car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
 
 CarSessionLocal = sessionmaker(bind=car_engine)
 
