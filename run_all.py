@@ -83,7 +83,10 @@ if __name__ == "__main__":
     # Start API first to ensure availability
     api_proc.start()
     time.sleep(2) # Give API a moment to bind port
-    bot_proc.start()
+    
+    # DEBUG: Temporarily DISABLED Bot Process to check for Duplicate/Zombie instances
+    # If the bot assumes life even with this disabled, we know there's another container running.
+    # bot_proc.start()
     
     try:
         # Monitor processes
@@ -93,10 +96,10 @@ if __name__ == "__main__":
                 api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
                 api_proc.start()
             
-            if not bot_proc.is_alive():
-                print("⚠️ Bot Process died! Restarting...", flush=True)
-                bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
-                bot_proc.start()
+            # if not bot_proc.is_alive():
+            #     print("⚠️ Bot Process died! Restarting...", flush=True)
+            #     bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
+            #     bot_proc.start()
             
             time.sleep(5)
     except KeyboardInterrupt:
