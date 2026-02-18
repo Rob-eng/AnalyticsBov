@@ -142,6 +142,29 @@ def search_properties(query: str = Query(..., min_length=3),
     finally:
         session.close()
 
+import threading
+import migrate_ms
+
+@app.post("/admin/migrate_ms")
+def trigger_migration(background_tasks: bool = True, api_key: APIKey = Depends(get_api_key)):
+    """
+    Triggers the MS data migration (Cleanup -> Download -> Ingest) in the background.
+    """
+    def run_job():
+        try:
+            print("🚀 Admin: Starting migration job...", flush=True)
+            migrate_ms.run_migration()
+        except Exception as e:
+            print(f"❌ Admin: Migration job failed: {e}", flush=True)
+
+    if background_tasks:
+        thread = threading.Thread(target=run_job)
+        thread.start()
+        return {"status": "started", "message": "Migration started in background. Check logs."}
+    else:
+        run_job()
+        return {"status": "completed", "message": "Migration finished synchronous."}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
