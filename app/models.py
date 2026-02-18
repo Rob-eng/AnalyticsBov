@@ -164,7 +164,8 @@ else:
                     break
                     
                 except Exception as e:
-                    print(f"❌ Failed connection to {region}: {e}")
+                    # Log as debug/warning instead of error since we expect failures
+                    print(f"DEBUG: Skipped {region}: {str(e).split('FATAL')[0].strip()}...", flush=True)
             
             if not connected:
                 print("⚠️ All regions failed. Falling back to original URL (likely to fail on IPv6).")

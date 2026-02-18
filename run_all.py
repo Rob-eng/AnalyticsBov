@@ -28,6 +28,12 @@ def run_api_process():
 def run_bot_process():
     """Runs the Telegram Bot in a separate process."""
     print(f"🤖 Starting Telegram Bot... | PID: {os.getpid()}", flush=True)
+    
+    # SQLAlchemy Multiprocessing safety: Dispose engines to reset connection pool in child process
+    from app.models import engine, car_engine
+    engine.dispose()
+    car_engine.dispose()
+
     import asyncio
     
     async def main():
