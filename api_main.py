@@ -145,7 +145,7 @@ def search_properties(query: str = Query(..., min_length=3),
 import threading
 import migrate_ms
 
-@app.post("/admin/migrate_ms")
+@app.api_route("/admin/migrate_ms", methods=["GET", "POST"])
 def trigger_migration(background_tasks: bool = True, api_key: APIKey = Depends(get_api_key)):
     """
     Triggers the MS data migration (Cleanup -> Download -> Ingest) in the background.
