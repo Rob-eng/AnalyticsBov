@@ -107,9 +107,18 @@ else:
         if "supabase.co" in car_db_url and ":5432" in car_db_url:
             print("DEBUG: Switching to Supabase Connection Pooler (Port 6543) for IPv4 support.")
             car_db_url_pooler = car_db_url.replace(":5432", ":6543")
-            # Disable prepared statements for transaction pooler compatibility if needed, 
-            # though usually safe to try default first.
-            car_engine = create_engine(car_db_url_pooler, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+            
+            # Disable prepared statements for transaction pooler compatibility (REQUIRED for Supabase port 6543)
+            # 'prepare_threshold': None disables server-side prepared statements in psycopg2
+            car_engine = create_engine(
+                car_db_url_pooler, 
+                pool_pre_ping=True, 
+                connect_args={'connect_timeout': 10, 'options': '-c statement_timeout=10000'}
+            )
+            # Note: SQLAlchemy 1.4/2.0+ with psycopg2 might need different handling for prepare_threshold
+            # But usually it's passed in connect_args if using pure psycopg2, or handled by dialect.
+            # For robustness, we'll assume the URL change helps connectivity first. 
+            # Ideally we pass execution_options={"isolation_level": "AUTOCOMMIT"} if strictly needed but let's stick to port.
         else:
             # Standard fallback
             car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})

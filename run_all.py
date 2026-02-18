@@ -65,7 +65,13 @@ def run_bot_process():
 if __name__ == "__main__":
     # Ensure support for spawn on all platforms
     multiprocessing.freeze_support()
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
     
+    print("🚀 Main: Launching services...", flush=True)
+
     # Create processes
     api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
     bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
@@ -79,12 +85,12 @@ if __name__ == "__main__":
         # Monitor processes
         while True:
             if not api_proc.is_alive():
-                print("⚠️ API Process died! Restarting...")
+                print("⚠️ API Process died! Restarting...", flush=True)
                 api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
                 api_proc.start()
             
             if not bot_proc.is_alive():
-                print("⚠️ Bot Process died! Restarting...")
+                print("⚠️ Bot Process died! Restarting...", flush=True)
                 bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
                 bot_proc.start()
             
