@@ -1200,9 +1200,96 @@ def create_bot_application(post_init=None):
         
     app = builder.build()
     
-    # Debug: Log every update
+    # 0. Global Logger (Debug)
     from telegram.ext import TypeHandler
     app.add_handler(TypeHandler(Update, log_update), group=-1)
+    
+    # 1. Conversation Handlers
+    
+    # Weather
+    weather_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("clima", start_weather),
+            MessageHandler(filters.Regex("^🌧️ Precipitação$"), start_weather)
+        ],
+        states={
+            WAITING_WEATHER_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_weather_location)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_weather)]
+    )
+    app.add_handler(weather_conv)
+    
+    # Environmental Analysis
+    env_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("ambiental", start_env_analysis),
+            MessageHandler(filters.Regex("^🌿 Análise Ambiental$"), start_env_analysis)
+        ],
+        states={
+            WAITING_ENV_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_env_location)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_env)]
+    )
+    app.add_handler(env_conv)
+    
+    # Feedback
+    feedback_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("feedback", start_feedback),
+            MessageHandler(filters.Regex("^💬 Feedback$"), start_feedback)
+        ],
+        states={
+            WAITING_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_feedback)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_feedback)]
+    )
+    app.add_handler(feedback_conv)
+    
+    # Broadcast (Admin)
+    # Using generic 'send_broadcast' as state handler, need to verify existence or map correctly
+    # Seen 'start_broadcast' (829) and 'send_broadcast' (844) in grep
+    from app.bot import start_broadcast, send_broadcast, cancel_broadcast
+    broadcast_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("broadcast", start_broadcast), # Admin check inside?
+            MessageHandler(filters.Regex("^📢 Enviar Anúncio$"), start_broadcast)
+        ],
+        states={
+            WAITING_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_broadcast)]
+    )
+    app.add_handler(broadcast_conv)
+    
+    # Locations Management
+    from app.bot import start_locations, handle_location_buttons, receive_location_name, receive_location_coords, start_delete_location, confirm_delete_location, cancel_locations
+    loc_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("propriedades", start_locations),
+            MessageHandler(filters.Regex("^📌 Minhas Propriedades$"), start_locations)
+        ],
+        states={
+            WAITING_LOCATION_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_location_buttons)],
+            WAITING_LOCATION_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_location_name)],
+            WAITING_LOCATION_COORDS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_location_coords)],
+            WAITING_LOCATION_DELETE: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_delete_location)]
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_locations)]
+    )
+    app.add_handler(loc_conv)
+
+    # 2. Command Handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("atual", current_analysis))
+    app.add_handler(CommandHandler("futuro", future_market))
+    app.add_handler(CommandHandler("importar", sync_history))
+    app.add_handler(CommandHandler("users", list_users))
+    app.add_handler(CommandHandler("admin_locais", list_all_locations_admin))
+    
+    # 3. Main Menu Buttons / Catch-All
+    # This handles buttons that are NOT conversation entry points (e.g. Cotação Atual, Status, admin buttons managed by handle_keyboard_buttons logic)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
     
     app.add_error_handler(error_handler)
     return app
