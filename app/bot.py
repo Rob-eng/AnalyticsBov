@@ -63,12 +63,16 @@ def get_keyboard(chat_id):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f"DEBUG: Entering start handler for {update.effective_chat.id}", flush=True)
     chat_id = str(update.effective_chat.id)
     username = update.effective_chat.username
     
+    print("DEBUG: Creating DB Session...", flush=True)
     session = SessionLocal()
     try:
+        print("DEBUG: Querying User...", flush=True)
         user = session.query(User).filter_by(chat_id=chat_id).first()
+        print(f"DEBUG: User found: {user is not None}", flush=True)
         
         welcome_msg = (
             "🐂 *Bem-vindo ao Agro Analytics Bot!*\n\n"
@@ -90,6 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         if not user:
+            print("DEBUG: Creating new user...", flush=True)
             new_user = User(chat_id=chat_id, username=username)
             session.add(new_user)
             session.commit()
@@ -105,29 +110,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except:
                     pass
             
+            print("DEBUG: Sending welcome message (new user)...", flush=True)
             await update.message.reply_text(
                 welcome_msg,
                 parse_mode='Markdown',
                 reply_markup=get_keyboard(chat_id)
             )
         else:
+            print("DEBUG: Sending welcome message (existing user)...", flush=True)
             await update.message.reply_text(
                 welcome_msg,
                 parse_mode='Markdown',
                 reply_markup=get_keyboard(chat_id)
             )
+        print("DEBUG: Message sent successfully.", flush=True)
     except Exception as e:
         import traceback
-        print(f"ERROR in start command (chat_id: {chat_id}): {e}")
-        print(traceback.format_exc())
+        print(f"ERROR in start command (chat_id: {chat_id}): {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
         try:
             await update.message.reply_text("⚠️ Ocorreu um erro ao registrar. Por favor, tente novamente em instantes.")
         except:
             pass
     finally:
+        print("DEBUG: Closing session.", flush=True)
         session.close()
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("DEBUG: Entering status handler", flush=True)
     chat_id = str(update.effective_chat.id)
     session = SessionLocal()
     
@@ -135,6 +145,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 1. User Registration
     try:
+        print("DEBUG: Status - Checking User...", flush=True)
         user = session.query(User).filter_by(chat_id=chat_id).first()
         status_txt = "ATIVO ✅" if user else "INATIVO ❌"
         msg += f"👤 *Cadastro:* {status_txt}\n"
