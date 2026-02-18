@@ -107,43 +107,62 @@ else:
         # We replace the project-specific hostname with the regional pooler hostname.
         # User/Pass/DB info remains in the URL and handles routing.
         if "supabase.co" in car_db_url:
-            print("DEBUG: Switching to Regional Connection Pooler (aws-0-sa-east-1) for IPv4 support.")
+            print("DEBUG: Switching to Regional Connection Pooler (Supavisor) for IPv4 support.")
             
-            # 1. Extract Project ID from Hostname
+            # Extract Project ID
             try:
-                # db.project_id.supabase.co
                 parts = hostname.split('.')
-                project_id = parts[1]
+                project_id = parts[1] # db.project_id.supabase.co
                 print(f"DEBUG: Extracted Project ID: {project_id}")
             except IndexError:
                 print(f"DEBUG: Could not extract verified project ID from {hostname}")
                 project_id = None
 
-            # 2. Update Username (Format: user.project_id)
+            # Base credentials
             current_user = parsed.username
             current_password = parsed.password
             current_port = 6543 # Transaction Mode
             
-            print(f"DEBUG: Original Username: {current_user}")
-            
+            # Prepare Username (Format: user.project_id)
             new_user = current_user
             if project_id and project_id not in current_user:
                 new_user = f"{current_user}.{project_id}"
-                print(f"DEBUG: Updated username to {new_user} for pooler routing")
             
-            # Rebuild netloc: user:pass@host:port
-            # TRYING SA-EAST-1 First (São Paulo)
-            target_host = "aws-0-sa-east-1.pooler.supabase.com"
-            new_netloc = f"{new_user}:{current_password}@{target_host}:{current_port}"
+            # List of regions to try (Priority: SA -> US -> EU)
+            regions = ['sa-east-1', 'us-east-1', 'eu-central-1']
+            connected = False
             
-            car_db_url_pooler = urlunparse(parsed._replace(netloc=new_netloc))
+            for region in regions:
+                try:
+                    target_host = f"aws-0-{region}.pooler.supabase.com"
+                    print(f"DEBUG: Testing Region: {region} ({target_host})...")
+                    
+                    new_netloc = f"{new_user}:{current_password}@{target_host}:{current_port}"
+                    candidate_url = urlunparse(parsed._replace(netloc=new_netloc))
+                    
+                    # Create temporary engine to test connection
+                    temp_engine = create_engine(
+                        candidate_url, 
+                        pool_pre_ping=True, 
+                        connect_args={'connect_timeout': 3}
+                    )
+                    
+                    # Force connection attempt
+                    with temp_engine.connect() as conn:
+                        print(f"✅ SUCCESS! Connected to {region}")
+                    
+                    # If successful, use this engine
+                    car_engine = temp_engine
+                    connected = True
+                    break
+                    
+                except Exception as e:
+                    print(f"❌ Failed connection to {region}: {e}")
             
-            # Disable prepared statements for transaction pooler compatibility
-            car_engine = create_engine(
-                car_db_url_pooler, 
-                pool_pre_ping=True, 
-                connect_args={'connect_timeout': 10}
-            )
+            if not connected:
+                print("⚠️ All regions failed. Falling back to original URL (likely to fail on IPv6).")
+                car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+
         else:
             # Standard fallback for non-supabase
             car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
