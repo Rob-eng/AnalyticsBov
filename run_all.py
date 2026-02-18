@@ -42,8 +42,9 @@ def run_bot_process():
         
         # Start Polling
         print("Starting Bot Polling...")
-        await application.updater.start_polling()
+        await application.initialize()
         await application.start()
+        await application.updater.start_polling()
         
         # Keep the bot running
         stop_signal = asyncio.Event()
@@ -51,6 +52,15 @@ def run_bot_process():
 
     try:
         asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"❌ Bot Crash: {e}")
+    finally:
+        # We can't easily access 'application' here to stop it gracefully in this structure
+        # but the process termination handles it.
+        # Ideally main() should have a finally block.
+        pass
     except KeyboardInterrupt:
         pass
     except Exception as e:

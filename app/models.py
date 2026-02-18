@@ -79,15 +79,27 @@ else:
         
         parsed = urlparse(car_db_url)
         hostname = parsed.hostname
-        # Resolve to IPv4
-        ipv4 = socket.gethostbyname(hostname)
-        print(f"DEBUG: Resolved {hostname} to {ipv4}")
         
-        # Reconstruct URL with IPv4
-        new_netloc = parsed.netloc.replace(hostname, ipv4)
-        car_db_url_ipv4 = urlunparse(parsed._replace(netloc=new_netloc))
+        # Resolve to IPv4 using getaddrinfo to filter for AF_INET
+        # This is more robust than gethostbyname in some environments
+        addr_info = socket.getaddrinfo(hostname, None, family=socket.AF_INET)
         
-        car_engine = create_engine(car_db_url_ipv4, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+        if addr_info:
+            # Take the first available IPv4 address
+            # addr_info returns list of (family, type, proto, canonname, sockaddr)
+            # sockaddr is (address, port) for AF_INET
+            ipv4 = addr_info[0][4][0]
+            print(f"DEBUG: Resolved {hostname} to {ipv4}")
+            
+            # Reconstruct URL with IPv4
+            new_netloc = parsed.netloc.replace(hostname, ipv4)
+            car_db_url_ipv4 = urlunparse(parsed._replace(netloc=new_netloc))
+            
+            car_engine = create_engine(car_db_url_ipv4, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+        else:
+             print(f"DEBUG: No IPv4 address found for {hostname}")
+             car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+
     except Exception as e:
         print(f"DEBUG: Failed to force IPv4 resolution: {e}")
         # Fallback to original
