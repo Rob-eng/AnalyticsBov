@@ -1167,6 +1167,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     # We don't notify user about every network glitch to avoid spamming
     # but we log it for analysis.
 
+async def log_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log every update received"""
+    try:
+        user = update.effective_user
+        print(f"📩 Received Update | User: {user.username if user else 'Unknown'} ({user.id if user else 'NoID'}) | Type: {update.effective_message.chat.type if update.effective_message else 'Other'}", flush=True)
+    except:
+        print("📩 Received Update (Parseless)", flush=True)
+
 def create_bot_application(post_init=None):
     if not Config.TELEGRAM_TOKEN:
         raise ValueError("A variável de ambiente TELEGRAM_TOKEN não está definida. Adicione-a nas variáveis do Railway.")
@@ -1180,5 +1188,10 @@ def create_bot_application(post_init=None):
         builder.post_init(post_init)
         
     app = builder.build()
+    
+    # Debug: Log every update
+    from telegram.ext import TypeHandler
+    app.add_handler(TypeHandler(Update, log_update), group=-1)
+    
     app.add_error_handler(error_handler)
     return app
