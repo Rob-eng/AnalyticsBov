@@ -21,6 +21,13 @@ WAITING_LOCATION_NAME = 6
 WAITING_LOCATION_COORDS = 7
 WAITING_LOCATION_DELETE = 8
 
+MAIN_MENU_BUTTONS = [
+    "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação", 
+    "🌿 Análise Ambiental", "📢 Enviar Anúncio", "📈 Status", 
+    "📥 Importar Histórico", "👥 Lista de Usuários", "💬 Feedback", 
+    "📌 Minhas Propriedades"
+]
+
 
 def is_admin(chat_id):
     """Check if user is admin"""
@@ -381,6 +388,9 @@ async def receive_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if feedback_text.startswith('/'):
         return WAITING_FEEDBACK
     
+    if feedback_text in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
+    
     try:
         # Forward to admin
         admin_message = (
@@ -454,6 +464,9 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
     
     if query.startswith('/'):
         return WAITING_WEATHER_LOCATION
+    
+    if query in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
 
     status_msg = await update.message.reply_text("🔍 Buscando dados... Aguarde.")
     
@@ -630,6 +643,9 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if query.startswith('/'):
         return WAITING_ENV_LOCATION
+    
+    if query in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
 
     status_msg = await update.message.reply_text("🛰️ Processando imagens de satélite... Aguarde.")
     
@@ -785,6 +801,9 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if broadcast_text.startswith('/'):
         return WAITING_BROADCAST_MESSAGE
+    
+    if broadcast_text in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
 
     status_msg = await update.message.reply_text("🚀 Iniciando transmissão...")
     
@@ -945,6 +964,8 @@ async def start_add_location(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def receive_location_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text
+    if name in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
     if name == "❌ Cancelar":
         await update.message.reply_text("Cancelado.", reply_markup=get_location_keyboard())
         return WAITING_LOCATION_MENU
@@ -958,6 +979,8 @@ async def receive_location_name(update: Update, context: ContextTypes.DEFAULT_TY
 async def receive_location_coords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     query = update.message.text
+    if query in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
     if query == "❌ Cancelar":
         await update.message.reply_text("Cancelado.", reply_markup=get_location_keyboard())
         return WAITING_LOCATION_MENU
@@ -1020,6 +1043,8 @@ async def start_delete_location(update: Update, context: ContextTypes.DEFAULT_TY
 async def confirm_delete_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     text = update.message.text
+    if text in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
     if text == "❌ Cancelar":
         await update.message.reply_text("Exclusão cancelada.", reply_markup=get_location_keyboard())
         return WAITING_LOCATION_MENU
@@ -1053,6 +1078,9 @@ async def cancel_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_location_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if text in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
+        
     if text == "📋 Listar Minhas Propriedades":
         return await list_user_locations(update, context)
     elif text == "➕ Adicionar Nova":
