@@ -110,17 +110,21 @@ else:
             print("DEBUG: Switching to Regional Connection Pooler (aws-0-sa-east-1) for IPv4 support.")
             
             # 1. Extract Project ID from Hostname
-            # Hostname format: db.[project_id].supabase.co
-            project_id = hostname.split('.')[1]
-            if not project_id or len(project_id) < 10:
+            try:
+                # db.project_id.supabase.co
+                parts = hostname.split('.')
+                project_id = parts[1]
+                print(f"DEBUG: Extracted Project ID: {project_id}")
+            except IndexError:
                 print(f"DEBUG: Could not extract verified project ID from {hostname}")
-                # Fallback to just switching host if we can't parse, but likely won't work without user update
-            
+                project_id = None
+
             # 2. Update Username (Format: user.project_id)
-            # We need to reconstruct the netloc with the new username
             current_user = parsed.username
             current_password = parsed.password
-            current_port = 6543 # Transaction mode
+            current_port = 6543 # Transaction Mode
+            
+            print(f"DEBUG: Original Username: {current_user}")
             
             new_user = current_user
             if project_id and project_id not in current_user:
@@ -128,6 +132,7 @@ else:
                 print(f"DEBUG: Updated username to {new_user} for pooler routing")
             
             # Rebuild netloc: user:pass@host:port
+            # TRYING SA-EAST-1 First (São Paulo)
             target_host = "aws-0-sa-east-1.pooler.supabase.com"
             new_netloc = f"{new_user}:{current_password}@{target_host}:{current_port}"
             
