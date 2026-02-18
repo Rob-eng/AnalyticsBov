@@ -27,9 +27,12 @@ def run_bot_process():
     
     async def main():
         # Initialize DB (Essential migrations only)
+        # We wrap this in a timeout so the bot doesn't hang if DB is slow/down
         print("Initializing Database...")
         try:
-             await asyncio.to_thread(init_db)
+             await asyncio.wait_for(asyncio.to_thread(init_db), timeout=5.0)
+        except asyncio.TimeoutError:
+             print("⚠️ DB Init timed out! Starting bot anyway (DB might be slow).")
         except Exception as e:
              print(f"DB Init Warning: {e}")
 
