@@ -13,6 +13,10 @@ import os
 from pathlib import Path
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
+from app.models import SessionLocal, CARProperty
+from geoalchemy2.functions import ST_Intersects, ST_GeomFromText, ST_Distance
+from geoalchemy2.shape import to_shape
+from sqlalchemy import text
 
 def get_state_from_coords(lat, lon):
     """
@@ -57,74 +61,47 @@ def get_state_from_coords(lat, lon):
 
 def query_local_car_database(lat, lon):
     """
-    Query local GeoJSON file for CAR perimeter containing the point.
-    If no exact match, returns the nearest property within 5km.
-    Returns: (geometry, status_type) where status_type is 'OFFICIAL' or 'NEARBY'
+    Query Supabase PostGIS for CAR perimeter containing the point.
+    Falls back to regional proximity if no exact match.
     """
+    session = SessionLocal()
     try:
-        base_dir = Path(__file__).parent.parent
+        # 1. Exact match: find property containing the point
+        point_wkt = f'POINT({lon} {lat})'
         
-        # 1. Determine which state file to use
-        # We can iterate through available flags/files or use a simple heuristic
-        uf = get_state_from_coords(lat, lon)
-        geojson_path = base_dir / f"car_{uf}.geojson"
+        prop = session.query(CARProperty).filter(
+            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
+        ).first()
+
+        if prop:
+            geom_shape = to_shape(prop.geometry)
+            print(f"PostGIS: Found exact match for {prop.cod_imovel}")
+            return (mapping(geom_shape), 'OFFICIAL')
         
-        if not geojson_path.exists():
-            # Fallback: check if any car_*.geojson contains the point
-            # (though this is slow, so we'll just check if we have the file)
-            print(f"Local CAR database not found: {geojson_path}")
-            # Try to find any car_*.geojson as fallback
-            available_files = list(base_dir.glob("car_*.geojson"))
-            if not available_files:
-                return (None, False)
-            geojson_path = available_files[0] # Just use the first one if we only have one
-        
-        # Load GeoJSON with GeoPandas
-        gdf = gpd.read_file(geojson_path)
-        
-        # Create point geometry
-        from shapely.geometry import Point
-        point = Point(lon, lat)
-        
-        # Helper to ensure Polygon (Agromonitoring doesn't support MultiPolygon)
-        def ensure_polygon(geom):
-            if geom.geom_type == 'MultiPolygon':
-                # Return the largest polygon by area
-                return max(geom.geoms, key=lambda p: p.area)
-            return geom
-        
-        # 1. Try exact match: find properties containing the point
-        matches = gdf[gdf.contains(point)]
-        
-        if len(matches) > 0:
-            geometry = ensure_polygon(matches.iloc[0].geometry)
-            print(f"Found exact match: {matches.iloc[0].get('cod_imovel', 'N/A')}")
-            return (mapping(geometry), 'OFFICIAL')
-        
-        # 2. Fallback: find nearest property by centroid distance
-        # Warning: Direct distance calculation on WGS84 is approximate but fast enough for this purpose
-        # To avoid projection errors, we calculate distance on centroids
-        gdf['centroid'] = gdf.geometry.centroid
-        gdf['dist'] = gdf.centroid.distance(point)
-        
-        nearest = gdf.nsmallest(1, 'dist')
-        
-        if len(nearest) > 0:
-            dist_deg = nearest.iloc[0]['dist']
-            # Approx conversion: 1 deg ~= 111km. 0.1 deg ~= 11km
+        # 2. Fallback: find nearest property within ~11km (0.1 deg)
+        nearest = session.query(CARProperty).order_by(
+            CARProperty.geometry.ST_Distance(ST_GeomFromText(point_wkt, 4674))
+        ).limit(1).first()
+
+        if nearest:
+            # Check distance explicitly
+            dist_deg = session.execute(
+                text(f"SELECT ST_Distance(geometry, ST_GeomFromText('{point_wkt}', 4674)) FROM car_properties WHERE id = :pid"),
+                {"pid": nearest.id}
+            ).scalar()
+            
             if dist_deg < 0.1:
-                geometry = ensure_polygon(nearest.iloc[0].geometry)
-                cod = nearest.iloc[0].get('cod_imovel', 'N/A')
-                print(f"Found nearest property ({dist_deg:.4f} deg): {cod}")
-                return (mapping(geometry), 'NEARBY')
+                geom_shape = to_shape(nearest.geometry)
+                print(f"PostGIS: Found nearest property ({dist_deg:.4f} deg): {nearest.cod_imovel}")
+                return (mapping(geom_shape), 'NEARBY')
         
         return (None, None)
         
     except Exception as e:
-        print(f"Error querying local CAR database: {e}")
-        # import traceback
-        # traceback.print_exc()
+        print(f"Error querying PostGIS CAR database: {e}")
         return (None, None)
+    finally:
+        session.close()
 
 
 def fetch_car_perimeter(lat, lon):

@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import pandas as pd
+from geoalchemy2 import Geometry
 from app.config import Config
 
 Base = declarative_base()
@@ -33,6 +34,16 @@ class PriceHistory(Base):
     price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
 
+class CARProperty(Base):
+    __tablename__ = 'car_properties'
+    
+    id = Column(BigInteger, primary_key=True)
+    cod_imovel = Column(String(100), unique=True, index=True)
+    uf = Column(String(2), index=True)
+    municipio = Column(String(100))
+    # SRID 4674 is SIRGAS 2000 (Geodetic), common in Brazil and compatible with WGS84
+    geometry = Column(Geometry('MULTIPOLYGON', srid=4674))
+
 import os
 if not Config.DATABASE_URL:
     print("Environment variables present:", list(os.environ.keys()))
@@ -47,17 +58,28 @@ engine = create_engine(db_url)
 SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
-    Base.metadata.create_all(engine)
+    # Fix for SQLAlchemy requiring 'postgresql://' instead of 'postgres://'
+    db_engine = engine
+    
+    with db_engine.connect() as conn:
+        try:
+            # Enable PostGIS extension
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
+            if hasattr(conn, 'commit'):
+                conn.commit()
+            print("✅ PostGIS extension verified")
+        except Exception as e:
+            print(f"ℹ️ PostGIS notice: {e}")
+
+    Base.metadata.create_all(db_engine)
     # Forced migration to BIGINT for Telegram IDs
-    with engine.connect() as conn:
+    with db_engine.connect() as conn:
         try:
             conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT USING chat_id::text;"))
-            # Depending on SQLAlchemy version, commit might be needed
             if hasattr(conn, 'commit'):
                 conn.commit()
             print("✅ Database migration components verified")
         except Exception as e:
-            # Table/column might not exist yet or already be BIGINT
             print(f"ℹ️ Migration notice: {e}")
 
 def get_recent_prices(days=1095):

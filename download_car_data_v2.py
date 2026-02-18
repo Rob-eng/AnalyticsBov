@@ -1,0 +1,78 @@
+import requests
+import json
+import os
+import time
+
+def download_car_data_paginated():
+    base_url = "https://geoserver.car.gov.br/geoserver/sicar/ows"
+    ufs = [
+        "ac", "al", "am", "ap", "ba", "ce", "df", "es", "go", "ma", 
+        "mg", "ms", "mt", "pa", "pb", "pe", "pi", "pr", "rj", "rn", 
+        "ro", "rr", "rs", "sc", "se", "sp", "to"
+    ]
+    
+    output_dir = os.path.dirname(os.path.abspath(__file__))
+    chunk_size = 5000 # Fetch 5000 features at a time
+    
+    for uf in ufs:
+        filename = f"car_{uf}.geojson"
+        filepath = os.path.join(output_dir, filename)
+        
+        print(f"Downloading data for {uf.upper()}...")
+        
+        all_features = []
+        start_index = 0
+        
+        while True:
+            params = {
+                "service": "WFS",
+                "version": "2.0.0",
+                "request": "GetFeature",
+                "typeName": f"sicar:sicar_imoveis_{uf}",
+                "outputFormat": "application/json",
+                "count": chunk_size,
+                "startIndex": start_index
+            }
+            
+            try:
+                response = requests.get(base_url, params=params, timeout=300)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    features = data.get('features', [])
+                    
+                    if not features:
+                        break
+                        
+                    all_features.extend(features)
+                    print(f"  Fetched {len(all_features)} features...")
+                    
+                    if len(features) < chunk_size:
+                        break # Last page
+                        
+                    start_index += chunk_size
+                    time.sleep(0.5) # Throttle 
+                else:
+                    print(f"  Failed page at {start_index} for {uf.upper()}: {response.status_code}")
+                    break
+                    
+            except Exception as e:
+                print(f"  Error at index {start_index} for {uf.upper()}: {e}")
+                break
+        
+        if all_features:
+            geojson_data = {
+                "type": "FeatureCollection",
+                "features": all_features
+            }
+            
+            with open(filepath, 'w') as f:
+                json.dump(geojson_data, f)
+            
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            print(f"  Completed {uf.upper()}: {len(all_features)} features, {size_mb:.2f} MB")
+        else:
+            print(f"  No features found for {uf.upper()}")
+
+if __name__ == "__main__":
+    download_car_data_paginated()

@@ -1,0 +1,133 @@
+from fastapi import FastAPI, HTTPException, Query, Depends, Security
+from fastapi.security.api_key import APIKeyHeader, APIKey
+from sqlalchemy import text
+from app.models import SessionLocal, CARProperty, engine
+from geoalchemy2.functions import ST_Intersects, ST_GeomFromText, ST_Distance, ST_Centroid
+from geoalchemy2.shape import to_shape
+from shapely.geometry import mapping
+import json
+import os
+from starlette.status import HTTP_403_FORBIDDEN
+
+app = FastAPI(title="CAR Spatial API", description="API to query CAR properties from PostGIS")
+
+# Security: Basic API Key
+API_KEY = os.getenv("CAR_API_KEY", "your-default-secure-key")
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header == API_KEY:
+        return api_key_header
+    else:
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
+        )
+
+@app.get("/")
+def read_root():
+    return {"status": "online", "service": "CAR Spatial API", "version": "1.1.0"}
+
+@app.get("/property/at")
+def get_property_at(lat: float = Query(..., description="Latitude"), 
+                    lon: float = Query(..., description="Longitude"),
+                    api_key: APIKey = Depends(get_api_key)):
+    """
+    Finds the CAR property containing the given coordinates.
+    """
+    session = SessionLocal()
+    try:
+        point_wkt = f'POINT({lon} {lat})'
+        
+        prop = session.query(CARProperty).filter(
+            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
+        ).first()
+
+        if prop:
+            geom_shape = to_shape(prop.geometry)
+            return {
+                "found": True,
+                "status": "OFFICIAL",
+                "cod_imovel": prop.cod_imovel,
+                "uf": prop.uf,
+                "municipio": prop.municipio,
+                "geometry": mapping(geom_shape)
+            }
+        
+        # Fallback: Nearest within 11km
+        nearest = session.query(CARProperty).order_by(
+            CARProperty.geometry.ST_Distance(ST_GeomFromText(point_wkt, 4674))
+        ).limit(1).first()
+
+        if nearest:
+            dist_query = session.execute(
+                text(f"SELECT ST_Distance(geometry, ST_GeomFromText('{point_wkt}', 4674)) FROM car_properties WHERE id = :pid"),
+                {"pid": nearest.id}
+            ).scalar()
+            
+            if dist_query < 0.1: 
+                geom_shape = to_shape(nearest.geometry)
+                return {
+                    "found": True,
+                    "status": "NEARBY",
+                    "cod_imovel": nearest.cod_imovel,
+                    "uf": nearest.uf,
+                    "municipio": nearest.municipio,
+                    "geometry": mapping(geom_shape),
+                    "distance_degrees": dist_query
+                }
+
+        return {"found": False, "message": "No property found at this location."}
+    finally:
+        session.close()
+
+@app.get("/property/details/{cod_imovel}")
+def get_property_details(cod_imovel: str, api_key: APIKey = Depends(get_api_key)):
+    """
+    Retrieve full details and perimeter for a specific property code.
+    """
+    session = SessionLocal()
+    try:
+        prop = session.query(CARProperty).filter(CARProperty.cod_imovel == cod_imovel).first()
+        if not prop:
+            raise HTTPException(status_code=404, detail="Property not found")
+            
+        geom_shape = to_shape(prop.geometry)
+        return {
+            "found": True,
+            "cod_imovel": prop.cod_imovel,
+            "uf": prop.uf,
+            "municipio": prop.municipio,
+            "geometry": mapping(geom_shape)
+        }
+    finally:
+        session.close()
+
+@app.get("/property/search")
+def search_properties(query: str = Query(..., min_length=3), 
+                      limit: int = 20,
+                      api_key: APIKey = Depends(get_api_key)):
+    """
+    Search properties by code or municipality.
+    """
+    session = SessionLocal()
+    try:
+        props = session.query(CARProperty).filter(
+            (CARProperty.cod_imovel.ilike(f"%{query}%")) | 
+            (CARProperty.municipio.ilike(f"%{query}%"))
+        ).limit(limit).all()
+        
+        results = []
+        for p in props:
+            results.append({
+                "cod_imovel": p.cod_imovel,
+                "uf": p.uf,
+                "municipio": p.municipio
+            })
+        return {"count": len(results), "results": results}
+    finally:
+        session.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -19,5 +19,5 @@ COPY . .
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Run the application
-CMD ["python", "main.py"]
+# Run the application (Bot + API)
+CMD ["python", "run_all.py"]
