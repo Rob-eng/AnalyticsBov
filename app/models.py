@@ -71,7 +71,27 @@ if car_db_url == db_url:
     car_engine = engine
 else:
     print("DEBUG: Creating separate engine for CAR database.")
-    car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+    
+    # Force IPv4 resolution for Supabase
+    try:
+        import socket
+        from urllib.parse import urlparse, urlunparse
+        
+        parsed = urlparse(car_db_url)
+        hostname = parsed.hostname
+        # Resolve to IPv4
+        ipv4 = socket.gethostbyname(hostname)
+        print(f"DEBUG: Resolved {hostname} to {ipv4}")
+        
+        # Reconstruct URL with IPv4
+        new_netloc = parsed.netloc.replace(hostname, ipv4)
+        car_db_url_ipv4 = urlunparse(parsed._replace(netloc=new_netloc))
+        
+        car_engine = create_engine(car_db_url_ipv4, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+    except Exception as e:
+        print(f"DEBUG: Failed to force IPv4 resolution: {e}")
+        # Fallback to original
+        car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
 
 CarSessionLocal = sessionmaker(bind=car_engine)
 
