@@ -63,12 +63,8 @@ def run_bot_process():
         pass
 
 if __name__ == "__main__":
-    # Ensure support for spawn on all platforms
+    # Ensure support for spawn on all platforms (optional but good practice)
     multiprocessing.freeze_support()
-    try:
-        multiprocessing.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
     
     print("🚀 Main: Launching services...", flush=True)
 
