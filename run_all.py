@@ -4,6 +4,11 @@ import time
 import os
 import multiprocessing
 import uvicorn
+import sys
+
+# Debug: Log process info immediately
+print(f"🔍 Process Starting | PID: {os.getpid()} | PPID: {os.getppid()} | Name: {multiprocessing.current_process().name}", flush=True)
+
 from api_main import app
 from app.models import init_db
 
