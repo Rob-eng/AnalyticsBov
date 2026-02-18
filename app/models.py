@@ -109,25 +109,28 @@ else:
         if "supabase.co" in car_db_url:
             print("DEBUG: Switching to Regional Connection Pooler (aws-0-sa-east-1) for IPv4 support.")
             
-            # 1. Replace Hostname
-            # From: db.projectid.supabase.co
-            # To:   aws-0-sa-east-1.pooler.supabase.com
-            # Note: We assume sa-east-1 because that's what we found, but ideally this should be configurable.
-            # However, for this project we know it's likely SA based on previous context or we just use the universal pooler alias if available?
-            # Actually, let's just try to resolve the project provided hostname to IP? No, we can't.
-            # We will force the pooler hostname.
+            # 1. Extract Project ID from Hostname
+            # Hostname format: db.[project_id].supabase.co
+            project_id = hostname.split('.')[1]
+            if not project_id or len(project_id) < 10:
+                print(f"DEBUG: Could not extract verified project ID from {hostname}")
+                # Fallback to just switching host if we can't parse, but likely won't work without user update
             
-            new_netloc = parsed.netloc.replace(hostname, "aws-0-sa-east-1.pooler.supabase.com")
+            # 2. Update Username (Format: user.project_id)
+            # We need to reconstruct the netloc with the new username
+            current_user = parsed.username
+            current_password = parsed.password
+            current_port = 6543 # Transaction mode
             
-            # 2. Update Port to 6543 (Transaction Mode) if not already
-            if ":5432" in new_netloc:
-                new_netloc = new_netloc.replace(":5432", ":6543")
-            elif ":6543" not in new_netloc:
-                 # If no port specified, append it (unlikely for sqlalchemy url but good safety)
-                 if "@" in new_netloc:
-                    # complex parsing, let's just assume replace worked or port was there
-                    pass
-
+            new_user = current_user
+            if project_id and project_id not in current_user:
+                new_user = f"{current_user}.{project_id}"
+                print(f"DEBUG: Updated username to {new_user} for pooler routing")
+            
+            # Rebuild netloc: user:pass@host:port
+            target_host = "aws-0-sa-east-1.pooler.supabase.com"
+            new_netloc = f"{new_user}:{current_password}@{target_host}:{current_port}"
+            
             car_db_url_pooler = urlunparse(parsed._replace(netloc=new_netloc))
             
             # Disable prepared statements for transaction pooler compatibility
