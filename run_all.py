@@ -61,10 +61,6 @@ def run_bot_process():
         # but the process termination handles it.
         # Ideally main() should have a finally block.
         pass
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"❌ Bot Crash: {e}")
 
 if __name__ == "__main__":
     # Ensure support for spawn on all platforms
