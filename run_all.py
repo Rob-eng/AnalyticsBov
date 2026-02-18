@@ -27,29 +27,29 @@ def run_api_process():
 
 def run_bot_process():
     """Runs the Telegram Bot in a separate process."""
-    print("🤖 Starting Telegram Bot...")
+    print(f"🤖 Starting Telegram Bot... | PID: {os.getpid()}", flush=True)
     import asyncio
     
     async def main():
         # Initialize DB (Essential migrations only)
         # We wrap this in a timeout so the bot doesn't hang if DB is slow/down
-        print("Initializing Database...")
+        print("Initializing Database...", flush=True)
         try:
              await asyncio.wait_for(asyncio.to_thread(init_db), timeout=5.0)
         except asyncio.TimeoutError:
-             print("⚠️ DB Init timed out! Starting bot anyway (DB might be slow).")
+             print("⚠️ DB Init timed out! Starting bot anyway (DB might be slow).", flush=True)
         except Exception as e:
-             print(f"DB Init Warning: {e}")
+             print(f"DB Init Warning: {e}", flush=True)
 
         application = create_bot_application()
         
         # Setup Scheduler
-        print("Setting up Scheduler...")
-        scheduler = setup_scheduler(application)
-        scheduler.start()
+        # print("Setting up Scheduler...", flush=True)
+        # scheduler = setup_scheduler(application)
+        # scheduler.start()
         
         # Start Polling
-        print("Starting Bot Polling...")
+        print("Starting Bot Polling...", flush=True)
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
@@ -63,7 +63,7 @@ def run_bot_process():
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"❌ Bot Crash: {e}")
+        print(f"❌ Bot Crash: {e}", flush=True)
     finally:
         # We can't easily access 'application' here to stop it gracefully in this structure
         # but the process termination handles it.
@@ -84,9 +84,8 @@ if __name__ == "__main__":
     api_proc.start()
     time.sleep(2) # Give API a moment to bind port
     
-    # DEBUG: Temporarily DISABLED Bot Process to check for Duplicate/Zombie instances
-    # If the bot assumes life even with this disabled, we know there's another container running.
-    # bot_proc.start()
+    # Re-enable Bot
+    bot_proc.start()
     
     try:
         # Monitor processes
@@ -96,10 +95,10 @@ if __name__ == "__main__":
                 api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
                 api_proc.start()
             
-            # if not bot_proc.is_alive():
-            #     print("⚠️ Bot Process died! Restarting...", flush=True)
-            #     bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
-            #     bot_proc.start()
+            if not bot_proc.is_alive():
+                print("⚠️ Bot Process died! Restarting...", flush=True)
+                bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
+                bot_proc.start()
             
             time.sleep(5)
     except KeyboardInterrupt:
