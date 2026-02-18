@@ -64,7 +64,12 @@ def run_bot_process():
         print("Starting Bot Polling...", flush=True)
         await application.initialize()
         await application.start()
-        await application.updater.start_polling()
+        
+        # Drop pending updates to flush any old conflicting offset
+        print(" Clearing pending updates...", flush=True)
+        await application.updater.start_polling(drop_pending_updates=True)
+        
+        print("✅ Bot Polling Started Successfully!", flush=True)
         
         # Keep the bot running
         stop_signal = asyncio.Event()
