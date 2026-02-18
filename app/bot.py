@@ -130,14 +130,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     session = SessionLocal()
+    
+    msg = "📊 *Diagnóstico do Sistema*\n\n"
+    
+    # 1. User Registration
     try:
         user = session.query(User).filter_by(chat_id=chat_id).first()
-        if user:
-            await update.message.reply_text("Status: ATIVO. Você receberá os relatórios.")
-        else:
-            await update.message.reply_text("Status: INATIVO. Use /start para se registrar.")
+        status_txt = "ATIVO ✅" if user else "INATIVO ❌"
+        msg += f"👤 *Cadastro:* {status_txt}\n"
+    except Exception as e:
+        msg += f"👤 *Cadastro:* ERRO ({str(e)}) ❌\n"
     finally:
         session.close()
+
+    # 2. CAR Database Connection
+    msg += "🗺️ *Banco de Dados CAR (Supabase):* "
+    try:
+        if not Config.CAR_DATABASE_URL:
+             msg += "NÃO CONFIGURADO ⚠️\n_(Variável CAR_DATABASE_URL ausente)_\n"
+        else:
+            # Test direct connection
+            try:
+                from app.models import CarSessionLocal, CARProperty
+                car_session = CarSessionLocal()
+                count = car_session.query(CARProperty).count()
+                car_session.close()
+                msg += f"OK ✅ ({count} registros)\n"
+            except Exception as e:
+                msg += f"FALHA NA CONEXÃO ❌\n_Erro: {str(e)}_\n"
+    except Exception as e:
+        msg += f"ERRO GERAL ({str(e)}) ❌\n"
+
+    # 3. Local API Health Check
+    msg += "🔌 *API Local:* "
+    try:
+        import requests
+        resp = requests.get("http://127.0.0.1:8000/", timeout=3)
+        if resp.status_code == 200:
+            msg += "ONLINE ✅\n"
+        else:
+             msg += f"ERRO {resp.status_code} ❌\n"
+    except Exception as e:
+         msg += f"OFFLINE ❌\n_Erro: {str(e)}_\n"
+
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 def format_chart_caption(data, title="Cotação do Boi no Mundo", note=None):
     """Helper to format chart caption with prices and feedback CTA"""
