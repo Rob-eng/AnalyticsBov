@@ -37,6 +37,17 @@ def get_property_at(lat: float = Query(..., description="Latitude"),
     """
     from app.models import CarSessionLocal
     session = CarSessionLocal()
+    
+    # DEBUG: Inspect DB Connection
+    try:
+        from sqlalchemy import inspect
+        bind = session.get_bind()
+        print(f"DEBUG API: DB URL: {bind.url}", flush=True)
+        inspector = inspect(bind)
+        print(f"DEBUG API: Tables in DB: {inspector.get_table_names()}", flush=True)
+    except Exception as e:
+        print(f"DEBUG API: Inspection Failed: {e}", flush=True)
+
     try:
         point_wkt = f'POINT({lon} {lat})'
         
