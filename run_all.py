@@ -94,10 +94,6 @@ if __name__ == "__main__":
     
     print("🚀 Main: Launching services...", flush=True)
 
-    # Database Migration (Optional via Env Var)
-    import migrate_ms
-    migrate_ms.run_migration()
-
     # Create processes
     api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
     bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
