@@ -19,6 +19,12 @@ from app.scheduler import setup_scheduler
 def run_api_process():
     """Runs the FastAPI service in a separate process."""
     print("🚀 Starting API Service...")
+    
+    # SQLAlchemy Multiprocessing safety: Dispose engines to reset connection pool in child process
+    from app.models import engine, car_engine
+    engine.dispose()
+    car_engine.dispose()
+
     try:
         port = int(os.getenv("PORT", 8000))
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
