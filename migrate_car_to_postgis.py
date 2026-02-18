@@ -18,9 +18,9 @@ def migrate_car_data():
     # Sort files to ensure predictable order
     geojson_files.sort()
     
-    db_url = os.environ.get('DATABASE_URL')
+    db_url = os.environ.get('CAR_DATABASE_URL') or os.environ.get('DATABASE_URL')
     if not db_url:
-        print("DATABASE_URL environment variable is missing.")
+        print("CAR_DATABASE_URL or DATABASE_URL environment variable is missing.")
         return
 
     # PostGIS specific engine
