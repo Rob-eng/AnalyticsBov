@@ -110,10 +110,11 @@ else:
             
             # Disable prepared statements for transaction pooler compatibility (REQUIRED for Supabase port 6543)
             # 'prepare_threshold': None disables server-side prepared statements in psycopg2
+            # Note: 'options' is NOT supported by Supabase Transaction Pooler, so we remove it.
             car_engine = create_engine(
                 car_db_url_pooler, 
                 pool_pre_ping=True, 
-                connect_args={'connect_timeout': 10, 'options': '-c statement_timeout=10000'}
+                connect_args={'connect_timeout': 10}
             )
             # Note: SQLAlchemy 1.4/2.0+ with psycopg2 might need different handling for prepare_threshold
             # But usually it's passed in connect_args if using pure psycopg2, or handled by dialect.
