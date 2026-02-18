@@ -35,7 +35,8 @@ def get_property_at(lat: float = Query(..., description="Latitude"),
     """
     Finds the CAR property containing the given coordinates.
     """
-    session = SessionLocal()
+    from app.models import CarSessionLocal
+    session = CarSessionLocal()
     try:
         point_wkt = f'POINT({lon} {lat})'
         
@@ -86,7 +87,8 @@ def get_property_details(cod_imovel: str, api_key: APIKey = Depends(get_api_key)
     """
     Retrieve full details and perimeter for a specific property code.
     """
-    session = SessionLocal()
+    from app.models import CarSessionLocal
+    session = CarSessionLocal()
     try:
         prop = session.query(CARProperty).filter(CARProperty.cod_imovel == cod_imovel).first()
         if not prop:
@@ -110,7 +112,8 @@ def search_properties(query: str = Query(..., min_length=3),
     """
     Search properties by code or municipality.
     """
-    session = SessionLocal()
+    from app.models import CarSessionLocal
+    session = CarSessionLocal()
     try:
         props = session.query(CARProperty).filter(
             (CARProperty.cod_imovel.ilike(f"%{query}%")) | 
