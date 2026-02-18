@@ -2,6 +2,15 @@ import requests
 import json
 import os
 import time
+import ssl
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+class LegacySSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        context = create_urllib3_context(ciphers='DEFAULT:@SECLEVEL=1')
+        kwargs['ssl_context'] = context
+        return super(LegacySSLAdapter, self).init_poolmanager(*args, **kwargs)
 
 def download_car_data_paginated():
     base_url = "https://geoserver.car.gov.br/geoserver/sicar/ows"
@@ -10,12 +19,23 @@ def download_car_data_paginated():
     ]
     
     output_dir = os.path.dirname(os.path.abspath(__file__))
-    chunk_size = 5000 # Fetch 5000 features at a time
+    chunk_size = 5000 
     
+    # Configure Session with Legacy SSL
+    session = requests.Session()
+    try:
+        session.mount('https://', LegacySSLAdapter())
+    except Exception as e:
+        print(f"Warning: Could not mount LegacySSLAdapter: {e}")
+
     for uf in ufs:
         filename = f"car_{uf}.geojson"
         filepath = os.path.join(output_dir, filename)
         
+        # Remove old file to strictly avoid staleness
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            
         print(f"Downloading data for {uf.upper()}...")
         
         all_features = []
@@ -33,7 +53,7 @@ def download_car_data_paginated():
             }
             
             try:
-                response = requests.get(base_url, params=params, timeout=300)
+                response = session.get(base_url, params=params, timeout=300)
                 
                 if response.status_code == 200:
                     data = response.json()

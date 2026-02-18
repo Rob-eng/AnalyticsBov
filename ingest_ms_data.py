@@ -29,10 +29,17 @@ def ingest_ms():
     objects = []
     count = 0
     errors = 0
+    seen_ids = set()
     
     for i, feat in enumerate(features):
         try:
             props = feat.get('properties', {})
+            cod = props.get('cod_imovel')
+            
+            if not cod or cod in seen_ids:
+                continue
+            seen_ids.add(cod)
+
             geom_data = feat.get('geometry')
             
             if not geom_data:
