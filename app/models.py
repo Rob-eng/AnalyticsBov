@@ -102,8 +102,17 @@ else:
 
     except Exception as e:
         print(f"DEBUG: Failed to force IPv4 resolution: {e}")
-        # Fallback to original
-        car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+        
+        # Fallback Strategy: Use Supabase Connection Pooler (Port 6543 supports IPv4)
+        if "supabase.co" in car_db_url and ":5432" in car_db_url:
+            print("DEBUG: Switching to Supabase Connection Pooler (Port 6543) for IPv4 support.")
+            car_db_url_pooler = car_db_url.replace(":5432", ":6543")
+            # Disable prepared statements for transaction pooler compatibility if needed, 
+            # though usually safe to try default first.
+            car_engine = create_engine(car_db_url_pooler, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+        else:
+            # Standard fallback
+            car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
 
 CarSessionLocal = sessionmaker(bind=car_engine)
 
