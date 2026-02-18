@@ -67,7 +67,8 @@ def fetch_car_perimeter(lat, lon):
     status can be: 'OFFICIAL', 'NEARBY', 'FALLBACK'
     """
     # 1. Try Local API (FastAPI sidecar)
-    api_url = "http://127.0.0.1:8000/property/at"
+    port = os.getenv("PORT", 8000)
+    api_url = f"http://127.0.0.1:{port}/property/at"
     headers = {"X-API-Key": os.getenv("CAR_API_KEY", "your-default-secure-key")}
     params = {"lat": lat, "lon": lon}
     
