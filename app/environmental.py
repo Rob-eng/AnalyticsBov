@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
-from app.models import SessionLocal, CARProperty
+from app.models import CarSessionLocal, CARProperty
 from geoalchemy2.functions import ST_Intersects, ST_GeomFromText, ST_Distance
 from geoalchemy2.shape import to_shape
 from sqlalchemy import text
@@ -59,59 +59,61 @@ def get_state_from_coords(lat, lon):
             
     return "ms" # Defaulting if no match found
 
-def query_local_car_database(lat, lon):
-    """
-    Query Supabase PostGIS for CAR perimeter containing the point.
-    Falls back to regional proximity if no exact match.
-    """
-    session = SessionLocal()
-    try:
-        # 1. Exact match: find property containing the point
-        point_wkt = f'POINT({lon} {lat})'
-        
-        prop = session.query(CARProperty).filter(
-            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
-        ).first()
-
-        if prop:
-            geom_shape = to_shape(prop.geometry)
-            print(f"PostGIS: Found exact match for {prop.cod_imovel}")
-            return (mapping(geom_shape), 'OFFICIAL')
-        
-        # 2. Fallback: find nearest property within ~11km (0.1 deg)
-        nearest = session.query(CARProperty).order_by(
-            CARProperty.geometry.ST_Distance(ST_GeomFromText(point_wkt, 4674))
-        ).limit(1).first()
-
-        if nearest:
-            # Check distance explicitly
-            dist_deg = session.execute(
-                text(f"SELECT ST_Distance(geometry, ST_GeomFromText('{point_wkt}', 4674)) FROM car_properties WHERE id = :pid"),
-                {"pid": nearest.id}
-            ).scalar()
-            
-            if dist_deg < 0.1:
-                geom_shape = to_shape(nearest.geometry)
-                print(f"PostGIS: Found nearest property ({dist_deg:.4f} deg): {nearest.cod_imovel}")
-                return (mapping(geom_shape), 'NEARBY')
-        
-        return (None, None)
-        
-    except Exception as e:
-        print(f"Error querying PostGIS CAR database: {e}")
-        return (None, None)
-    finally:
-        session.close()
-
-
 def fetch_car_perimeter(lat, lon):
     """
-    Attempts to fetch CAR perimeter using WFS.
-    Falls back to local GeoJSON database, then to a 1km bounding box if both fail.
+    Attempts to fetch CAR perimeter using Local API (Priority 1) then WFS (Priority 2).
+    Falls back to a 1km bounding box if both fail.
     Returns: (geometry, status)
     status can be: 'OFFICIAL', 'NEARBY', 'FALLBACK'
     """
-    # Fallback to 1km box
+    # 1. Try Local API (FastAPI sidecar)
+    api_url = "http://127.0.0.1:8000/property/at"
+    headers = {"X-API-Key": os.getenv("CAR_API_KEY", "your-default-secure-key")}
+    params = {"lat": lat, "lon": lon}
+    
+    try:
+        print(f"Querying Local API: {api_url} params={params}")
+        response = requests.get(api_url, params=params, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("found"):
+                status = data.get("status", "OFFICIAL")
+                print(f"✓ Local API found property: {data.get('cod_imovel')} ({status})")
+                return (data["geometry"], status)
+        else:
+            print(f"Local API returned status {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"⚠️ Local API connection failed: {e}")
+
+    # 2. Try WFS (External Government Server)
+    print("Trying WFS fallback...")
+    endpoints = [
+        "https://geoserver.car.gov.br/geoserver/sicar/wfs",
+        "https://geoserver.car.gov.br/geoserver/wfs"
+    ]
+    
+    wfs_params = {
+        "service": "WFS",
+        "version": "1.1.0",
+        "request": "GetFeature",
+        "typeName": "sicar:area_imovel",
+        "outputFormat": "application/json",
+        "cql_filter": f"CONTAINS(geometria, POINT({lon} {lat}))"
+    }
+
+    for url in endpoints:
+        try:
+            response = requests.get(url, params=wfs_params, timeout=10)
+            if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
+                data = response.json()
+                if "features" in data and len(data["features"]) > 0:
+                    print("✓ WFS found property")
+                    return (data["features"][0]["geometry"], 'OFFICIAL')
+        except:
+            continue
+    
+    # 3. Last resort: estimated area
+    print("⚠ All sources failed. Using estimated 1km² area")
     offset = 0.005 # ~500m
     bbox_polygon = {
         "type": "Polygon",
@@ -123,40 +125,6 @@ def fetch_car_perimeter(lat, lon):
             [lon - offset, lat - offset]
         ]]
     }
-
-    endpoints = [
-        "https://geoserver.car.gov.br/geoserver/sicar/wfs",
-        "https://geoserver.car.gov.br/geoserver/wfs"
-    ]
-    
-    params = {
-        "service": "WFS",
-        "version": "1.1.0",
-        "request": "GetFeature",
-        "typeName": "sicar:area_imovel",
-        "outputFormat": "application/json",
-        "cql_filter": f"CONTAINS(geometria, POINT({lon} {lat}))"
-    }
-
-    for url in endpoints:
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
-                data = response.json()
-                if "features" in data and len(data["features"]) > 0:
-                    return (data["features"][0]["geometry"], 'OFFICIAL')
-        except:
-            continue
-    
-    # 2. Try local GeoJSON database
-    print("WFS servers unavailable, trying local database...")
-    local_result, status = query_local_car_database(lat, lon)
-    if status and local_result:
-        print(f"✓ CAR perimeter from local database ({status})")
-        return (local_result, status)
-    
-    # 3. Last resort: estimated area
-    print("⚠ Using estimated 1km² area")
     return (bbox_polygon, 'FALLBACK')
 
 from app.gee_connector import get_ndvi_image
