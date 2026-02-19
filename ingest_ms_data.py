@@ -58,9 +58,17 @@ def ingest_ms():
             if not geom.is_valid:
                 # Try to fix
                 geom = geom.buffer(0)
+                # buffer(0) might return Polygon, so re-force MultiPolygon
+                if isinstance(geom, Polygon):
+                    geom = MultiPolygon([geom])
+                
                 if not geom.is_valid:
                     errors += 1
                     continue
+
+            # Final safety check
+            if isinstance(geom, Polygon):
+                geom = MultiPolygon([geom])
 
             # Create object
             obj = CARProperty(
