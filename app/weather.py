@@ -224,3 +224,31 @@ def generate_weather_map_with_title(lat, lon, title=None):
         print(f"Error generating weather map with title: {e}")
         return None
 
+
+def get_forecast_image(lat: float, lon: float, days: int):
+    """
+    Calls the ECMWF Weather Forecast Microservice and returns a BytesIO PNG buffer.
+    Requires WEATHER_SERVICE_URL environment variable to be set.
+    """
+    import os
+    from io import BytesIO
+    
+    base_url = os.environ.get("WEATHER_SERVICE_URL", "").rstrip("/")
+    if not base_url:
+        print("WEATHER_SERVICE_URL not configured.")
+        return None
+    
+    try:
+        resp = requests.get(
+            f"{base_url}/forecast",
+            params={"lat": lat, "lon": lon, "days": days},
+            timeout=120  # ECMWF download can take a while
+        )
+        if resp.status_code == 200:
+            return BytesIO(resp.content)
+        else:
+            print(f"Weather service error: {resp.status_code} — {resp.text[:200]}")
+            return None
+    except Exception as e:
+        print(f"Error contacting weather service: {e}")
+        return None

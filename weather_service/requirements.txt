@@ -1,0 +1,9 @@
+fastapi==0.115.8
+uvicorn==0.34.0
+ecmwf-opendata==0.3.11
+cfgrib==0.9.15.0
+xarray==2025.1.2
+numpy==2.0.2
+matplotlib==3.9.4
+requests==2.32.5
+eccodes==2.41.0

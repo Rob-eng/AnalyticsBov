@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart, generate_future_table
-from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url
+from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url, get_forecast_image
 from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
 
 
@@ -20,6 +20,7 @@ WAITING_LOCATION_MENU = 5
 WAITING_LOCATION_NAME = 6
 WAITING_LOCATION_COORDS = 7
 WAITING_LOCATION_DELETE = 8
+WAITING_FORECAST_PERIOD = 9
 
 MAIN_MENU_BUTTONS = [
     "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação", 
@@ -634,11 +635,99 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
         
+    # After showing historical data, offer forecast option
+        mode_keyboard = ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("🌧️ Histórico (30 dias)"), KeyboardButton("🔮 Previsão ECMWF")],
+                [KeyboardButton("🔙 Voltar ao Menu")]
+            ],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+        await update.message.reply_text(
+            "🔮 Deseja ver uma previsão de chuva ECMWF para este local?",
+            reply_markup=mode_keyboard
+        )
+        # Store lat/lon for forecast use
+        context.user_data['wx_lat'] = lat
+        context.user_data['wx_lon'] = lon
+        context.user_data['wx_loc_name'] = loc_name
+        return WAITING_FORECAST_PERIOD
+
     except Exception as e:
         print(f"Error in weather_info: {e}")
         import traceback
         print(traceback.format_exc())
         await status_msg.edit_text("❌ Ocorreu um erro ao processar sua solicitação de clima.")
+
+    return ConversationHandler.END
+
+
+async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles mode and period selection for the forecast sub-flow."""
+    chat_id = str(update.effective_chat.id)
+    text = update.message.text.strip()
+
+    if text == "🔙 Voltar ao Menu" or text == "🌧️ Histórico (30 dias)":
+        await update.message.reply_text("Ok!", reply_markup=get_keyboard(chat_id))
+        return ConversationHandler.END
+
+    if text == "🔮 Previsão ECMWF":
+        period_keyboard = ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("📅 1 dia"), KeyboardButton("📅 5 dias"), KeyboardButton("📅 10 dias")],
+                [KeyboardButton("❌ Cancelar")]
+            ],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+        await update.message.reply_text(
+            "Selecione o período de acumulação da previsão:",
+            reply_markup=period_keyboard
+        )
+        return WAITING_FORECAST_PERIOD
+
+    # Parse period
+    days_map = {"📅 1 dia": 1, "📅 5 dias": 5, "📅 10 dias": 10}
+    days = days_map.get(text)
+
+    if not days:
+        await update.message.reply_text("⚠️ Opção inválida. Escolha 1, 5 ou 10 dias.", reply_markup=get_keyboard(chat_id))
+        return ConversationHandler.END
+
+    lat = context.user_data.get('wx_lat')
+    lon = context.user_data.get('wx_lon')
+    loc_name = context.user_data.get('wx_loc_name', 'Local selecionado')
+
+    if lat is None or lon is None:
+        await update.message.reply_text("❌ Sessão expirou. Tente novamente.", reply_markup=get_keyboard(chat_id))
+        return ConversationHandler.END
+
+    status_msg = await update.message.reply_text(f"🛐 Baixando previsão ECMWF para {days} dia(s)... Isso pode levar até 2 minutos.")
+
+    try:
+        img_buf = get_forecast_image(lat, lon, days)
+        if img_buf:
+            period_label = f"{days} dia" + ("s" if days > 1 else "")
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=img_buf,
+                caption=(
+                    f"🌧️ *Previsão ECMWF IFS — {period_label} acumulado*\n"
+                    f"📍 *Local:* {loc_name}\n\n"
+                    "_Fonte: ECMWF Open Data. Res: 0.25° (~28 km)._"
+                ),
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text(
+                "❌ Não foi possível gerar a previsão. Verifique se o serviço ECMWF está ativo (WEATHER_SERVICE_URL)."
+            )
+            await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
+    except Exception as e:
+        print(f"Forecast period handler error: {e}")
+        await status_msg.edit_text("❌ Erro ao gerar previsão.")
+        await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
     return ConversationHandler.END
 
@@ -1204,7 +1293,8 @@ def create_bot_application(post_init=None):
             MessageHandler(filters.Regex("^🌧️ Precipitação$"), start_weather)
         ],
         states={
-            WAITING_WEATHER_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_weather_location)]
+            WAITING_WEATHER_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_weather_location)],
+            WAITING_FORECAST_PERIOD:  [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_forecast_period)],
         },
         fallbacks=[CommandHandler("cancelar", cancel_weather)]
     )
