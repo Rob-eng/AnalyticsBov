@@ -7,6 +7,7 @@ import os
 import io
 import tempfile
 import logging
+import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -77,10 +78,17 @@ def load_regional_data(grib_path: str, lat_center: float, lon_center: float, spa
     Loads data from GRIB2 and clips to a region around (lat_center, lon_center).
     Returns (lon_grid, lat_grid, precip_mm_grid, metadata_dict) or raises.
     """
-    import cfgrib
     import xarray as xr
 
-    ds = cfgrib.open_dataset(grib_path, backend_kwargs={"indexing_time": "valid_time"})
+    # Open GRIB2 with xarray's cfgrib engine (works with current cfgrib versions)
+    try:
+        ds = xr.open_dataset(grib_path, engine='cfgrib')
+    except Exception:
+        # Some GRIB files have multiple messages; open_datasets returns a list
+        import cfgrib
+        datasets = cfgrib.open_datasets(grib_path)
+        ds = datasets[0]
+
     tp = ds['tp']  # Shape: (lat, lon), unit: m
 
     # Convert to mm
@@ -205,8 +213,6 @@ def generate_forecast_map(lat: float, lon: float, forecast_days: int) -> io.Byte
     """
     Full pipeline: download ECMWF → load regional data → render map → return PNG BytesIO.
     """
-    import pandas as pd  # imported here to keep top-level imports light
-    
     with tempfile.TemporaryDirectory() as tmpdir:
         grib_path = download_ecmwf_precip(forecast_days, tmpdir)
         lon_grid, lat_grid, precip, meta = load_regional_data(grib_path, lat, lon)
