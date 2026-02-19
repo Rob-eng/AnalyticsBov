@@ -25,11 +25,20 @@ def ingest_ms():
     print(f"Found {total} features. Starting ingestion...")
 
     session = CarSessionLocal()
-    batch_size = 500
+    batch_size = 100 # Reduced from 500 for stability
     objects = []
     count = 0
     errors = 0
-    seen_ids = set()
+    
+    print("🔄 Fetching existing records to resume...", flush=True)
+    try:
+        existing = session.query(CARProperty.cod_imovel).filter(CARProperty.uf == 'MS').all()
+        seen_ids = {r[0] for r in existing}
+        print(f"✅ Found {len(seen_ids)} existing records. Resuming...", flush=True)
+    except Exception as e:
+        print(f"⚠️ Could not fetch existing records: {e}. Starting fresh.", flush=True)
+        seen_ids = set()
+
     
     # Pre-fetch existing IDs to avoid unique constraint violations if re-running
     # Actually, better to trust the database constraints and handle errors
