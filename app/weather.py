@@ -231,24 +231,35 @@ def get_forecast_image(lat: float, lon: float, days: int):
     Requires WEATHER_SERVICE_URL environment variable to be set.
     """
     import os
+    import traceback
     from io import BytesIO
     
     base_url = os.environ.get("WEATHER_SERVICE_URL", "").rstrip("/")
+    print(f"🌦️ WEATHER_SERVICE_URL = '{base_url}'", flush=True)
+    
     if not base_url:
-        print("WEATHER_SERVICE_URL not configured.")
+        print("❌ WEATHER_SERVICE_URL not configured.", flush=True)
         return None
     
+    # Test connectivity via health endpoint
     try:
-        resp = requests.get(
-            f"{base_url}/forecast",
-            params={"lat": lat, "lon": lon, "days": days},
-            timeout=120  # ECMWF download can take a while
-        )
+        health = requests.get(f"{base_url}/health", timeout=10)
+        print(f"  /health → {health.status_code}: {health.text[:100]}", flush=True)
+    except Exception as he:
+        print(f"  /health → FAILED: {he}", flush=True)
+    
+    try:
+        url = f"{base_url}/forecast"
+        params = {"lat": lat, "lon": lon, "days": days}
+        print(f"  Calling {url} params={params}", flush=True)
+        resp = requests.get(url, params=params, timeout=120)
+        print(f"  Response: {resp.status_code}", flush=True)
         if resp.status_code == 200:
             return BytesIO(resp.content)
         else:
-            print(f"Weather service error: {resp.status_code} — {resp.text[:200]}")
+            print(f"  Error body: {resp.text[:500]}", flush=True)
             return None
     except Exception as e:
-        print(f"Error contacting weather service: {e}")
+        print(f"❌ Weather service call failed: {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
         return None
