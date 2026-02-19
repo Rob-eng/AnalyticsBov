@@ -22,9 +22,13 @@ def run_migration():
     print("🧹 Step 1: Cleaning DB (Truncate)")
     cleanup_db.cleanup()
     
-    # 2. Download
-    print("⬇️ Step 2: Downloading MS Data")
-    download_car_data_v2.download_car_data_paginated()
+    # 2. Download (Skip if file exists and provided manually)
+    filepath = "car_ms.geojson"
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 1024 * 1024:
+        print("⬇️ Step 2: File provided manually (Skipping Download)")
+    else:
+        print("⬇️ Step 2: Downloading MS Data")
+        download_car_data_v2.download_car_data_paginated()
     
     # 3. Ingest
     print("📥 Step 3: Ingesting MS Data")
