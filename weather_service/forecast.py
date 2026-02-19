@@ -202,62 +202,73 @@ def _pe(fg='black', lw=2):
 
 
 # ─────────────────────────────────────────────
-# Main dual-panel render
+# Individual map renderers
 # ─────────────────────────────────────────────
-def render_dual_map(lon_grid_wide, lat_grid_wide, precip_wide,
-                    lon_grid_close, lat_grid_close, precip_close,
-                    meta: dict,
+def render_wide_map(lon_grid, lat_grid, precip, meta: dict,
                     lat_pin: float, lon_pin: float,
-                    forecast_days: int,
-                    polygon_geojson: str | None = None) -> io.BytesIO:
+                    forecast_days: int) -> io.BytesIO:
+    """Wide regional map with country + state borders."""
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=110, facecolor='#1a1a2e')
+    fig.subplots_adjust(left=0.06, right=0.88, top=0.88, bottom=0.07)
+    ax.set_facecolor('#0d0d1a')
 
-    fig, axes = plt.subplots(1, 2, figsize=(18, 8), dpi=100,
-                             facecolor='#1a1a2e')
-    fig.subplots_adjust(wspace=0.05, left=0.04, right=0.93, top=0.88, bottom=0.07)
+    ext = (lon_grid.min(), lon_grid.max(), lat_grid.min(), lat_grid.max())
+    mesh = _draw_precip(ax, lon_grid, lat_grid, precip)
+    _draw_borders(ax, ext)
 
-    # ── 1. Wide panel ──────────────────────────────────────────────────────
-    ax_w = axes[0]
-    ax_w.set_facecolor('#0d0d1a')
+    ax.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=15,
+            markeredgecolor='black', markeredgewidth=1.0, zorder=10)
+    ax.text(lon_pin + 0.35, lat_pin + 0.35,
+            f"  {meta['point_mm']:.1f} mm",
+            fontsize=10, color='white', fontweight='bold', zorder=11,
+            path_effects=_pe())
 
-    wide_extent = (lon_grid_wide.min(), lon_grid_wide.max(),
-                   lat_grid_wide.min(), lat_grid_wide.max())
-
-    mesh = _draw_precip(ax_w, lon_grid_wide, lat_grid_wide, precip_wide)
-    _draw_borders(ax_w, wide_extent)
-
-    # Property marker
-    ax_w.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=14,
-              markeredgecolor='black', markeredgewidth=1.0, zorder=10)
-    ax_w.text(lon_pin + 0.3, lat_pin + 0.3,
-              f"  {meta['point_mm']:.1f} mm",
-              fontsize=9, color='white', fontweight='bold', zorder=11,
-              path_effects=_pe())
-
-    ax_w.set_xlim(wide_extent[0], wide_extent[1])
-    ax_w.set_ylim(wide_extent[2], wide_extent[3])
-    ax_w.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
-    ax_w.set_ylabel('Latitude',  fontsize=8, color='#aaaaaa')
-    ax_w.tick_params(colors='#aaaaaa', labelsize=7)
-    ax_w.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
-    ax_w.spines[:].set_edgecolor('#444466')
+    ax.set_xlim(ext[0], ext[1])
+    ax.set_ylim(ext[2], ext[3])
+    ax.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
+    ax.set_ylabel('Latitude',  fontsize=8, color='#aaaaaa')
+    ax.tick_params(colors='#aaaaaa', labelsize=7)
+    ax.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
+    ax.spines[:].set_edgecolor('#444466')
 
     period_label = f"{forecast_days} dia{'s' if forecast_days > 1 else ''}"
-    ax_w.set_title(
-        f"ECMWF IFS — Acumulado {period_label}  |  F{meta['step_h']:03d}\n"
+    ax.set_title(
+        f"ECMWF IFS — Precipitação Acumulada {period_label}  |  F{meta['step_h']:03d}\n"
         f"Início: {meta['init_time']}   Válido: {meta['valid_time']}",
-        loc='left', fontsize=10, fontweight='bold', color='white', pad=10
+        loc='left', fontsize=11, fontweight='bold', color='white', pad=10
     )
 
-    # ── 2. Close panel ─────────────────────────────────────────────────────
-    ax_c = axes[1]
-    ax_c.set_facecolor('#0d0d1a')
+    cbar_ax = fig.add_axes([0.895, 0.07, 0.016, 0.78])
+    cb = fig.colorbar(mesh, cax=cbar_ax, extend='max',
+                      ticks=[0, 5, 10, 20, 30, 50, 70, 100, 150, 200, 300])
+    cb.set_label('Precipitação Acumulada (mm)', fontsize=8, color='white', labelpad=8)
+    cb.ax.tick_params(colors='white', labelsize=7)
+    cb.outline.set_edgecolor('#444466')
 
-    close_extent = (lon_grid_close.min(), lon_grid_close.max(),
-                    lat_grid_close.min(), lat_grid_close.max())
+    fig.text(0.5, 0.01,
+             f"ECMWF Open Data IFS · 0.25° (~28 km) · Máx: {meta['max_mm']:.1f} mm",
+             ha='center', va='bottom', fontsize=7.5, color='#888888')
 
-    _draw_precip(ax_c, lon_grid_close, lat_grid_close, precip_close,
-                 draw_contours=False)
-    _draw_borders(ax_c, close_extent)
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight',
+                facecolor=fig.get_facecolor(), dpi=110)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+
+def render_close_map(lon_grid, lat_grid, precip, meta: dict,
+                     lat_pin: float, lon_pin: float,
+                     forecast_days: int,
+                     polygon_geojson: str | None = None) -> io.BytesIO:
+    """Close-up map with property pin and optional CAR polygon."""
+    fig, ax = plt.subplots(figsize=(10, 9), dpi=110, facecolor='#1a1a2e')
+    fig.subplots_adjust(left=0.08, right=0.88, top=0.88, bottom=0.07)
+    ax.set_facecolor('#0d0d1a')
+
+    ext = (lon_grid.min(), lon_grid.max(), lat_grid.min(), lat_grid.max())
+    mesh = _draw_precip(ax, lon_grid, lat_grid, precip, draw_contours=False)
+    _draw_borders(ax, ext)
 
     # CAR polygon
     if polygon_geojson:
@@ -271,76 +282,77 @@ def render_dual_map(lon_grid_wide, lat_grid_wide, precip_wide,
                 coords = None
             if coords:
                 xs, ys = zip(*coords)
-                ax_c.plot(xs, ys, color='white', linewidth=2.0,
-                          linestyle='-', zorder=8)
-                ax_c.fill(xs, ys, alpha=0.08, color='white', zorder=7)
+                ax.plot(xs, ys, color='#FFD700', linewidth=2.2, linestyle='-', zorder=8)
+                ax.fill(xs, ys, alpha=0.12, color='#FFD700', zorder=7)
         except Exception as e:
             logger.warning(f"Could not draw polygon: {e}")
 
     # Property pin
-    ax_c.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=16,
-              markeredgecolor='black', markeredgewidth=1.2, zorder=10)
+    ax.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=18,
+            markeredgecolor='black', markeredgewidth=1.5, zorder=10)
 
     # Value box
-    ax_c.text(0.97, 0.04,
-              f"📍 {meta['point_mm']:.1f} mm",
-              transform=ax_c.transAxes, ha='right', va='bottom',
-              fontsize=12, fontweight='bold', color='yellow',
-              path_effects=_pe(lw=3),
-              zorder=12)
+    ax.text(0.97, 0.05, f"📍 {meta['point_mm']:.1f} mm",
+            transform=ax.transAxes, ha='right', va='bottom',
+            fontsize=14, fontweight='bold', color='#FFD700',
+            path_effects=_pe(lw=4), zorder=12)
 
-    ax_c.set_xlim(close_extent[0], close_extent[1])
-    ax_c.set_ylim(close_extent[2], close_extent[3])
-    ax_c.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
-    ax_c.tick_params(colors='#aaaaaa', labelsize=7)
-    ax_c.yaxis.set_ticklabels([])
-    ax_c.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
-    ax_c.spines[:].set_edgecolor('#444466')
-    ax_c.set_title('Detalhe da Propriedade', loc='left',
-                   fontsize=10, fontweight='bold', color='white', pad=10)
+    ax.set_xlim(ext[0], ext[1])
+    ax.set_ylim(ext[2], ext[3])
+    ax.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
+    ax.set_ylabel('Latitude',  fontsize=8, color='#aaaaaa')
+    ax.tick_params(colors='#aaaaaa', labelsize=7)
+    ax.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
+    ax.spines[:].set_edgecolor('#444466')
 
-    # ── Shared colorbar ────────────────────────────────────────────────────
-    cbar_ax = fig.add_axes([0.94, 0.07, 0.015, 0.78])
+    period_label = f"{forecast_days} dia{'s' if forecast_days > 1 else ''}"
+    ax.set_title(
+        f"Detalhe da Propriedade — {period_label} acumulado\n"
+        f"Perím. CAR {'✅ plotado' if polygon_geojson else '⬜ não disponível'}",
+        loc='left', fontsize=11, fontweight='bold', color='white', pad=10
+    )
+
+    cbar_ax = fig.add_axes([0.895, 0.07, 0.016, 0.78])
     cb = fig.colorbar(mesh, cax=cbar_ax, extend='max',
                       ticks=[0, 5, 10, 20, 30, 50, 70, 100, 150, 200, 300])
-    cb.set_label('Precipitação Acumulada (mm)', fontsize=8,
-                 color='white', labelpad=8)
+    cb.set_label('Precipitação Acumulada (mm)', fontsize=8, color='white', labelpad=8)
     cb.ax.tick_params(colors='white', labelsize=7)
     cb.outline.set_edgecolor('#444466')
 
-    # ── Footer ─────────────────────────────────────────────────────────────
-    fig.text(0.5, 0.01,
-             f"Fonte: ECMWF Open Data IFS · Resolução: 0.25° (~28 km) · "
-             f"Máx regional: {meta['max_mm']:.1f} mm",
-             ha='center', va='bottom', fontsize=7.5, color='#888888')
-
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight',
-                facecolor=fig.get_facecolor(), dpi=100)
+                facecolor=fig.get_facecolor(), dpi=110)
     buf.seek(0)
     plt.close(fig)
     return buf
 
 
 # ─────────────────────────────────────────────
-# Full pipeline
+# Public API entry point  
 # ─────────────────────────────────────────────
-def generate_forecast_map(lat: float, lon: float, forecast_days: int,
-                          polygon_geojson: str | None = None) -> io.BytesIO:
+def generate_single_map(lat: float, lon: float, forecast_days: int,
+                        view: str = 'wide',
+                        polygon_geojson: str | None = None) -> io.BytesIO:
     """
-    Full pipeline: download ECMWF → load regional data (wide + close) →
-    render dual-panel map → return PNG BytesIO.
+    Download ECMWF data and render a single map (wide or close).
+    `view` must be 'wide' or 'close'.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         grib_path = download_ecmwf_precip(forecast_days, tmpdir)
 
-        # Wide panel: ±25° span
-        lon_w, lat_w, prec_w, meta = load_regional_data(grib_path, lat, lon, span=25.0)
+        if view == 'wide':
+            lon_g, lat_g, prec, meta = load_regional_data(
+                grib_path, lat, lon, span=25.0)
+            return render_wide_map(lon_g, lat_g, prec, meta, lat, lon, forecast_days)
+        else:  # close
+            lon_g, lat_g, prec, meta = load_regional_data(
+                grib_path, lat, lon, span=1.0)
+            return render_close_map(lon_g, lat_g, prec, meta, lat, lon,
+                                    forecast_days, polygon_geojson=polygon_geojson)
 
-        # Close panel: ±1.0° span
-        lon_c, lat_c, prec_c, _ = load_regional_data(grib_path, lat, lon, span=1.0)
 
-        return render_dual_map(lon_w, lat_w, prec_w,
-                               lon_c, lat_c, prec_c,
-                               meta, lat, lon, forecast_days,
-                               polygon_geojson=polygon_geojson)
+# Keep for backward compat
+def generate_forecast_map(lat: float, lon: float, forecast_days: int,
+                          polygon_geojson: str | None = None) -> io.BytesIO:
+    return generate_single_map(lat, lon, forecast_days, 'wide', polygon_geojson)
+

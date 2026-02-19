@@ -20,28 +20,32 @@ def health():
 
 
 @app.get("/forecast")
-def get_forecast(lat: float, lon: float, days: int = 5, polygon: str = None):
+def get_forecast(lat: float, lon: float, days: int = 5,
+                 view: str = "wide", polygon: str = None):
     """
-    Returns a dual-panel PNG: wide regional map + close-up with optional CAR polygon.
+    Returns a single PNG for either the wide or close view.
+    Call twice (view=wide, view=close) to get both images separately.
 
     Args:
-        lat:     Latitude of the property/location
-        lon:     Longitude of the property/location
+        lat:     Latitude of property
+        lon:     Longitude of property
         days:    Accumulation period — 1, 5, or 10
+        view:    'wide' (regional, country+state borders) or 'close' (property detail)
         polygon: Optional GeoJSON geometry string for the CAR property perimeter
     """
     if days not in (1, 5, 10):
         raise HTTPException(status_code=400, detail="days must be 1, 5, or 10")
-
+    if view not in ("wide", "close"):
+        raise HTTPException(status_code=400, detail="view must be 'wide' or 'close'")
     if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
         raise HTTPException(status_code=400, detail="Invalid lat/lon coordinates")
 
     logger.info(f"Forecast request: lat={lat}, lon={lon}, days={days}, "
-                f"polygon={'yes' if polygon else 'no'}")
+                f"view={view}, polygon={'yes' if polygon else 'no'}")
 
     try:
-        png_buf = generate_forecast_map(lat=lat, lon=lon, forecast_days=days,
-                                        polygon_geojson=polygon)
+        png_buf = generate_single_map(lat=lat, lon=lon, forecast_days=days,
+                                      view=view, polygon_geojson=polygon)
     except Exception as e:
         logger.error(f"Forecast generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500,
@@ -50,5 +54,5 @@ def get_forecast(lat: float, lon: float, days: int = 5, polygon: str = None):
     return StreamingResponse(
         png_buf,
         media_type="image/png",
-        headers={"Content-Disposition": f"inline; filename=forecast_{days}d.png"}
+        headers={"Content-Disposition": f"inline; filename=forecast_{view}_{days}d.png"}
     )

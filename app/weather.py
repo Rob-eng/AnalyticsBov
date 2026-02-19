@@ -227,42 +227,38 @@ def generate_weather_map_with_title(lat, lon, title=None):
 
 def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str = None):
     """
-    Calls the ECMWF Weather Forecast Microservice and returns a BytesIO PNG buffer.
-    Requires WEATHER_SERVICE_URL environment variable to be set.
+    Calls the ECMWF Weather Forecast Microservice.
+    Returns a tuple (wide_buf, close_buf) of BytesIO PNGs, or (None, None) on failure.
     """
     import os
     import traceback
     from io import BytesIO
-    
+
     base_url = os.environ.get("WEATHER_SERVICE_URL", "").rstrip("/")
     print(f"🌦️ WEATHER_SERVICE_URL = '{base_url}'", flush=True)
-    
+
     if not base_url:
         print("❌ WEATHER_SERVICE_URL not configured.", flush=True)
-        return None
-    
-    # Test connectivity via health endpoint
-    try:
-        health = requests.get(f"{base_url}/health", timeout=10)
-        print(f"  /health → {health.status_code}: {health.text[:100]}", flush=True)
-    except Exception as he:
-        print(f"  /health → FAILED: {he}", flush=True)
-    
-    try:
+        return None, None
+
+    def _fetch(view):
         url = f"{base_url}/forecast"
-        params = {"lat": lat, "lon": lon, "days": days}
-        if polygon_geojson:
+        params = {"lat": lat, "lon": lon, "days": days, "view": view}
+        if view == "close" and polygon_geojson:
             params["polygon"] = polygon_geojson
-        print(f"  Calling {url} params=lat={lat},lon={lon},days={days},"
-              f"polygon={'yes' if polygon_geojson else 'no'}", flush=True)
+        print(f"  Calling {url} view={view} polygon={'yes' if params.get('polygon') else 'no'}", flush=True)
         resp = requests.get(url, params=params, timeout=120)
-        print(f"  Response: {resp.status_code}", flush=True)
+        print(f"  Response [{view}]: {resp.status_code}", flush=True)
         if resp.status_code == 200:
             return BytesIO(resp.content)
-        else:
-            print(f"  Error body: {resp.text[:500]}", flush=True)
-            return None
+        print(f"  Error body [{view}]: {resp.text[:300]}", flush=True)
+        return None
+
+    try:
+        wide_buf  = _fetch("wide")
+        close_buf = _fetch("close")
+        return wide_buf, close_buf
     except Exception as e:
         print(f"❌ Weather service call failed: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc()
-        return None
+        return None, None
