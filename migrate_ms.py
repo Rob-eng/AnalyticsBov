@@ -22,12 +22,21 @@ def run_migration():
     print("🧹 Step 1: Cleaning DB (Truncate) - SKIPPED to allow resuming")
     # cleanup_db.cleanup()
     
-    # 2. Download (Skip if file exists and provided manually)
-    filepath = "car_ms.geojson"
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 1024 * 1024:
-        print("⬇️ Step 2: File provided manually (Skipping Download)")
+    # 2. Unzip/Download
+    zip_path = "car_ms.zip"
+    geojson_path = "car_ms.geojson"
+
+    if os.path.exists(zip_path):
+        print(f"📦 Found {zip_path}, extracting...", flush=True)
+        import zipfile
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(".")
+        print("✅ Extracted car_ms.geojson from zip.", flush=True)
+
+    if os.path.exists(geojson_path) and os.path.getsize(geojson_path) > 1024 * 1024:
+        print("⬇️ Step 2: File ready (Skipping Download)", flush=True)
     else:
-        print("⬇️ Step 2: Downloading MS Data")
+        print("⬇️ Step 2: Downloading MS Data", flush=True)
         download_car_data_v2.download_car_data_paginated()
     
     # 3. Ingest
