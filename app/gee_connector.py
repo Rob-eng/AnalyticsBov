@@ -46,6 +46,7 @@ def initialize_gee(key_file="service_account.json"):
 def get_ndvi_image(geometry_geojson):
     """
     Generates an NDVI image URL and stats from Sentinel-2 for the given geometry.
+    Selects the most recent image that is cloud-free INSIDE the specific polygon.
     Returns: {
         'image_url': str,
         'stats': dict, # {mean: float}
@@ -54,26 +55,19 @@ def get_ndvi_image(geometry_geojson):
     } or None
     """
     try:
-        # Lazy initialization
-        # We can just try to initialize properly
         if not initialize_gee():
              return None
 
-        # Convert GeoJSON to EE Geometry
-        # EE expects GeoJSON geometry object (type, coordinates)
         geom = ee.Geometry(geometry_geojson)
         
-        # 1. Filter Sentinel-2 Collection (Level-2A Surface Reflectance)
-        # 1. Filter Sentinel-2 Collection (Level-2A Surface Reflectance)
-        # Use Harmonized collection as S2_SR is deprecated
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=180) # 6 months window
+        start_date = end_date - timedelta(days=90)  # 3 month search window
         
+        # Load collection sorted newest-first
         collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                       .filterBounds(geom)
                       .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
-                      .sort('CLOUDY_PIXEL_PERCENTAGE'))
+                      .sort('system:time_start', False))  # False = descending (newest first)
         
         count = collection.size().getInfo()
         print(f"Found {count} images in GEE collection.")
@@ -81,27 +75,65 @@ def get_ndvi_image(geometry_geojson):
         if count == 0:
             print("No Sentinel-2 images found in date range.")
             return None
-            
-        # Get best image (least cloudy)
-        image = collection.first()
+
+        # --- Per-polygon cloud detection ---
+        # SCL band values: 8=Cloud Medium Probability, 9=Cloud High Probability, 10=Thin Cirrus, 3=Cloud Shadow
+        CLOUD_SCL_VALUES = [3, 8, 9, 10]
+        
+        def add_cloud_fraction(img):
+            """Add a per-polygon cloud fraction property to each image."""
+            scl = img.select('SCL')
+            # Create a binary cloud mask: 1 = cloud/shadow, 0 = clear
+            cloud_mask = scl.eq(3).Or(scl.eq(8)).Or(scl.eq(9)).Or(scl.eq(10))
+            # Compute mean within polygon (= fraction of cloudy pixels)
+            cloud_stat = cloud_mask.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geom,
+                scale=20,  # SCL is 20m resolution
+                maxPixels=1e8
+            )
+            cloud_fraction = ee.Number(cloud_stat.get('SCL')).multiply(100)
+            return img.set('cloud_fraction_polygon', cloud_fraction)
+        
+        # Map and filter: keep only images with < 15% cloud IN the polygon
+        cloud_checked = collection.map(add_cloud_fraction)
+        clear_collection = cloud_checked.filter(ee.Filter.lt('cloud_fraction_polygon', 15))
+        
+        clear_count = clear_collection.size().getInfo()
+        print(f"Images with <15% cloud over polygon: {clear_count}")
+        
+        if clear_count == 0:
+            # Relax threshold to 35% and try again
+            print("Relaxing cloud threshold to 35%...")
+            clear_collection = cloud_checked.filter(ee.Filter.lt('cloud_fraction_polygon', 35))
+            clear_count = clear_collection.size().getInfo()
+            if clear_count == 0:
+                print("No usable images found even with relaxed threshold.")
+                return None
+        
+        # Pick the MOST RECENT clear image (collection is already sorted newest-first)
+        image = clear_collection.first()
         
         # Extract metadata
-        # System properties like time_start are not always in toDictionary()
         date_timestamp = image.get('system:time_start').getInfo()
-        cloud_max = image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()
+        cloud_fraction_polygon = image.get('cloud_fraction_polygon').getInfo()
         
         if date_timestamp is None:
-            # Fallback for debugging
-            print(f"Error: Image has no time_start. Keys: {image.propertyNames().getInfo()}")
+            print(f"Error: Image has no time_start.")
             return None
-        # Use UTC to avoid timezone shifts (e.g. showing tomorrow's date)
+        
         date_str = datetime.utcfromtimestamp(date_timestamp / 1000).strftime('%Y-%m-%d')
-        print(f"Image Date (UTC): {date_str} (Timestamp: {date_timestamp})")
+        print(f"Selected Image: {date_str} | Cloud in polygon: {cloud_fraction_polygon:.1f}%")
         
-        # 2. Calculate NDVI: (B8 - B4) / (B8 + B4)
-        ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+        # Calculate NDVI: (B8 - B4) / (B8 + B4)
+        # Apply cloud mask before computing NDVI
+        scl = image.select('SCL')
+        cloud_mask = scl.eq(3).Or(scl.eq(8)).Or(scl.eq(9)).Or(scl.eq(10)).Not()
+        masked_image = image.updateMask(cloud_mask)
         
-        # 3. Calculate Stats
+        ndvi = masked_image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+        
+        # Calculate Stats
         stats = ndvi.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=geom,
@@ -111,12 +143,9 @@ def get_ndvi_image(geometry_geojson):
         
         ndvi_mean = stats.get('NDVI')
         
-        # 4. Generate Thumbnail URL
-        # Calculate a square region to avoid distortion when plotting in a square box
-        # Get bounds of the buffered geometry
+        # Generate Thumbnail URL
         bounds_poly = geom.buffer(100).bounds()
         coords = bounds_poly.coordinates().get(0).getInfo()
-        # coords is list of [x, y]
         lons = [c[0] for c in coords]
         lats = [c[1] for c in coords]
         min_lon, max_lon = min(lons), max(lons)
@@ -128,8 +157,6 @@ def get_ndvi_image(geometry_geojson):
         span_lon = max_lon - min_lon
         span_lat = max_lat - min_lat
         max_span = max(span_lon, span_lat)
-        
-        # Create square bounds (with slight padding)
         half_span = max_span / 2 * 1.1 
         
         square_region = ee.Geometry.Polygon([[
@@ -152,12 +179,12 @@ def get_ndvi_image(geometry_geojson):
         url = ndvi.getThumbURL(vis_params)
         return {
             "poly_id": "GEE_Sentinel2", 
-            "ndvi_img": url, # This will be the URL, not BytesIO object as per original function signature
+            "ndvi_img": url,
             "image_url": url,
             "stats": {'mean': ndvi_mean},
             "date": date_str,
-            "timestamp": date_timestamp, # Return raw millis
-            "cloud_cover": cloud_max,
+            "timestamp": date_timestamp,
+            "cloud_cover": cloud_fraction_polygon,
             "region_bbox": {
                 "min_lon": center_lon - half_span,
                 "min_lat": center_lat - half_span,
