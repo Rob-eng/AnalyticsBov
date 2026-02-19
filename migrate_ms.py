@@ -19,8 +19,8 @@ def run_migration():
     # Importing it runs top-level code? No, only defs.
     # But I need to call `cleanup()`.
     
-    print("🧹 Step 1: Cleaning DB (Truncate)")
-    cleanup_db.cleanup()
+    print("🧹 Step 1: Cleaning DB (Truncate) - SKIPPED to allow resuming")
+    # cleanup_db.cleanup()
     
     # 2. Download (Skip if file exists and provided manually)
     filepath = "car_ms.geojson"
