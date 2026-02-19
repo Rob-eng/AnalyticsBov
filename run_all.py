@@ -55,38 +55,45 @@ def run_bot_process():
              print(f"DB Init Warning: {e}", flush=True)
 
         application = create_bot_application()
-        
-        # Setup Scheduler
-        # print("Setting up Scheduler...", flush=True)
-        # scheduler = setup_scheduler(application)
-        # scheduler.start()
-        
+
         # Start Polling
         print("Starting Bot Polling...", flush=True)
         await application.initialize()
         await application.start()
-        
+
         # Drop pending updates to flush any old conflicting offset
         print(" Clearing pending updates...", flush=True)
         await application.updater.start_polling(drop_pending_updates=True)
-        
-        print("✅ Bot Polling Started Successfully!", flush=True)
-        
-        # Keep the bot running
-        stop_signal = asyncio.Event()
-        await stop_signal.wait()
 
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"❌ Bot Crash: {e}", flush=True)
-    finally:
-        # We can't easily access 'application' here to stop it gracefully in this structure
-        # but the process termination handles it.
-        # Ideally main() should have a finally block.
-        pass
+        print("✅ Bot Polling Started Successfully!", flush=True)
+
+        # Keep the bot running
+        try:
+            stop_signal = asyncio.Event()
+            await stop_signal.wait()
+        finally:
+            print("🛑 Bot shutting down...", flush=True)
+            await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
+
+    MAX_RETRIES = 10
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            asyncio.run(main())
+            break  # Clean exit
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "Conflict" in err_str or "getUpdates" in err_str:
+                wait_sec = 30
+                print(f"⚠️ Bot Conflict (attempt {attempt}/{MAX_RETRIES}): old instance still running. "
+                      f"Waiting {wait_sec}s before retry...", flush=True)
+                time.sleep(wait_sec)
+            else:
+                print(f"❌ Bot Crash (attempt {attempt}/{MAX_RETRIES}): {e}", flush=True)
+                time.sleep(5)
 
 if __name__ == "__main__":
     # Ensure support for spawn on all platforms (optional but good practice)
