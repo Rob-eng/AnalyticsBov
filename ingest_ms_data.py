@@ -32,10 +32,16 @@ def ingest_ms():
         print(f"⚠️ Could not fetch existing records: {e}. Starting fresh.", flush=True)
         seen_ids = set()
 
+import time
+
     try:
         with open(filepath, 'rb') as f:
             # Stream features one by one
-            for feat in ijson.items(f, 'features.item'):
+            for i, feat in enumerate(ijson.items(f, 'features.item')):
+                # Yield CPU every 1000 items to keep Health Checks alive
+                if i % 1000 == 0:
+                    time.sleep(0.02)
+                    
                 try:
                     props = feat.get('properties', {})
                     cod = props.get('cod_imovel')
@@ -84,6 +90,7 @@ def ingest_ms():
                         try:
                             session.bulk_save_objects(objects)
                             session.commit()
+                            time.sleep(0.1) # Yield after I/O
                             count += len(objects)
                             print(f"  Committed +{len(objects)} records (Total: {count})...", end='\r')
                         except Exception as e:
