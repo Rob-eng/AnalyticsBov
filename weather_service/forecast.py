@@ -1,10 +1,13 @@
 """
-forecast.py — ECMWF Open Data download + matplotlib map rendering.
-Fetches the latest ECMWF IFS (ex-HRES) total precipitation forecast
-and generates a regional PNG map in the style of IgorRoik/ECMWF.
+forecast.py — ECMWF Open Data download + dual-panel matplotlib map rendering.
+
+Generates two side-by-side maps:
+  Left  → Wide regional view with country + Brazilian state borders
+  Right → Close-up view with CAR property polygon (if provided)
 """
 import os
 import io
+import json
 import tempfile
 import logging
 import pandas as pd
@@ -15,7 +18,9 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as path_effects
+import matplotlib.patches as mpatches
 from matplotlib.colors import BoundaryNorm, ListedColormap
+from shapely.geometry import shape
 
 logger = logging.getLogger(__name__)
 
@@ -36,184 +41,306 @@ def _build_cmap():
 
 CMAP, NORM = _build_cmap()
 
-
 # ─────────────────────────────────────────────
 # ECMWF step mapping: days → forecast hours
 # ─────────────────────────────────────────────
-# ECMWF IFS 0.25° provides 'tp' (total precip from t=0) at 6h steps.
-# To get accumulated precip for N days we use step=N*24
 DAYS_TO_STEP = {1: 24, 5: 120, 10: 240}
 
+# ─────────────────────────────────────────────
+# Lazy-loaded geographic boundary data
+# ─────────────────────────────────────────────
+_geo_cache = {}
 
-def download_ecmwf_precip(forecast_days: int, target_dir: str):
-    """
-    Downloads the latest ECMWF Open Data total precipitation GRIB file.
-    Returns path of the downloaded file or raises on failure.
-    """
+def _load_geo_data():
+    """Load Natural Earth country + Brazilian state boundaries (lazy, cached)."""
+    if _geo_cache:
+        return _geo_cache
+
+    import geopandas as gpd
+
+    try:
+        # Countries — 110m resolution bundled with geopandas (naturalearth_lowres)
+        world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+        _geo_cache['world'] = world
+        logger.info("Loaded naturalearth_lowres countries OK")
+    except Exception as e:
+        logger.warning(f"Could not load world boundaries: {e}")
+        _geo_cache['world'] = None
+
+    try:
+        # Brazilian states — download from Natural Earth 50m (small, reliable)
+        brazil_url = (
+            "https://naciscdn.org/naturalearth/50m/cultural/"
+            "ne_50m_admin_1_states_provinces.zip"
+        )
+        states_all = gpd.read_file(brazil_url)
+        _geo_cache['brazil_states'] = states_all[states_all['admin'] == 'Brazil']
+        logger.info("Loaded Brazil state boundaries OK")
+    except Exception as e:
+        logger.warning(f"Could not load Brazil state boundaries: {e}")
+        _geo_cache['brazil_states'] = None
+
+    return _geo_cache
+
+
+# ─────────────────────────────────────────────
+# ECMWF download
+# ─────────────────────────────────────────────
+def download_ecmwf_precip(forecast_days: int, target_dir: str) -> str:
     from ecmwf.opendata import Client
 
     step = DAYS_TO_STEP.get(forecast_days)
     if step is None:
-        raise ValueError(f"forecast_days must be 1, 5, or 10. Got {forecast_days}")
+        raise ValueError(f"forecast_days must be 1, 5 or 10. Got {forecast_days}")
 
     client = Client(source="ecmwf")
-
-    # Find the latest available run (ECMWF publishes ~6h after run time)
-    # Runs: 00 and 12 UTC. Default: latest.
     outfile = os.path.join(target_dir, f"ecmwf_tp_{forecast_days}d.grib2")
-    
     logger.info(f"Downloading ECMWF tp step={step}h ...")
-    client.retrieve(
-        type="fc",
-        param="tp",
-        step=step,
-        target=outfile,
-    )
+    client.retrieve(type="fc", param="tp", step=step, target=outfile)
     logger.info(f"Downloaded: {outfile}")
     return outfile
 
 
-def load_regional_data(grib_path: str, lat_center: float, lon_center: float, span: float = 8.0):
+# ─────────────────────────────────────────────
+# GRIB loading + regional clip
+# ─────────────────────────────────────────────
+def load_regional_data(grib_path: str, lat_center: float, lon_center: float,
+                       span: float = 25.0):
     """
-    Loads data from GRIB2 and clips to a region around (lat_center, lon_center).
-    Returns (lon_grid, lat_grid, precip_mm_grid, metadata_dict) or raises.
+    Load GRIB2, clip to a region of ±span° around (lat_center, lon_center).
+    Returns (lon_grid, lat_grid, precip_mm_grid, metadata_dict).
     """
     import xarray as xr
 
-    # Open GRIB2 with xarray's cfgrib engine (works with current cfgrib versions)
     try:
         ds = xr.open_dataset(grib_path, engine='cfgrib')
     except Exception:
-        # Some GRIB files have multiple messages; open_datasets returns a list
         import cfgrib
         datasets = cfgrib.open_datasets(grib_path)
         ds = datasets[0]
 
-    tp = ds['tp']  # Shape: (lat, lon), unit: m
+    tp = ds['tp']          # unit: m
+    tp_mm = tp * 1000.0    # to mm
 
-    # Convert to mm
-    tp_mm = tp * 1000.0
-
-    # Clip region
     lat_arr = tp.latitude.values
     lon_arr = tp.longitude.values
 
-    # Normalize longitudes to [-180, 180] if needed (ECMWF uses 0-360)
+    # Normalise longitudes 0-360 → -180-180
     if lon_arr.max() > 180:
         lon_arr = np.where(lon_arr > 180, lon_arr - 360, lon_arr)
 
-    lat_min = lat_center - span
-    lat_max = lat_center + span
-    lon_min = lon_center - span
-    lon_max = lon_center + span
+    lat_mask = (lat_arr >= lat_center - span) & (lat_arr <= lat_center + span)
+    lon_mask = (lon_arr >= lon_center - span) & (lon_arr <= lon_center + span)
 
-    lat_mask = (lat_arr >= lat_min) & (lat_arr <= lat_max)
-    lon_mask = (lon_arr >= lon_min) & (lon_arr <= lon_max)
-
-    tp_clipped = tp_mm.values[np.ix_(lat_mask, lon_mask)]
-    lat_clip = lat_arr[lat_mask]
-    lon_clip = lon_arr[lon_mask]
-
+    tp_clipped   = tp_mm.values[np.ix_(lat_mask, lon_mask)]
+    lat_clip     = lat_arr[lat_mask]
+    lon_clip     = lon_arr[lon_mask]
     lon_grid, lat_grid = np.meshgrid(lon_clip, lat_clip)
 
-    # Point value at property location (nearest grid)
-    lat_idx = np.argmin(np.abs(lat_arr - lat_center))
-    lon_idx = np.argmin(np.abs(lon_arr - lon_center))
-    point_mm = float(tp_mm.values[lat_idx, lon_idx])
-    max_mm   = float(tp_mm.values.max())
+    # Point value at property (nearest grid cell)
+    lat_idx   = np.argmin(np.abs(lat_arr - lat_center))
+    lon_idx   = np.argmin(np.abs(lon_arr - lon_center))
+    point_mm  = float(tp_mm.values[lat_idx, lon_idx])
+    max_mm    = float(tp_mm.values.max())
 
-    # Metadata
     try:
         valid_time = pd.Timestamp(tp.valid_time.values).strftime('%d/%b/%Y %HUTC')
         init_time  = pd.Timestamp(ds.time.values).strftime('%d/%b/%Y %HUTC')
+        step_h     = int(ds.step.values / np.timedelta64(1, 'h'))
     except Exception:
-        valid_time = "N/A"
-        init_time  = "N/A"
+        valid_time, init_time, step_h = "N/A", "N/A", 0
 
     meta = {
         "valid_time": valid_time,
-        "init_time": init_time,
-        "step_h": int(ds.step.values / np.timedelta64(1, 'h')),
-        "point_mm": point_mm,
-        "max_mm": max_mm,
+        "init_time":  init_time,
+        "step_h":     step_h,
+        "point_mm":   point_mm,
+        "max_mm":     max_mm,
     }
-
     return lon_grid, lat_grid, tp_clipped, meta
 
 
-def render_map(lon_grid, lat_grid, precip, meta: dict,
-               lat_pin: float, lon_pin: float, forecast_days: int) -> io.BytesIO:
-    """
-    Renders the precipitation map using matplotlib (no cartopy).
-    Returns a BytesIO PNG buffer.
-    """
-    fig, ax = plt.subplots(figsize=(10, 8), dpi=110, facecolor='#f0f0f8')
+# ─────────────────────────────────────────────
+# Rendering helpers
+# ─────────────────────────────────────────────
+def _draw_borders(ax, extent):
+    """Draw country + Brazil state borders within the given extent."""
+    geo = _load_geo_data()
+    lon_min, lon_max, lat_min, lat_max = extent
 
-    # Precipitation fill
+    if geo.get('world') is not None:
+        try:
+            world_clip = geo['world'].cx[lon_min:lon_max, lat_min:lat_max]
+            world_clip.boundary.plot(ax=ax, color='#333333', linewidth=0.6, zorder=3)
+        except Exception as e:
+            logger.debug(f"Country border draw failed: {e}")
+
+    if geo.get('brazil_states') is not None:
+        try:
+            br_clip = geo['brazil_states'].cx[lon_min:lon_max, lat_min:lat_max]
+            br_clip.boundary.plot(ax=ax, color='#555555', linewidth=0.35,
+                                  linestyle='--', zorder=4)
+        except Exception as e:
+            logger.debug(f"State border draw failed: {e}")
+
+
+def _draw_precip(ax, lon_grid, lat_grid, precip, draw_contours=True):
     mesh = ax.pcolormesh(lon_grid, lat_grid, precip,
-                         cmap=CMAP, norm=NORM,
-                         shading='auto', rasterized=True)
+                         cmap=CMAP, norm=NORM, shading='auto', rasterized=True)
+    if draw_contours:
+        try:
+            ax.contour(lon_grid, lat_grid, precip,
+                       levels=[100, 150, 200, 250, 300],
+                       colors='maroon', linewidths=0.6, linestyles='-', zorder=5)
+        except Exception:
+            pass
+    return mesh
 
-    # Optional contours for high values
-    try:
-        ax.contour(lon_grid, lat_grid, precip,
-                   levels=[100, 150, 200, 250, 300],
-                   colors='maroon', linewidths=0.8, linestyles='-')
-    except Exception:
-        pass
 
-    # Property pin
-    ax.plot(lon_pin, lat_pin, marker='*', color='white', markersize=16,
-            markeredgecolor='black', markeredgewidth=1.2, zorder=10)
+def _pe(fg='black', lw=2):
+    return [path_effects.withStroke(linewidth=lw, foreground=fg)]
 
-    point_label = f"{meta['point_mm']:.1f} mm"
-    ax.text(lon_pin + 0.15, lat_pin + 0.15, point_label,
-            fontsize=10, fontweight='bold', color='white', zorder=11,
-            path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
 
-    # Colorbar
-    cbar = fig.colorbar(mesh, ax=ax, orientation='vertical', pad=0.02,
-                        shrink=0.80, aspect=40, extend='max',
-                        ticks=BOUNDS[1::2])
-    cbar.set_label('Precipitação Acumulada (mm)', fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+# ─────────────────────────────────────────────
+# Main dual-panel render
+# ─────────────────────────────────────────────
+def render_dual_map(lon_grid_wide, lat_grid_wide, precip_wide,
+                    lon_grid_close, lat_grid_close, precip_close,
+                    meta: dict,
+                    lat_pin: float, lon_pin: float,
+                    forecast_days: int,
+                    polygon_geojson: str | None = None) -> io.BytesIO:
 
-    # Grid lines
-    ax.set_xlabel('Longitude', fontsize=9)
-    ax.set_ylabel('Latitude', fontsize=9)
-    ax.tick_params(labelsize=8)
-    ax.grid(color='gray', alpha=0.3, linestyle='--', linewidth=0.5)
+    fig, axes = plt.subplots(1, 2, figsize=(18, 8), dpi=100,
+                             facecolor='#1a1a2e')
+    fig.subplots_adjust(wspace=0.05, left=0.04, right=0.93, top=0.88, bottom=0.07)
 
-    # Title
+    # ── 1. Wide panel ──────────────────────────────────────────────────────
+    ax_w = axes[0]
+    ax_w.set_facecolor('#0d0d1a')
+
+    wide_extent = (lon_grid_wide.min(), lon_grid_wide.max(),
+                   lat_grid_wide.min(), lat_grid_wide.max())
+
+    mesh = _draw_precip(ax_w, lon_grid_wide, lat_grid_wide, precip_wide)
+    _draw_borders(ax_w, wide_extent)
+
+    # Property marker
+    ax_w.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=14,
+              markeredgecolor='black', markeredgewidth=1.0, zorder=10)
+    ax_w.text(lon_pin + 0.3, lat_pin + 0.3,
+              f"  {meta['point_mm']:.1f} mm",
+              fontsize=9, color='white', fontweight='bold', zorder=11,
+              path_effects=_pe())
+
+    ax_w.set_xlim(wide_extent[0], wide_extent[1])
+    ax_w.set_ylim(wide_extent[2], wide_extent[3])
+    ax_w.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
+    ax_w.set_ylabel('Latitude',  fontsize=8, color='#aaaaaa')
+    ax_w.tick_params(colors='#aaaaaa', labelsize=7)
+    ax_w.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
+    ax_w.spines[:].set_edgecolor('#444466')
+
     period_label = f"{forecast_days} dia{'s' if forecast_days > 1 else ''}"
-    lead_label   = f"F{meta['step_h']:03d}"
-    ax.set_title(
-        f"ECMWF IFS — Precipitação Acumulada ({period_label}) | {lead_label}\n"
-        f"Inic: {meta['init_time']}   |   Valid: {meta['valid_time']}",
-        loc='left', fontsize=11, fontweight='bold', pad=14
+    ax_w.set_title(
+        f"ECMWF IFS — Acumulado {period_label}  |  F{meta['step_h']:03d}\n"
+        f"Início: {meta['init_time']}   Válido: {meta['valid_time']}",
+        loc='left', fontsize=10, fontweight='bold', color='white', pad=10
     )
 
-    # Max precip annotation
-    ax.text(0.99, 0.01,
-            f"Máx: {meta['max_mm']:.1f} mm  |  📍 Propriedade: {meta['point_mm']:.1f} mm",
-            transform=ax.transAxes, ha='right', va='bottom',
-            fontsize=9, color='white',
-            bbox=dict(facecolor='#333333', alpha=0.85, edgecolor='none', pad=4),
-            zorder=12)
+    # ── 2. Close panel ─────────────────────────────────────────────────────
+    ax_c = axes[1]
+    ax_c.set_facecolor('#0d0d1a')
 
-    plt.tight_layout()
+    close_extent = (lon_grid_close.min(), lon_grid_close.max(),
+                    lat_grid_close.min(), lat_grid_close.max())
+
+    _draw_precip(ax_c, lon_grid_close, lat_grid_close, precip_close,
+                 draw_contours=False)
+    _draw_borders(ax_c, close_extent)
+
+    # CAR polygon
+    if polygon_geojson:
+        try:
+            geom = shape(json.loads(polygon_geojson))
+            if geom.geom_type == 'Polygon':
+                coords = list(geom.exterior.coords)
+            elif geom.geom_type == 'MultiPolygon':
+                coords = list(max(geom.geoms, key=lambda g: g.area).exterior.coords)
+            else:
+                coords = None
+            if coords:
+                xs, ys = zip(*coords)
+                ax_c.plot(xs, ys, color='white', linewidth=2.0,
+                          linestyle='-', zorder=8)
+                ax_c.fill(xs, ys, alpha=0.08, color='white', zorder=7)
+        except Exception as e:
+            logger.warning(f"Could not draw polygon: {e}")
+
+    # Property pin
+    ax_c.plot(lon_pin, lat_pin, marker='*', color='yellow', markersize=16,
+              markeredgecolor='black', markeredgewidth=1.2, zorder=10)
+
+    # Value box
+    ax_c.text(0.97, 0.04,
+              f"📍 {meta['point_mm']:.1f} mm",
+              transform=ax_c.transAxes, ha='right', va='bottom',
+              fontsize=12, fontweight='bold', color='yellow',
+              path_effects=_pe(lw=3),
+              zorder=12)
+
+    ax_c.set_xlim(close_extent[0], close_extent[1])
+    ax_c.set_ylim(close_extent[2], close_extent[3])
+    ax_c.set_xlabel('Longitude', fontsize=8, color='#aaaaaa')
+    ax_c.tick_params(colors='#aaaaaa', labelsize=7)
+    ax_c.yaxis.set_ticklabels([])
+    ax_c.grid(color='#444466', alpha=0.3, linestyle='--', linewidth=0.4)
+    ax_c.spines[:].set_edgecolor('#444466')
+    ax_c.set_title('Detalhe da Propriedade', loc='left',
+                   fontsize=10, fontweight='bold', color='white', pad=10)
+
+    # ── Shared colorbar ────────────────────────────────────────────────────
+    cbar_ax = fig.add_axes([0.94, 0.07, 0.015, 0.78])
+    cb = fig.colorbar(mesh, cax=cbar_ax, extend='max',
+                      ticks=[0, 5, 10, 20, 30, 50, 70, 100, 150, 200, 300])
+    cb.set_label('Precipitação Acumulada (mm)', fontsize=8,
+                 color='white', labelpad=8)
+    cb.ax.tick_params(colors='white', labelsize=7)
+    cb.outline.set_edgecolor('#444466')
+
+    # ── Footer ─────────────────────────────────────────────────────────────
+    fig.text(0.5, 0.01,
+             f"Fonte: ECMWF Open Data IFS · Resolução: 0.25° (~28 km) · "
+             f"Máx regional: {meta['max_mm']:.1f} mm",
+             ha='center', va='bottom', fontsize=7.5, color='#888888')
+
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
+    plt.savefig(buf, format='png', bbox_inches='tight',
+                facecolor=fig.get_facecolor(), dpi=100)
     buf.seek(0)
     plt.close(fig)
     return buf
 
 
-def generate_forecast_map(lat: float, lon: float, forecast_days: int) -> io.BytesIO:
+# ─────────────────────────────────────────────
+# Full pipeline
+# ─────────────────────────────────────────────
+def generate_forecast_map(lat: float, lon: float, forecast_days: int,
+                          polygon_geojson: str | None = None) -> io.BytesIO:
     """
-    Full pipeline: download ECMWF → load regional data → render map → return PNG BytesIO.
+    Full pipeline: download ECMWF → load regional data (wide + close) →
+    render dual-panel map → return PNG BytesIO.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         grib_path = download_ecmwf_precip(forecast_days, tmpdir)
-        lon_grid, lat_grid, precip, meta = load_regional_data(grib_path, lat, lon)
-        return render_map(lon_grid, lat_grid, precip, meta, lat, lon, forecast_days)
+
+        # Wide panel: ±25° span
+        lon_w, lat_w, prec_w, meta = load_regional_data(grib_path, lat, lon, span=25.0)
+
+        # Close panel: ±1.0° span
+        lon_c, lat_c, prec_c, _ = load_regional_data(grib_path, lat, lon, span=1.0)
+
+        return render_dual_map(lon_w, lat_w, prec_w,
+                               lon_c, lat_c, prec_c,
+                               meta, lat, lon, forecast_days,
+                               polygon_geojson=polygon_geojson)

@@ -651,6 +651,21 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         context.user_data['wx_lat'] = lat
         context.user_data['wx_lon'] = lon
         context.user_data['wx_loc_name'] = loc_name
+
+        # Try to fetch CAR polygon for this location (for the close-up map)
+        try:
+            import json as _json
+            from app.environmental import fetch_car_perimeter
+            car_result = fetch_car_perimeter(lat, lon)
+            if car_result and car_result.get('geometry'):
+                context.user_data['wx_polygon'] = _json.dumps(car_result['geometry'])
+                print(f"  CAR polygon found for forecast map", flush=True)
+            else:
+                context.user_data['wx_polygon'] = None
+        except Exception as poly_err:
+            print(f"  Could not fetch CAR polygon: {poly_err}", flush=True)
+            context.user_data['wx_polygon'] = None
+
         return WAITING_FORECAST_PERIOD
 
     except Exception as e:
@@ -704,7 +719,8 @@ async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_
     status_msg = await update.message.reply_text(f"🛐 Baixando previsão ECMWF para {days} dia(s)... Isso pode levar até 2 minutos.")
 
     try:
-        img_buf = get_forecast_image(lat, lon, days)
+        polygon = context.user_data.get('wx_polygon')
+        img_buf = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
         if img_buf:
             period_label = f"{days} dia" + ("s" if days > 1 else "")
             await context.bot.send_photo(

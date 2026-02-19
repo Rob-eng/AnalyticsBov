@@ -225,7 +225,7 @@ def generate_weather_map_with_title(lat, lon, title=None):
         return None
 
 
-def get_forecast_image(lat: float, lon: float, days: int):
+def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str = None):
     """
     Calls the ECMWF Weather Forecast Microservice and returns a BytesIO PNG buffer.
     Requires WEATHER_SERVICE_URL environment variable to be set.
@@ -251,7 +251,10 @@ def get_forecast_image(lat: float, lon: float, days: int):
     try:
         url = f"{base_url}/forecast"
         params = {"lat": lat, "lon": lon, "days": days}
-        print(f"  Calling {url} params={params}", flush=True)
+        if polygon_geojson:
+            params["polygon"] = polygon_geojson
+        print(f"  Calling {url} params=lat={lat},lon={lon},days={days},"
+              f"polygon={'yes' if polygon_geojson else 'no'}", flush=True)
         resp = requests.get(url, params=params, timeout=120)
         print(f"  Response: {resp.status_code}", flush=True)
         if resp.status_code == 200:
