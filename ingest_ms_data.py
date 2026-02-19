@@ -1,4 +1,4 @@
-import json
+import ijson
 import os
 import sys
 from app.models import CarSessionLocal, CARProperty
@@ -12,20 +12,13 @@ def ingest_ms():
         print(f"❌ File {filepath} not found. Run download script first.")
         return
 
-    print(f"Loading {filepath}...")
-    try:
-        with open(filepath, 'r') as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"❌ Failed to load JSON: {e}")
-        return
-
-    features = data.get('features', [])
-    total = len(features)
-    print(f"Found {total} features. Starting ingestion...")
+    print(f"Streaming {filepath} with ijson...")
+    
+    # We can't easily count total features with ijson without iterating once.
+    # So we'll just track count.
 
     session = CarSessionLocal()
-    batch_size = 100 # Reduced from 500 for stability
+    batch_size = 100 # Keep small for stability
     objects = []
     count = 0
     errors = 0
@@ -39,80 +32,81 @@ def ingest_ms():
         print(f"⚠️ Could not fetch existing records: {e}. Starting fresh.", flush=True)
         seen_ids = set()
 
-    
-    # Pre-fetch existing IDs to avoid unique constraint violations if re-running
-    # Actually, better to trust the database constraints and handle errors
-    
-    for i, feat in enumerate(features):
-        try:
-            props = feat.get('properties', {})
-            cod = props.get('cod_imovel')
-            
-            if not cod or cod in seen_ids:
-                continue
-            seen_ids.add(cod)
+    try:
+        with open(filepath, 'rb') as f:
+            # Stream features one by one
+            for feat in ijson.items(f, 'features.item'):
+                try:
+                    props = feat.get('properties', {})
+                    cod = props.get('cod_imovel')
+                    
+                    if not cod or cod in seen_ids:
+                        continue
+                    seen_ids.add(cod)
 
-            geom_data = feat.get('geometry')
-            
-            if not geom_data:
-                continue
+                    geom_data = feat.get('geometry')
+                    
+                    if not geom_data:
+                        continue
 
-            geom = shape(geom_data)
-            
-            # Force MultiPolygon if it's a Polygon
-            if isinstance(geom, Polygon):
-                geom = MultiPolygon([geom])
-            
-            # Skip invalid geometries
-            if not geom.is_valid:
-                # Try to fix
-                geom = geom.buffer(0)
-                # buffer(0) might return Polygon, so re-force MultiPolygon
-                if isinstance(geom, Polygon):
-                    geom = MultiPolygon([geom])
-                
-                if not geom.is_valid:
+                    geom = shape(geom_data)
+                    
+                    # Force MultiPolygon if it's a Polygon
+                    if isinstance(geom, Polygon):
+                        geom = MultiPolygon([geom])
+                    
+                    # Skip invalid geometries
+                    if not geom.is_valid:
+                        # Try to fix
+                        geom = geom.buffer(0)
+                        # buffer(0) might return Polygon, so re-force MultiPolygon
+                        if isinstance(geom, Polygon):
+                            geom = MultiPolygon([geom])
+                        
+                        if not geom.is_valid:
+                            errors += 1
+                            continue
+
+                    # Final safety check
+                    if isinstance(geom, Polygon):
+                        geom = MultiPolygon([geom])
+
+                    # Create object
+                    obj = CARProperty(
+                        cod_imovel=props.get('cod_imovel'),
+                        uf='MS',
+                        municipio=props.get('municipio'),
+                        geometry=from_shape(geom, srid=4674)
+                    )
+                    objects.append(obj)
+                    
+                    if len(objects) >= batch_size:
+                        try:
+                            session.bulk_save_objects(objects)
+                            session.commit()
+                            count += len(objects)
+                            print(f"  Committed +{len(objects)} records (Total: {count})...", end='\r')
+                        except Exception as e:
+                            session.rollback()
+                            # Fallback: Insert one by one
+                            for item in objects:
+                                try:
+                                    session.add(item)
+                                    session.commit()
+                                    count += 1
+                                except Exception as inner_e:
+                                    session.rollback()
+                                    errors += 1
+                        finally:
+                            objects = [] # Clear batch regardless of success/failure
+                        
+                except Exception as e:
+                    # print(f"Skipping record: {e}")
                     errors += 1
                     continue
-
-            # Final safety check
-            if isinstance(geom, Polygon):
-                geom = MultiPolygon([geom])
-
-            # Create object
-            obj = CARProperty(
-                cod_imovel=props.get('cod_imovel'),
-                uf='MS',
-                municipio=props.get('municipio'),
-                geometry=from_shape(geom, srid=4674)
-            )
-            objects.append(obj)
-            
-            if len(objects) >= batch_size:
-                try:
-                    session.bulk_save_objects(objects)
-                    session.commit()
-                    count += len(objects)
-                    print(f"  Committed {count}/{total} records... (Errors: {errors})", end='\r')
-                except Exception as e:
-                    session.rollback()
-                    # print(f"Batch failed: {e}. Retrying individually...")
-                    # Fallback: Insert one by one
-                    for item in objects:
-                        try:
-                            session.add(item)
-                            session.commit()
-                            count += 1
-                        except Exception as inner_e:
-                            session.rollback()
-                            errors += 1
-                finally:
-                    objects = [] # Clear batch regardless of success/failure
-                
-        except Exception as e:
-            # print(f"Skipping record: {e}")
-            errors += 1
-            continue
+    except Exception as e:
+        print(f"❌ Failed to stream JSON: {e}")
+        return
 
     # Commit remaining
     if objects:
@@ -132,7 +126,7 @@ def ingest_ms():
                     errors += 1
 
     session.close()
-    print(f"\n✅ Finished! Total inserted: {count}. Total skipped/errors: {errors}")
+    print(f"\n✅ Finished! Ingested in this run: {count}. Total skipped/errors: {errors}")
 
 if __name__ == "__main__":
     ingest_ms()

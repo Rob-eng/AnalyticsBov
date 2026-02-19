@@ -101,3 +101,4 @@ zipp==3.23.0
 fastapi==0.115.8
 uvicorn==0.34.0
 httpx==0.28.1
+ijson==3.3.0
