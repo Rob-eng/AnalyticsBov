@@ -4,7 +4,7 @@ import sys
 from app.models import CarSessionLocal, CARProperty
 from geoalchemy2.shape import from_shape
 from shapely.geometry import shape, MultiPolygon, Polygon
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, InternalError, DataError
 
 def ingest_ms():
     filepath = "car_ms.geojson"
@@ -30,6 +30,9 @@ def ingest_ms():
     count = 0
     errors = 0
     seen_ids = set()
+    
+    # Pre-fetch existing IDs to avoid unique constraint violations if re-running
+    # Actually, better to trust the database constraints and handle errors
     
     for i, feat in enumerate(features):
         try:
@@ -69,11 +72,25 @@ def ingest_ms():
             objects.append(obj)
             
             if len(objects) >= batch_size:
-                session.bulk_save_objects(objects)
-                session.commit()
-                count += len(objects)
-                objects = []
-                print(f"  Committed {count}/{total} records... (Errors: {errors})", end='\r')
+                try:
+                    session.bulk_save_objects(objects)
+                    session.commit()
+                    count += len(objects)
+                    print(f"  Committed {count}/{total} records... (Errors: {errors})", end='\r')
+                except Exception as e:
+                    session.rollback()
+                    # print(f"Batch failed: {e}. Retrying individually...")
+                    # Fallback: Insert one by one
+                    for item in objects:
+                        try:
+                            session.add(item)
+                            session.commit()
+                            count += 1
+                        except Exception as inner_e:
+                            session.rollback()
+                            errors += 1
+                finally:
+                    objects = [] # Clear batch regardless of success/failure
                 
         except Exception as e:
             # print(f"Skipping record: {e}")
@@ -87,7 +104,15 @@ def ingest_ms():
             session.commit()
             count += len(objects)
         except Exception as e:
-            print(f"Error saving last batch: {e}")
+            session.rollback()
+            for item in objects:
+                try:
+                    session.add(item)
+                    session.commit()
+                    count += 1
+                except Exception as inner_e:
+                    session.rollback()
+                    errors += 1
 
     session.close()
     print(f"\n✅ Finished! Total inserted: {count}. Total skipped/errors: {errors}")
