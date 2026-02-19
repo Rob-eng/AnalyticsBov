@@ -1,6 +1,7 @@
 import ijson
 import os
 import sys
+import time
 from app.models import CarSessionLocal, CARProperty
 from geoalchemy2.shape import from_shape
 from shapely.geometry import shape, MultiPolygon, Polygon
@@ -31,8 +32,6 @@ def ingest_ms():
     except Exception as e:
         print(f"⚠️ Could not fetch existing records: {e}. Starting fresh.", flush=True)
         seen_ids = set()
-
-import time
 
     try:
         with open(filepath, 'rb') as f:
