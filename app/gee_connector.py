@@ -222,23 +222,44 @@ def get_precipitation_heatmap(lat, lon):
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=30)
         
-        # GPM/IMERG V06 LATE Precipitation (Low latency ~14h)
-        collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06_LATE')
-                      .filterBounds(region)
-                      .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                      .select('precipitation'))
+        # GPM/IMERG V07 (current version — IMERG Final Run)
+        GPM_ASSETS = [
+            'NASA/GPM_L3/IMERG_V07',     # Current (v07)
+            'NASA/GPM_L3/IMERG_V06',     # Previous (v06 Final)
+            'NASA/GPM_L3/IMERG_V06_LATE', # Late-run fallback
+        ]
 
-        # Check if we have data, if not try a slightly older range (GPM sometimes has gaps)
-        count = int(collection.size().getInfo())
-        if count == 0:
-            print("Heatmap collection empty, trying 60 day range...")
+        collection = None
+        count = 0
+        for asset in GPM_ASSETS:
+            try:
+                coll = (ee.ImageCollection(asset)
+                        .filterBounds(region)
+                        .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                        .select('precipitation'))
+                count = int(coll.size().getInfo())
+                if count > 0:
+                    print(f"Using GPM asset: {asset} ({count} images)")
+                    collection = coll
+                    break
+                else:
+                    print(f"Asset {asset}: 0 images, trying next...")
+            except Exception as ae:
+                print(f"Asset {asset} error: {ae}, trying next...")
+
+        if collection is None or count == 0:
+            # Last resort: widen time window on best asset
+            print("Heatmap: widening to 60-day window...")
             start_date = end_date - timedelta(days=60)
-            collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V06_LATE')
-                          .filterBounds(region)
-                          .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                          .select('precipitation'))
-            count = int(collection.size().getInfo())
-            
+            try:
+                collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V07')
+                              .filterBounds(region)
+                              .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                              .select('precipitation'))
+                count = int(collection.size().getInfo())
+            except Exception:
+                count = 0
+
         if count == 0:
             print("Heatmap collection still empty after fallback.")
             return None
