@@ -534,23 +534,22 @@ async def _ask_location(update, context):
 
 
 async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process location and show weather data"""
+    """Process location — branches on wx_mode (historico vs forecast)."""
     chat_id = str(update.effective_chat.id)
     query = update.message.text
-    
+
     if query.startswith('/'):
         return WAITING_WEATHER_LOCATION
-    
+
     if query in MAIN_MENU_BUTTONS:
         return await handle_keyboard_buttons(update, context)
 
-    status_msg = await update.message.reply_text("🔍 Buscando dados... Aguarde.")
-    
+    status_msg = await update.message.reply_text("🔍 Buscando localização... Aguarde.")
+
     try:
-        # 1. Determine Lat/Lon
+        # ── 1. Resolve lat/lon ──────────────────────────────────────────
         lat, lon, loc_name = None, None, query
-        
-        # Priority 1: Check for numerical shortcut
+
         if query.isdigit():
             session = SessionLocal()
             try:
@@ -562,124 +561,41 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                     loc_name = locs[idx].name
                     context.user_data['prop_name'] = loc_name
                 else:
-                    await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada. Você tem {len(locs)} locais cadastrados.")
+                    await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada.")
                     return WAITING_WEATHER_LOCATION
             finally:
                 session.close()
 
-        # Priority 2: Google Maps URL
         if lat is None:
             url_coords = extract_coords_from_url(query)
             if url_coords:
                 lat, lon = url_coords
-                loc_name = f"Coordenadas do Link ({lat:.4f}, {lon:.4f})"
-        
-        # Priority 3: Manual Coordinates (Decimal or DMS)
+                loc_name = f"Coordenadas ({lat:.4f}, {lon:.4f})"
+
         if lat is None:
             coords = parse_coordinates(query)
             if coords:
                 lat, lon = coords
                 loc_name = f"Coordenadas: {lat:.4f}, {lon:.4f}"
-        
-        # Priority 4: Geocoding (Municipality Name)
+
         if lat is None:
             loc = geocode_location(query)
             if loc:
                 lat, lon = loc['lat'], loc['lon']
                 loc_name = f"{loc['name']}, {loc.get('admin1', '')}"
-        
+
         if lat is None or lon is None:
-            await status_msg.edit_text("⚠️ Não consegui interpretar o local. Tente o nome da cidade (ex: Bebedouro), coordenadas decimais ou um link do Google Maps.")
+            await status_msg.edit_text("⚠️ Não consegui interpretar o local. Tente o nome da cidade, coordenadas ou link do Google Maps.")
             return WAITING_WEATHER_LOCATION
 
-
-        # 2. Get Weather Data
-        data = get_precipitation_data(lat, lon)
-        if not data:
-            await status_msg.edit_text("❌ Erro ao buscar dados meteorológicos para este local.")
-            return WAITING_WEATHER_LOCATION
-
-        # 3. Format Message
-        precip_val = data.get('last_24h', 0)
-        msg = f"🌧️ *Dados de Precipitação*\n"
-        msg += f"📍 *Local:* {loc_name}\n"
-        msg += f"🕒 *Últimas 24h:* {precip_val:.1f} mm\n\n"
-        msg += f"📅 *Histórico Recente (Últimos 7 dias):*\n"
-        
-        # History is already reversed in weather.py (latest first)
-        for date, val in data.get('daily_history', []):
-            d_fmt = datetime.strptime(date, '%Y-%m-%d').strftime('%d/%m')
-            msg += f"• {d_fmt}: {val:.1f} mm\n"
-        
-        msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
-        
-        # 4. Get Regional Heatmap (GEE)
-        status_msg = await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
-        from app.gee_connector import get_precipitation_heatmap
-        heatmap = get_precipitation_heatmap(lat, lon)
-        
-        # 4.5. Get Static Map
-        prop_name = context.user_data.pop('prop_name', None)
-        from app.weather import generate_weather_map_with_title
-        map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
-        
-        # 5. Send Photos
-        handled = False
-        try:
-            # Send Regional Heatmap first if available
-            if heatmap:
-                from app.environmental import generate_environmental_image
-                heatmap_buffer = generate_environmental_image(
-                    heatmap['image_url'],
-                    {"type": "Polygon", "coordinates": [[
-                        [lon-0.01, lat-0.01], [lon+0.01, lat-0.01],
-                        [lon+0.01, lat+0.01], [lon-0.01, lat+0.01], [lon-0.01, lat-0.01]
-                    ]]},
-                    is_real_car=False,
-                    region_bbox=heatmap['region_bbox'],
-                    title="🔥 Variação Regional de Chuva (30 dias)",
-                    pin_coords=(lat, lon)
-                )
-                if heatmap_buffer:
-                    await context.bot.send_photo(
-                        chat_id=chat_id, photo=heatmap_buffer,
-                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados na região.",
-                        parse_mode='Markdown'
-                    )
-                else:
-                    await context.bot.send_photo(
-                        chat_id=chat_id, photo=heatmap['image_url'],
-                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados."
-                    )
-
-            # Send Local Property Map + historical message
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=map_image if map_image else get_static_map_url(lat, lon),
-                caption=msg,
-                parse_mode='Markdown',
-                reply_markup=get_keyboard(chat_id)
-            )
-            await status_msg.delete()
-            handled = True
-        except Exception as spe:
-            print(f"Error sending photo: {spe}")
-            # Fallback: send historical text as plain message
-            try:
-                await status_msg.edit_text(msg, parse_mode='Markdown')
-            except Exception:
-                await update.message.reply_text(msg, parse_mode='Markdown',
-                                                reply_markup=get_keyboard(chat_id))
-            await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
-            handled = True
-
-        if handled:
-            return ConversationHandler.END
-
-        # If forecast mode: fetch polygon + call weather service
+        # ── 2. Branch on mode ───────────────────────────────────────────
         wx_mode = context.user_data.get('wx_mode', 'historico')
+
+        # ── FORECAST mode: skip historical, call ECMWF directly ─────────
         if wx_mode == 'forecast':
             days = context.user_data.get('wx_days', 5)
+            period_label = f"{days} dia" + ("s" if days > 1 else "")
+
             # Try CAR polygon
             polygon = None
             try:
@@ -692,22 +608,20 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             except Exception as poly_err:
                 print(f"  CAR polygon unavailable: {poly_err}", flush=True)
 
-            period_label = f"{days} dia" + ("s" if days > 1 else "")
             await status_msg.edit_text(f"⏳ Baixando previsão ECMWF {period_label}... Até 3 minutos.")
-
             wide_buf, close_buf, err_detail = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
             sent_any = False
             if wide_buf:
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=wide_buf,
-                    caption=(f"🌎 *Previsão ECMWF — {period_label} acumulado*\n📍 {loc_name}"),
+                    caption=f"🌎 *Previsão ECMWF — {period_label} acumulado*\n📍 {loc_name}",
                     parse_mode='Markdown'
                 )
                 sent_any = True
             if close_buf:
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=close_buf,
-                    caption=(f"🏡 *Detalhe — {period_label}*\n_Res: 0.25° | ECMWF Open Data_"),
+                    caption=f"🏡 *Detalhe — {period_label}*\n_Res: 0.25° | ECMWF Open Data_",
                     parse_mode='Markdown', reply_markup=get_keyboard(chat_id)
                 )
                 sent_any = True
@@ -715,17 +629,99 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 await status_msg.delete()
             else:
                 detail = f"\n`{err_detail[:300]}`" if err_detail else ""
-                await status_msg.edit_text(f"❌ Não foi possível gerar a previsão.{detail}", parse_mode='Markdown')
+                await status_msg.edit_text(
+                    f"❌ Não foi possível gerar a previsão.{detail}", parse_mode='Markdown'
+                )
                 await update.message.reply_text("📱 Menu.", reply_markup=get_keyboard(chat_id))
-        else:
-            # Histórico: show data and end
+            return ConversationHandler.END
+
+        # ── HISTORICO mode: precipitation data + heatmap ─────────────────
+        data = get_precipitation_data(lat, lon)
+        if not data:
+            await status_msg.edit_text("❌ Erro ao buscar dados meteorológicos para este local.")
+            return WAITING_WEATHER_LOCATION
+
+        # Format text message
+        precip_val = data.get('last_24h', 0)
+        msg = f"🌧️ *Dados de Precipitação*\n"
+        msg += f"📍 *Local:* {loc_name}\n"
+        msg += f"🕒 *Últimas 24h:* {precip_val:.1f} mm\n\n"
+        msg += f"📅 *Histórico Recente (Últimos 7 dias):*\n"
+        for date, val in data.get('daily_history', []):
+            d_fmt = datetime.strptime(date, '%Y-%m-%d').strftime('%d/%m')
+            msg += f"• {d_fmt}: {val:.1f} mm\n"
+        msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
+
+        # Get Regional Heatmap (GEE) — non-blocking; skip on failure
+        status_msg = await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
+        try:
+            from app.gee_connector import get_precipitation_heatmap
+            heatmap = get_precipitation_heatmap(lat, lon)
+        except Exception as ge:
+            print(f"  Heatmap skipped: {ge}", flush=True)
+            heatmap = None
+
+        # Get static map
+        prop_name = context.user_data.pop('prop_name', None)
+        from app.weather import generate_weather_map_with_title
+        map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
+
+        # Send photos
+        try:
+            if heatmap:
+                try:
+                    from app.environmental import generate_environmental_image
+                    heatmap_buffer = generate_environmental_image(
+                        heatmap['image_url'],
+                        {"type": "Polygon", "coordinates": [[
+                            [lon-0.01, lat-0.01], [lon+0.01, lat-0.01],
+                            [lon+0.01, lat+0.01], [lon-0.01, lat+0.01], [lon-0.01, lat-0.01]
+                        ]]},
+                        is_real_car=False,
+                        region_bbox=heatmap['region_bbox'],
+                        title="🔥 Variação Regional de Chuva (30 dias)",
+                        pin_coords=(lat, lon)
+                    )
+                    if heatmap_buffer:
+                        await context.bot.send_photo(
+                            chat_id=chat_id, photo=heatmap_buffer,
+                            caption="🌍 *Mapa de Calor:* Azul escuro = maior volume acumulado.",
+                            parse_mode='Markdown'
+                        )
+                    else:
+                        await context.bot.send_photo(
+                            chat_id=chat_id, photo=heatmap['image_url'],
+                            caption="🌍 *Mapa de Calor* (30 dias)", parse_mode='Markdown'
+                        )
+                except Exception as he:
+                    print(f"  Heatmap send failed: {he}", flush=True)
+                    # Fall through — still send the main map
+
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=map_image if map_image else get_static_map_url(lat, lon),
+                caption=msg,
+                parse_mode='Markdown',
+                reply_markup=get_keyboard(chat_id)
+            )
             await status_msg.delete()
 
+        except Exception as spe:
+            print(f"Error sending historical photo: {spe}")
+            try:
+                await status_msg.edit_text(msg, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(msg, parse_mode='Markdown')
+            await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
+
     except Exception as e:
-        print(f"Error in weather_info: {e}")
+        print(f"Error in receive_weather_location: {e}")
         import traceback
         print(traceback.format_exc())
-        await status_msg.edit_text("❌ Ocorreu um erro ao processar sua solicitação de clima.")
+        try:
+            await status_msg.edit_text("❌ Ocorreu um erro ao processar sua solicitação.")
+        except Exception:
+            pass
 
     return ConversationHandler.END
 

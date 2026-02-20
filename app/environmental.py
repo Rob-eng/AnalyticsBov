@@ -201,7 +201,7 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
             img = plt.imread(ndvi_source, format='png')
         else:
             # Fallback for URL
-            resp = requests.get(ndvi_source, timeout=15)
+            resp = requests.get(ndvi_source, timeout=45)
             if resp.status_code != 200:
                 return None
             img = plt.imread(BytesIO(resp.content), format='png')
