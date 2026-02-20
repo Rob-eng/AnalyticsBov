@@ -738,11 +738,11 @@ async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("❌ Sessão expirou. Tente novamente.", reply_markup=get_keyboard(chat_id))
         return ConversationHandler.END
 
-    status_msg = await update.message.reply_text(f"🛐 Baixando previsão ECMWF para {days} dia(s)... Isso pode levar até 2 minutos.")
+    status_msg = await update.message.reply_text(f"🛐 Baixando previsão ECMWF para {days} dia(s)... Até 3 minutos.")
 
     try:
         polygon = context.user_data.get('wx_polygon')
-        wide_buf, close_buf = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
+        wide_buf, close_buf, err_detail = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
         period_label = f"{days} dia" + ("s" if days > 1 else "")
         sent_any = False
 
@@ -774,14 +774,18 @@ async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_
         if sent_any:
             await status_msg.delete()
         else:
+            detail = f"\n\n`{err_detail[:350]}`" if err_detail else ""
             await status_msg.edit_text(
-                "❌ Não foi possível gerar a previsão. Verifique se o serviço ECMWF está ativo."
+                f"❌ Não foi possível gerar a previsão.{detail}",
+                parse_mode='Markdown'
             )
             await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
     except Exception as e:
-        print(f"Forecast period handler error: {e}")
-        await status_msg.edit_text("❌ Erro ao gerar previsão.")
+        import traceback
+        tb = traceback.format_exc()[-400:]
+        print(f"Forecast period handler error: {tb}")
+        await status_msg.edit_text(f"❌ Erro ao gerar previsão:\n`{str(e)[:300]}`", parse_mode='Markdown')
         await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
     return ConversationHandler.END

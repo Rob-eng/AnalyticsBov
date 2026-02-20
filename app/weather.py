@@ -228,7 +228,8 @@ def generate_weather_map_with_title(lat, lon, title=None):
 def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str = None):
     """
     Calls the ECMWF Weather Forecast Microservice.
-    Returns a tuple (wide_buf, close_buf) of BytesIO PNGs, or (None, None) on failure.
+    Returns a tuple (wide_buf, close_buf, error_detail) where error_detail is
+    a string describing what failed (or None if both succeeded).
     """
     import os
     import traceback
@@ -238,27 +239,36 @@ def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str =
     print(f"🌦️ WEATHER_SERVICE_URL = '{base_url}'", flush=True)
 
     if not base_url:
-        print("❌ WEATHER_SERVICE_URL not configured.", flush=True)
-        return None, None
+        return None, None, "WEATHER_SERVICE_URL não configurada"
+
+    errors = []
 
     def _fetch(view):
         url = f"{base_url}/forecast"
         params = {"lat": lat, "lon": lon, "days": days, "view": view}
         if view == "close" and polygon_geojson:
             params["polygon"] = polygon_geojson
-        print(f"  Calling {url} view={view} polygon={'yes' if params.get('polygon') else 'no'}", flush=True)
-        resp = requests.get(url, params=params, timeout=120)
-        print(f"  Response [{view}]: {resp.status_code}", flush=True)
-        if resp.status_code == 200:
-            return BytesIO(resp.content)
-        print(f"  Error body [{view}]: {resp.text[:300]}", flush=True)
-        return None
+        print(f"  Calling {url} view={view}", flush=True)
+        try:
+            resp = requests.get(url, params=params, timeout=180)
+            print(f"  Response [{view}]: {resp.status_code}", flush=True)
+            if resp.status_code == 200:
+                return BytesIO(resp.content)
+            body = resp.text[:300]
+            print(f"  Error body [{view}]: {body}", flush=True)
+            errors.append(f"[{view}] HTTP {resp.status_code}: {body}")
+            return None
+        except Exception as e:
+            msg = f"[{view}] {type(e).__name__}: {e}"
+            print(f"  ❌ {msg}", flush=True)
+            errors.append(msg)
+            return None
 
     try:
         wide_buf  = _fetch("wide")
         close_buf = _fetch("close")
-        return wide_buf, close_buf
+        error_detail = "\n".join(errors) if errors else None
+        return wide_buf, close_buf, error_detail
     except Exception as e:
-        print(f"❌ Weather service call failed: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc()
-        return None, None
+        return None, None, f"{type(e).__name__}: {e}"
