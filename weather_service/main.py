@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
-from forecast import generate_forecast_map
+from forecast import generate_forecast_map, generate_single_map
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
