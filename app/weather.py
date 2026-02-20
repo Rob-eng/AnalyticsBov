@@ -227,11 +227,12 @@ def generate_weather_map_with_title(lat, lon, title=None):
 
 def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str = None):
     """
-    Calls the ECMWF Weather Forecast Microservice.
-    Returns a tuple (wide_buf, close_buf, error_detail) where error_detail is
-    a string describing what failed (or None if both succeeded).
+    Calls the ECMWF Weather Forecast Microservice (single HTTP call).
+    Returns a tuple (wide_buf, close_buf, error_detail).
+    The service returns both images as base64 JSON in one response.
     """
     import os
+    import base64
     import traceback
     from io import BytesIO
 
@@ -241,34 +242,29 @@ def get_forecast_image(lat: float, lon: float, days: int, polygon_geojson: str =
     if not base_url:
         return None, None, "WEATHER_SERVICE_URL não configurada"
 
-    errors = []
+    url = f"{base_url}/forecast"
+    params = {"lat": lat, "lon": lon, "days": days}
+    if polygon_geojson:
+        params["polygon"] = polygon_geojson
 
-    def _fetch(view):
-        url = f"{base_url}/forecast"
-        params = {"lat": lat, "lon": lon, "days": days, "view": view}
-        if view == "close" and polygon_geojson:
-            params["polygon"] = polygon_geojson
-        print(f"  Calling {url} view={view}", flush=True)
-        try:
-            resp = requests.get(url, params=params, timeout=180)
-            print(f"  Response [{view}]: {resp.status_code}", flush=True)
-            if resp.status_code == 200:
-                return BytesIO(resp.content)
-            body = resp.text[:300]
-            print(f"  Error body [{view}]: {body}", flush=True)
-            errors.append(f"[{view}] HTTP {resp.status_code}: {body}")
-            return None
-        except Exception as e:
-            msg = f"[{view}] {type(e).__name__}: {e}"
-            print(f"  ❌ {msg}", flush=True)
-            errors.append(msg)
-            return None
-
+    print(f"  Calling {url} (single call, dual-image JSON)", flush=True)
     try:
-        wide_buf  = _fetch("wide")
-        close_buf = _fetch("close")
-        error_detail = "\n".join(errors) if errors else None
-        return wide_buf, close_buf, error_detail
+        # 360s timeout — ECMWF download (~60-90s) + two renders (~20s)
+        resp = requests.get(url, params=params, timeout=360)
+        print(f"  Response: {resp.status_code}", flush=True)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            wide_buf  = BytesIO(base64.b64decode(data["wide"]))  if data.get("wide")  else None
+            close_buf = BytesIO(base64.b64decode(data["close"])) if data.get("close") else None
+            return wide_buf, close_buf, None
+        else:
+            body = resp.text[:300]
+            print(f"  Error body: {body}", flush=True)
+            return None, None, f"HTTP {resp.status_code}: {body}"
+
     except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        print(f"❌ Weather service call failed: {msg}", flush=True)
         traceback.print_exc()
-        return None, None, f"{type(e).__name__}: {e}"
+        return None, None, msg

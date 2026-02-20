@@ -328,31 +328,35 @@ def render_close_map(lon_grid, lat_grid, precip, meta: dict,
 
 
 # ─────────────────────────────────────────────
-# Public API entry point  
+# Public API entry points
 # ─────────────────────────────────────────────
-def generate_single_map(lat: float, lon: float, forecast_days: int,
-                        view: str = 'wide',
-                        polygon_geojson: str | None = None) -> io.BytesIO:
+def generate_dual_images(lat: float, lon: float, forecast_days: int,
+                         polygon_geojson: str | None = None
+                         ) -> tuple[io.BytesIO, io.BytesIO]:
     """
-    Download ECMWF data and render a single map (wide or close).
-    `view` must be 'wide' or 'close'.
+    Download ECMWF GRIB once, render wide map + close-up map.
+    Returns (wide_buf, close_buf) — both are PNG BytesIO objects.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         grib_path = download_ecmwf_precip(forecast_days, tmpdir)
 
-        if view == 'wide':
-            lon_g, lat_g, prec, meta = load_regional_data(
-                grib_path, lat, lon, span=25.0)
-            return render_wide_map(lon_g, lat_g, prec, meta, lat, lon, forecast_days)
-        else:  # close
-            lon_g, lat_g, prec, meta = load_regional_data(
-                grib_path, lat, lon, span=1.0)
-            return render_close_map(lon_g, lat_g, prec, meta, lat, lon,
-                                    forecast_days, polygon_geojson=polygon_geojson)
+        # Wide view: ±25° regional
+        lon_w, lat_w, prec_w, meta = load_regional_data(grib_path, lat, lon, span=25.0)
+        wide_buf = render_wide_map(lon_w, lat_w, prec_w, meta, lat, lon, forecast_days)
+
+        # Close view: ±1.5° property detail
+        lon_c, lat_c, prec_c, _ = load_regional_data(grib_path, lat, lon, span=1.5)
+        close_buf = render_close_map(lon_c, lat_c, prec_c, meta, lat, lon,
+                                     forecast_days, polygon_geojson=polygon_geojson)
+
+        return wide_buf, close_buf
 
 
-# Keep for backward compat
-def generate_forecast_map(lat: float, lon: float, forecast_days: int,
-                          polygon_geojson: str | None = None) -> io.BytesIO:
-    return generate_single_map(lat, lon, forecast_days, 'wide', polygon_geojson)
+# Keep legacy alias
+def generate_single_map(lat, lon, forecast_days, view='wide', polygon_geojson=None):
+    wide, close = generate_dual_images(lat, lon, forecast_days, polygon_geojson)
+    return wide if view == 'wide' else close
 
+def generate_forecast_map(lat, lon, forecast_days, polygon_geojson=None):
+    wide, _ = generate_dual_images(lat, lon, forecast_days, polygon_geojson)
+    return wide
