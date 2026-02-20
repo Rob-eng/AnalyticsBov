@@ -199,62 +199,60 @@ def get_ndvi_image(geometry_geojson):
 
 def get_precipitation_heatmap(lat, lon):
     """
-    Generates a regional precipitation heatmap for the last 30 days using GEE.
-    Returns: { 'image_url': str, 'region_bbox': dict } or None
+    Generates a Brazil-wide precipitation heatmap for the last 30 days.
+    State borders are painted via GEE GAUL dataset.
+    A red pin marks the queried point.
+    Returns: { 'buffer': BytesIO, 'image_url': str, 'region_bbox': dict } or None
     """
     try:
         if not initialize_gee():
             print("GEE initialization failed for heatmap")
             return None
 
-        print(f"Generating heatmap for {lat}, {lon}")
-        # 1. Define region: +/- 2 degrees around point (~220km radius)
-        # Sufficient to see most of a state like MS
-        span = 2.0
-        region = ee.Geometry.BBox(lon - span, lat - span, lon + span, lat + span)
+        print(f"Generating Brazil heatmap for {lat}, {lon}")
 
-        # 2. Get GPM Dataset (30min precipitation)
-        end_date = datetime.now()
+        # Brazil bounding box
+        BRAZIL_MIN_LON, BRAZIL_MAX_LON = -74.0, -28.6
+        BRAZIL_MIN_LAT, BRAZIL_MAX_LAT = -33.8,   5.3
+        brazil = ee.Geometry.BBox(BRAZIL_MIN_LON, BRAZIL_MIN_LAT,
+                                  BRAZIL_MAX_LON, BRAZIL_MAX_LAT)
+
+        # Date range — last 30 days (UTC)
+        end_date   = datetime.utcnow()
         start_date = end_date - timedelta(days=30)
-        
-        # 2. Get GPM Dataset (30min precipitation)
-        # Use UTC to avoid timezone issues with GEE
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=30)
-        
-        # GPM/IMERG V07 (current version — IMERG Final Run)
+        start_str  = start_date.strftime('%Y-%m-%d')
+        end_str    = end_date.strftime('%Y-%m-%d')
+
+        # ── GPM dataset (fallback chain) ──────────────────────────────────
         GPM_ASSETS = [
-            'NASA/GPM_L3/IMERG_V07',     # Current (v07)
-            'NASA/GPM_L3/IMERG_V06',     # Previous (v06 Final)
-            'NASA/GPM_L3/IMERG_V06_LATE', # Late-run fallback
+            'NASA/GPM_L3/IMERG_V07',
+            'NASA/GPM_L3/IMERG_V06',
+            'NASA/GPM_L3/IMERG_V06_LATE',
         ]
-
         collection = None
         count = 0
         for asset in GPM_ASSETS:
             try:
                 coll = (ee.ImageCollection(asset)
-                        .filterBounds(region)
-                        .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                        .filterBounds(brazil)
+                        .filterDate(start_str, end_str)
                         .select('precipitation'))
                 count = int(coll.size().getInfo())
                 if count > 0:
                     print(f"Using GPM asset: {asset} ({count} images)")
                     collection = coll
                     break
-                else:
-                    print(f"Asset {asset}: 0 images, trying next...")
+                print(f"Asset {asset}: 0 images, trying next...")
             except Exception as ae:
                 print(f"Asset {asset} error: {ae}, trying next...")
 
         if collection is None or count == 0:
-            # Last resort: widen time window on best asset
             print("Heatmap: widening to 60-day window...")
             start_date = end_date - timedelta(days=60)
             try:
                 collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V07')
-                              .filterBounds(region)
-                              .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                              .filterBounds(brazil)
+                              .filterDate(start_date.strftime('%Y-%m-%d'), end_str)
                               .select('precipitation'))
                 count = int(collection.size().getInfo())
             except Exception:
@@ -266,34 +264,80 @@ def get_precipitation_heatmap(lat, lon):
 
         print(f"Heatmap collection has {count} images.")
 
-        # 3. Aggregate: Sum of precipitation
-        # Each image represents 30min, so real total = sum(mm/hr) * 0.5
+        # ── Aggregate: sum × 0.5 to convert mm/hr × 30min → mm ──────────
         total_precip = collection.reduce(ee.Reducer.sum()).multiply(0.5)
 
-        # 4. Generate Thumbnail URL
-        # Palette: Light Gray (Dry) to Dark Blue/Purple (Wet)
-        vis_params = {
-            'min': 1,      # Min 1mm to show color
-            'max': 150,    # Max 150mm in 30 days for better sensitivity
-            'palette': ['#f0f0f0', '#99ccff', '#3366ff', '#000080', '#4b0082'],
-            'dimensions': 600,
-            'region': region.getInfo(),
-            'format': 'png'
-        }
+        # ── Visualise heatmap ─────────────────────────────────────────────
+        heatmap_vis = total_precip.visualize(
+            min=1, max=300,
+            palette=['#f0f0f0', '#aad4f5', '#3399ff', '#003580', '#2d0055']
+        )
 
-        url = total_precip.getThumbURL(vis_params)
+        # ── Paint Brazil state borders (white, 1px) ───────────────────────
+        try:
+            brazil_states = (ee.FeatureCollection('FAO/GAUL/2015/level1')
+                             .filter(ee.Filter.eq('ADM0_NAME', 'Brazil')))
+            state_borders = ee.Image().paint(
+                featureCollection=brazil_states, color=1, width=1
+            )
+            white = ee.Image.constant([255, 255, 255]).byte()
+            composite = heatmap_vis.where(state_borders, white)
+        except Exception as sb_err:
+            print(f"  State borders failed, using plain heatmap: {sb_err}")
+            composite = heatmap_vis
+
+        # ── Get thumbnail URL ─────────────────────────────────────────────
+        url = composite.getThumbURL({
+            'dimensions': 900,
+            'region': brazil.getInfo(),
+            'format': 'png',
+        })
         print(f"Heatmap URL: {url}")
-        
+
+        # ── Download image ────────────────────────────────────────────────
+        import requests as _req
+        resp = _req.get(url, timeout=60)
+        if resp.status_code != 200:
+            print(f"Heatmap download failed: {resp.status_code}")
+            return {'image_url': url, 'region_bbox': {
+                'min_lon': BRAZIL_MIN_LON, 'min_lat': BRAZIL_MIN_LAT,
+                'max_lon': BRAZIL_MAX_LON, 'max_lat': BRAZIL_MAX_LAT
+            }}
+
+        # ── Add red pin for queried point ─────────────────────────────────
+        from PIL import Image as PILImage, ImageDraw
+        import io as _io
+
+        img = PILImage.open(_io.BytesIO(resp.content)).convert('RGBA')
+        w, h = img.size
+
+        px = int((lon - BRAZIL_MIN_LON) / (BRAZIL_MAX_LON - BRAZIL_MIN_LON) * w)
+        py = int((BRAZIL_MAX_LAT - lat) / (BRAZIL_MAX_LAT - BRAZIL_MIN_LAT) * h)
+        px = max(4, min(w - 4, px))
+        py = max(4, min(h - 4, py))
+
+        draw = ImageDraw.Draw(img)
+        r = 8
+        draw.ellipse([px - r, py - r, px + r, py + r],
+                     fill=(220, 30, 30, 230), outline=(255, 255, 255, 255))
+        draw.ellipse([px - 3, py - 3, px + 3, py + 3],
+                     fill=(255, 255, 255, 230))
+
+        buf = _io.BytesIO()
+        img.convert('RGB').save(buf, format='PNG')
+        buf.seek(0)
+
         return {
-            "image_url": url,
-            "region_bbox": {
-                "min_lon": lon - span,
-                "min_lat": lat - span,
-                "max_lon": lon + span,
-                "max_lat": lat + span
+            'buffer': buf,
+            'image_url': url,
+            'region_bbox': {
+                'min_lon': BRAZIL_MIN_LON, 'min_lat': BRAZIL_MIN_LAT,
+                'max_lon': BRAZIL_MAX_LON, 'max_lat': BRAZIL_MAX_LAT,
             }
         }
 
     except Exception as e:
         print(f"Heatmap error: {e}")
+        import traceback
+        print(traceback.format_exc())
         return None

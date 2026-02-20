@@ -670,29 +670,17 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         try:
             if heatmap:
                 try:
-                    from app.environmental import generate_environmental_image
-                    heatmap_buffer = generate_environmental_image(
-                        heatmap['image_url'],
-                        {"type": "Polygon", "coordinates": [[
-                            [lon-0.01, lat-0.01], [lon+0.01, lat-0.01],
-                            [lon+0.01, lat+0.01], [lon-0.01, lat+0.01], [lon-0.01, lat-0.01]
-                        ]]},
-                        is_real_car=False,
-                        region_bbox=heatmap['region_bbox'],
-                        title="🔥 Variação Regional de Chuva (30 dias)",
-                        pin_coords=(lat, lon)
+                    # gee_connector now returns a pre-rendered BytesIO buffer
+                    heatmap_photo = heatmap.get('buffer') or heatmap.get('image_url')
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=heatmap_photo,
+                        caption=(
+                            "🌍 *Precipitação Acumulada — 30 dias | Brasil*\n"
+                            "Cinza = seco · Azul claro = 50mm · Azul escuro = 300mm+"
+                        ),
+                        parse_mode='Markdown'
                     )
-                    if heatmap_buffer:
-                        await context.bot.send_photo(
-                            chat_id=chat_id, photo=heatmap_buffer,
-                            caption="🌍 *Mapa de Calor:* Azul escuro = maior volume acumulado.",
-                            parse_mode='Markdown'
-                        )
-                    else:
-                        await context.bot.send_photo(
-                            chat_id=chat_id, photo=heatmap['image_url'],
-                            caption="🌍 *Mapa de Calor* (30 dias)", parse_mode='Markdown'
-                        )
                 except Exception as he:
                     print(f"  Heatmap send failed: {he}", flush=True)
                     # Fall through — still send the main map
