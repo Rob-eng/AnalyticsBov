@@ -24,9 +24,9 @@ WAITING_FORECAST_PERIOD = 9
 WAITING_WEATHER_MODE = 10
 
 MAIN_MENU_BUTTONS = [
-    "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação", 
-    "🌿 Análise Ambiental", "📢 Enviar Anúncio", "📈 Status", 
-    "📥 Importar Histórico", "👥 Lista de Usuários", "💬 Feedback", 
+    "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação (chuva)",
+    "🌿 Análise Ambiental", "📢 Enviar Anúncio", "📈 Status",
+    "📥 Importar Histórico", "👥 Lista de Usuários", "💬 Feedback",
     "📌 Minhas Propriedades"
 ]
 
@@ -48,16 +48,15 @@ def get_keyboard(chat_id):
     if is_admin(chat_id):
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("📈 Status")],
             [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
             [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
             [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("💬 Feedback")]
         ]
     else:
-
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("🌧️ Precipitação"), KeyboardButton("📈 Status")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("📈 Status")],
             [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
             [KeyboardButton("💬 Feedback")]
         ]
@@ -466,17 +465,17 @@ async def cancel_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start weather conversation — ask mode first (Histórico or Previsão)"""
+    """Start: show Histórico / Previsão choice immediately"""
     mode_keyboard = ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🌧️ Histórico (30 dias)"), KeyboardButton("🔮 Previsão ECMWF")],
+            [KeyboardButton("📅 Histórico"), KeyboardButton("🔮 Previsão")],
             [KeyboardButton("🔙 Voltar ao Menu")]
         ],
         resize_keyboard=True, one_time_keyboard=True
     )
     await update.message.reply_text(
         "🌧️ *Precipitação*\n\n"
-        "O que você deseja consultar?",
+        "O que deseja consultar?",
         parse_mode='Markdown',
         reply_markup=mode_keyboard
     )
@@ -484,19 +483,36 @@ async def start_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def receive_weather_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle mode selection (Histórico or Previsão) then ask for location"""
+    """Mode selected: Histórico → ask location. Previsão → ask period first."""
     text = update.message.text.strip()
     chat_id = str(update.effective_chat.id)
 
-    if text in MAIN_MENU_BUTTONS or text == "🔙 Voltar ao Menu":
+    if text in MAIN_MENU_BUTTONS or "🔙" in text:
         return await handle_keyboard_buttons(update, context)
 
-    if "🔮 Previsão" in text or "ECMWF" in text:
+    if "Previsão" in text:
         context.user_data['wx_mode'] = 'forecast'
+        # Ask for period before location
+        period_keyboard = ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("📅 1 dia"), KeyboardButton("📅 5 dias"), KeyboardButton("📅 10 dias")],
+                [KeyboardButton("🔙 Voltar")]
+            ],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+        await update.message.reply_text(
+            "Selecione o período de acumulação:",
+            reply_markup=period_keyboard
+        )
+        return WAITING_FORECAST_PERIOD
     else:
         context.user_data['wx_mode'] = 'historico'
+        return await _ask_location(update, context)
 
-    # Build location prompt with registered properties
+
+async def _ask_location(update, context):
+    """Helper: show location prompt with list of registered properties."""
+    chat_id = str(update.effective_chat.id)
     help_text = (
         "📍 *Informe a Localização*\n\n"
         "🏙️ *Município*: Ex: Bebedouro SP\n"
@@ -507,13 +523,12 @@ async def receive_weather_mode(update: Update, context: ContextTypes.DEFAULT_TYP
         from app.models import FavoriteLocation
         locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
         if locs:
-            help_text += "\n📌 *Suas Propriedades (Digite o número):*\n"
+            help_text += "\n📌 *Suas Propriedades (número):*\n"
             for i, loc in enumerate(locs, 1):
                 help_text += f"{i}. {loc.name}\n"
     finally:
         session.close()
-
-    help_text += "\nEnvie /cancelar para sair."
+    help_text += "\n/cancelar para sair."
     await update.message.reply_text(help_text, parse_mode='Markdown')
     return WAITING_WEATHER_LOCATION
 
@@ -656,39 +671,50 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             await status_msg.edit_text(msg, parse_mode='Markdown')
             await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
 
-        
-    # After showing historical data, offer forecast option
-        mode_keyboard = ReplyKeyboardMarkup(
-            [
-                [KeyboardButton("🌧️ Histórico (30 dias)"), KeyboardButton("🔮 Previsão ECMWF")],
-                [KeyboardButton("🔙 Voltar ao Menu")]
-            ],
-            resize_keyboard=True, one_time_keyboard=True
-        )
-        await update.message.reply_text(
-            "🔮 Deseja ver uma previsão de chuva ECMWF para este local?",
-            reply_markup=mode_keyboard
-        )
-        # Store lat/lon for forecast use
-        context.user_data['wx_lat'] = lat
-        context.user_data['wx_lon'] = lon
-        context.user_data['wx_loc_name'] = loc_name
+        # If forecast mode: fetch polygon + call weather service
+        wx_mode = context.user_data.get('wx_mode', 'historico')
+        if wx_mode == 'forecast':
+            days = context.user_data.get('wx_days', 5)
+            # Try CAR polygon
+            polygon = None
+            try:
+                import json as _json
+                from app.environmental import fetch_car_perimeter
+                car_result = fetch_car_perimeter(lat, lon)
+                if car_result and car_result[0]:
+                    polygon = _json.dumps(car_result[0])
+                    print(f"  CAR polygon found ({car_result[1]})", flush=True)
+            except Exception as poly_err:
+                print(f"  CAR polygon unavailable: {poly_err}", flush=True)
 
-        # Try to fetch CAR polygon — returns (geometry_dict, status) tuple
-        try:
-            import json as _json
-            from app.environmental import fetch_car_perimeter
-            car_result = fetch_car_perimeter(lat, lon)
-            if car_result and car_result[0]:  # tuple: (geometry, status)
-                context.user_data['wx_polygon'] = _json.dumps(car_result[0])
-                print(f"  CAR polygon found ({car_result[1]}) for forecast map", flush=True)
+            period_label = f"{days} dia" + ("s" if days > 1 else "")
+            await status_msg.edit_text(f"⏳ Baixando previsão ECMWF {period_label}... Até 3 minutos.")
+
+            wide_buf, close_buf, err_detail = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
+            sent_any = False
+            if wide_buf:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=wide_buf,
+                    caption=(f"🌎 *Previsão ECMWF — {period_label} acumulado*\n📍 {loc_name}"),
+                    parse_mode='Markdown'
+                )
+                sent_any = True
+            if close_buf:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=close_buf,
+                    caption=(f"🏡 *Detalhe — {period_label}*\n_Res: 0.25° | ECMWF Open Data_"),
+                    parse_mode='Markdown', reply_markup=get_keyboard(chat_id)
+                )
+                sent_any = True
+            if sent_any:
+                await status_msg.delete()
             else:
-                context.user_data['wx_polygon'] = None
-        except Exception as poly_err:
-            print(f"  Could not fetch CAR polygon: {poly_err}", flush=True)
-            context.user_data['wx_polygon'] = None
-
-        return WAITING_FORECAST_PERIOD
+                detail = f"\n`{err_detail[:300]}`" if err_detail else ""
+                await status_msg.edit_text(f"❌ Não foi possível gerar a previsão.{detail}", parse_mode='Markdown')
+                await update.message.reply_text("📱 Menu.", reply_markup=get_keyboard(chat_id))
+        else:
+            # Histórico: show data and end
+            await status_msg.delete()
 
     except Exception as e:
         print(f"Error in weather_info: {e}")
@@ -700,95 +726,25 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
 
 
 async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles mode and period selection for the forecast sub-flow."""
+    """Period chosen (1/5/10 dias) — store it then ask for location."""
     chat_id = str(update.effective_chat.id)
     text = update.message.text.strip()
 
-    if text == "🔙 Voltar ao Menu" or text == "🌧️ Histórico (30 dias)":
-        await update.message.reply_text("Ok!", reply_markup=get_keyboard(chat_id))
+    if "Voltar" in text or "Cancelar" in text:
+        await update.message.reply_text("❌ Cancelado.", reply_markup=get_keyboard(chat_id))
         return ConversationHandler.END
 
-    if text == "🔮 Previsão ECMWF":
-        period_keyboard = ReplyKeyboardMarkup(
-            [
-                [KeyboardButton("📅 1 dia"), KeyboardButton("📅 5 dias"), KeyboardButton("📅 10 dias")],
-                [KeyboardButton("❌ Cancelar")]
-            ],
-            resize_keyboard=True, one_time_keyboard=True
-        )
-        await update.message.reply_text(
-            "Selecione o período de acumulação da previsão:",
-            reply_markup=period_keyboard
-        )
-        return WAITING_FORECAST_PERIOD
-
-    # Parse period
     days_map = {"📅 1 dia": 1, "📅 5 dias": 5, "📅 10 dias": 10}
     days = days_map.get(text)
 
     if not days:
-        await update.message.reply_text("⚠️ Opção inválida. Escolha 1, 5 ou 10 dias.", reply_markup=get_keyboard(chat_id))
+        await update.message.reply_text("⚠️ Escolha 1, 5 ou 10 dias.", reply_markup=get_keyboard(chat_id))
         return ConversationHandler.END
 
-    lat = context.user_data.get('wx_lat')
-    lon = context.user_data.get('wx_lon')
-    loc_name = context.user_data.get('wx_loc_name', 'Local selecionado')
+    context.user_data['wx_days'] = days
+    return await _ask_location(update, context)
 
-    if lat is None or lon is None:
-        await update.message.reply_text("❌ Sessão expirou. Tente novamente.", reply_markup=get_keyboard(chat_id))
-        return ConversationHandler.END
 
-    status_msg = await update.message.reply_text(f"🛐 Baixando previsão ECMWF para {days} dia(s)... Até 3 minutos.")
-
-    try:
-        polygon = context.user_data.get('wx_polygon')
-        wide_buf, close_buf, err_detail = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
-        period_label = f"{days} dia" + ("s" if days > 1 else "")
-        sent_any = False
-
-        if wide_buf:
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=wide_buf,
-                caption=(
-                    f"🌎 *Previsão ECMWF — {period_label} acumulado (Regional)*\n"
-                    f"📍 *Local:* {loc_name}"
-                ),
-                parse_mode='Markdown'
-            )
-            sent_any = True
-
-        if close_buf:
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=close_buf,
-                caption=(
-                    f"🏡 *Detalhe da Propriedade — {period_label}*\n"
-                    f"_Res: 0.25° (~28 km) | Fonte: ECMWF Open Data IFS_"
-                ),
-                parse_mode='Markdown',
-                reply_markup=get_keyboard(chat_id)
-            )
-            sent_any = True
-
-        if sent_any:
-            await status_msg.delete()
-        else:
-            detail = f"\n\n`{err_detail[:350]}`" if err_detail else ""
-            await status_msg.edit_text(
-                f"❌ Não foi possível gerar a previsão.{detail}",
-                parse_mode='Markdown'
-            )
-            await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
-
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()[-400:]
-        print(f"Forecast period handler error: {tb}")
-        await status_msg.edit_text(f"❌ Erro ao gerar previsão:\n`{str(e)[:300]}`", parse_mode='Markdown')
-        await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
-
-    return ConversationHandler.END
 
 async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start environmental analysis conversation"""
@@ -1349,7 +1305,7 @@ def create_bot_application(post_init=None):
     weather_conv = ConversationHandler(
         entry_points=[
             CommandHandler("clima", start_weather),
-            MessageHandler(filters.Regex("^🌧️ Precipitação$"), start_weather)
+            MessageHandler(filters.Regex("^🌧️ Precipitação \\(chuva\\)$"), start_weather)
         ],
         states={
             WAITING_WEATHER_MODE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_weather_mode)],
