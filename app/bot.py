@@ -624,18 +624,17 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
         
         # 5. Send Photos
+        handled = False
         try:
             # Send Regional Heatmap first if available
             if heatmap:
                 from app.environmental import generate_environmental_image
-                # We reuse generate_environmental_image to overlay the pin on the heatmap
-                # We treat the heatmap as a "square" image
                 heatmap_buffer = generate_environmental_image(
                     heatmap['image_url'],
                     {"type": "Polygon", "coordinates": [[
-                        [lon-0.01, lat-0.01], [lon+0.01, lat-0.01], 
+                        [lon-0.01, lat-0.01], [lon+0.01, lat-0.01],
                         [lon+0.01, lat+0.01], [lon-0.01, lat+0.01], [lon-0.01, lat-0.01]
-                    ]]}, # Dummy tiny polygon just to provide a center
+                    ]]},
                     is_real_car=False,
                     region_bbox=heatmap['region_bbox'],
                     title="🔥 Variação Regional de Chuva (30 dias)",
@@ -643,19 +642,17 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 )
                 if heatmap_buffer:
                     await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=heatmap_buffer,
-                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados na região."
+                        chat_id=chat_id, photo=heatmap_buffer,
+                        caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados na região.",
+                        parse_mode='Markdown'
                     )
                 else:
-                    # Fallback if processing failed
                     await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=heatmap['image_url'],
+                        chat_id=chat_id, photo=heatmap['image_url'],
                         caption="🌍 *Mapa de Calor:* Azul escuro indica maiores volumes acumulados."
                     )
-            
-            # Send Local Property Map
+
+            # Send Local Property Map + historical message
             await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=map_image if map_image else get_static_map_url(lat, lon),
@@ -664,12 +661,20 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 reply_markup=get_keyboard(chat_id)
             )
             await status_msg.delete()
+            handled = True
         except Exception as spe:
             print(f"Error sending photo: {spe}")
-            # Fallback to just message
-            # edit_text doesn't support ReplyKeyboardMarkup, so we send a new message or just edit without markup
-            await status_msg.edit_text(msg, parse_mode='Markdown')
+            # Fallback: send historical text as plain message
+            try:
+                await status_msg.edit_text(msg, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(msg, parse_mode='Markdown',
+                                                reply_markup=get_keyboard(chat_id))
             await update.message.reply_text("📱 Menu restaurado.", reply_markup=get_keyboard(chat_id))
+            handled = True
+
+        if handled:
+            return ConversationHandler.END
 
         # If forecast mode: fetch polygon + call weather service
         wx_mode = context.user_data.get('wx_mode', 'historico')
