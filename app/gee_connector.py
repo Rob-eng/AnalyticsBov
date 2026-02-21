@@ -199,11 +199,14 @@ def get_ndvi_image(geometry_geojson):
 
 def get_precipitation_heatmap(lat, lon):
     """
-    Generates a Brazil-wide precipitation heatmap for the last 30 days.
-    State borders are painted via GEE GAUL dataset.
-    A red pin marks the queried point.
+    Brazil-wide precipitation heatmap for the last 30 days.
+    State borders are overlaid via geopandas + matplotlib after
+    downloading the GEE thumbnail. A red pin marks the queried point.
     Returns: { 'buffer': BytesIO, 'image_url': str, 'region_bbox': dict } or None
     """
+    import io as _io
+    import requests as _req
+
     try:
         if not initialize_gee():
             print("GEE initialization failed for heatmap")
@@ -212,18 +215,17 @@ def get_precipitation_heatmap(lat, lon):
         print(f"Generating Brazil heatmap for {lat}, {lon}")
 
         # Brazil bounding box
-        BRAZIL_MIN_LON, BRAZIL_MAX_LON = -74.0, -28.6
-        BRAZIL_MIN_LAT, BRAZIL_MAX_LAT = -33.8,   5.3
-        brazil = ee.Geometry.BBox(BRAZIL_MIN_LON, BRAZIL_MIN_LAT,
-                                  BRAZIL_MAX_LON, BRAZIL_MAX_LAT)
+        BMIN_LON, BMAX_LON = -74.0, -28.6
+        BMIN_LAT, BMAX_LAT = -33.8,   5.3
+        brazil = ee.Geometry.BBox(BMIN_LON, BMIN_LAT, BMAX_LON, BMAX_LAT)
 
-        # Date range — last 30 days (UTC)
+        # Date range (UTC)
         end_date   = datetime.utcnow()
         start_date = end_date - timedelta(days=30)
         start_str  = start_date.strftime('%Y-%m-%d')
         end_str    = end_date.strftime('%Y-%m-%d')
 
-        # ── GPM dataset (fallback chain) ──────────────────────────────────
+        # GPM dataset fallback chain
         GPM_ASSETS = [
             'NASA/GPM_L3/IMERG_V07',
             'NASA/GPM_L3/IMERG_V06',
@@ -247,92 +249,133 @@ def get_precipitation_heatmap(lat, lon):
                 print(f"Asset {asset} error: {ae}, trying next...")
 
         if collection is None or count == 0:
-            print("Heatmap: widening to 60-day window...")
-            start_date = end_date - timedelta(days=60)
-            try:
-                collection = (ee.ImageCollection('NASA/GPM_L3/IMERG_V07')
-                              .filterBounds(brazil)
-                              .filterDate(start_date.strftime('%Y-%m-%d'), end_str)
-                              .select('precipitation'))
-                count = int(collection.size().getInfo())
-            except Exception:
-                count = 0
+            print("Widening to 60-day window...")
+            start_60 = end_date - timedelta(days=60)
+            for asset in GPM_ASSETS:
+                try:
+                    coll = (ee.ImageCollection(asset)
+                            .filterBounds(brazil)
+                            .filterDate(start_60.strftime('%Y-%m-%d'), end_str)
+                            .select('precipitation'))
+                    count = int(coll.size().getInfo())
+                    if count > 0:
+                        collection = coll
+                        break
+                except Exception:
+                    pass
 
-        if count == 0:
-            print("Heatmap collection still empty after fallback.")
+        if collection is None or count == 0:
+            print("Heatmap: no data found.")
             return None
 
-        print(f"Heatmap collection has {count} images.")
+        print(f"Heatmap: {count} images found.")
 
-        # ── Aggregate: sum × 0.5 to convert mm/hr × 30min → mm ──────────
+        # Aggregate: mm/hr × 30min intervals → total mm
         total_precip = collection.reduce(ee.Reducer.sum()).multiply(0.5)
 
-        # ── Visualise heatmap ─────────────────────────────────────────────
-        heatmap_vis = total_precip.visualize(
-            min=1, max=300,
-            palette=['#f0f0f0', '#aad4f5', '#3399ff', '#003580', '#2d0055']
-        )
-
-        # ── Paint Brazil state borders (white, 1px) ───────────────────────
-        try:
-            brazil_states = (ee.FeatureCollection('FAO/GAUL/2015/level1')
-                             .filter(ee.Filter.eq('ADM0_NAME', 'Brazil')))
-            state_borders = ee.Image().paint(
-                featureCollection=brazil_states, color=1, width=1
-            )
-            white = ee.Image.constant([255, 255, 255]).byte()
-            composite = heatmap_vis.where(state_borders, white)
-        except Exception as sb_err:
-            print(f"  State borders failed, using plain heatmap: {sb_err}")
-            composite = heatmap_vis
-
-        # ── Get thumbnail URL ─────────────────────────────────────────────
-        url = composite.getThumbURL({
+        # Simple thumbnail — plain heatmap, no GEE-side compositing
+        url = total_precip.getThumbURL({
+            'min': 1,
+            'max': 300,
+            'palette': ['f0f0f0', 'aad4f5', '3399ff', '003580', '2d0055'],
             'dimensions': 900,
             'region': brazil.getInfo(),
             'format': 'png',
         })
         print(f"Heatmap URL: {url}")
 
-        # ── Download image ────────────────────────────────────────────────
-        import requests as _req
-        resp = _req.get(url, timeout=60)
+        # Download image
+        resp = _req.get(url, timeout=90)
         if resp.status_code != 200:
-            print(f"Heatmap download failed: {resp.status_code}")
-            return {'image_url': url, 'region_bbox': {
-                'min_lon': BRAZIL_MIN_LON, 'min_lat': BRAZIL_MIN_LAT,
-                'max_lon': BRAZIL_MAX_LON, 'max_lat': BRAZIL_MAX_LAT
-            }}
+            print(f"Heatmap download failed: HTTP {resp.status_code}")
+            return None
 
-        # ── Add red pin for queried point ─────────────────────────────────
+        # ── Overlay state borders with matplotlib + geopandas ────────────
+        import numpy as np
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.image as mpimg
         from PIL import Image as PILImage, ImageDraw
-        import io as _io
 
-        img = PILImage.open(_io.BytesIO(resp.content)).convert('RGBA')
-        w, h = img.size
+        raw = PILImage.open(_io.BytesIO(resp.content)).convert('RGB')
+        img_w, img_h = raw.size
 
-        px = int((lon - BRAZIL_MIN_LON) / (BRAZIL_MAX_LON - BRAZIL_MIN_LON) * w)
-        py = int((BRAZIL_MAX_LAT - lat) / (BRAZIL_MAX_LAT - BRAZIL_MIN_LAT) * h)
-        px = max(4, min(w - 4, px))
-        py = max(4, min(h - 4, py))
+        fig, ax = plt.subplots(figsize=(img_w / 100, img_h / 100), dpi=100)
+        ax.imshow(np.array(raw),
+                  extent=[BMIN_LON, BMAX_LON, BMIN_LAT, BMAX_LAT],
+                  aspect='auto', origin='upper')
+        ax.set_xlim(BMIN_LON, BMAX_LON)
+        ax.set_ylim(BMIN_LAT, BMAX_LAT)
+        ax.axis('off')
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-        draw = ImageDraw.Draw(img)
-        r = 8
-        draw.ellipse([px - r, py - r, px + r, py + r],
-                     fill=(220, 30, 30, 230), outline=(255, 255, 255, 255))
-        draw.ellipse([px - 3, py - 3, px + 3, py + 3],
-                     fill=(255, 255, 255, 230))
+        # Draw state borders (try multiple data sources)
+        try:
+            import geopandas as gpd
+            states_gdf = None
+
+            # Source 1: naturalearth admin-1 via geodatasets (geopandas >= 0.12)
+            try:
+                import geodatasets
+                states_gdf = gpd.read_file(geodatasets.get_path('naturalearth.land'))
+                # geodatasets doesn't have admin-1 so skip this path
+                states_gdf = None
+            except Exception:
+                pass
+
+            # Source 2: naturalearth admin-1 GeoJSON from GitHub CDN
+            if states_gdf is None:
+                ne_url = (
+                    "https://raw.githubusercontent.com/nvkelso/"
+                    "natural-earth-vector/master/geojson/"
+                    "ne_10m_admin_1_states_provinces.geojson"
+                )
+                try:
+                    states_gdf = gpd.read_file(ne_url)
+                    states_gdf = states_gdf[states_gdf['admin'] == 'Brazil']
+                except Exception:
+                    states_gdf = None
+
+            # Source 3: IBGE simplified + reliable IBGE URL
+            if states_gdf is None:
+                ibge_url = (
+                    "https://raw.githubusercontent.com/codeforamerica/"
+                    "click_that_hood/master/public/data/brazil-states.geojson"
+                )
+                try:
+                    states_gdf = gpd.read_file(ibge_url)
+                except Exception:
+                    states_gdf = None
+
+            if states_gdf is not None and len(states_gdf) > 0:
+                states_gdf.boundary.plot(ax=ax, linewidth=0.7, color='white', alpha=0.85)
+                print(f"  Drew {len(states_gdf)} state borders")
+            else:
+                print("  No state border data found, drawing outline only")
+                # Fallback: draw simple Brazil outline from naturalearth_lowres
+                world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+                brazil_outline = world[world['name'] == 'Brazil']
+                brazil_outline.boundary.plot(ax=ax, linewidth=1.0, color='white', alpha=0.9)
+        except Exception as ge:
+            print(f"  State borders skipped entirely: {ge}")
+
+        # Red pin marker
+        ax.plot(lon, lat, 'o', markersize=10, color='#DC1E1E',
+                markeredgecolor='white', markeredgewidth=1.5, zorder=5)
 
         buf = _io.BytesIO()
-        img.convert('RGB').save(buf, format='PNG')
+        fig.savefig(buf, format='png', dpi=100,
+                    bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
         buf.seek(0)
 
         return {
             'buffer': buf,
             'image_url': url,
             'region_bbox': {
-                'min_lon': BRAZIL_MIN_LON, 'min_lat': BRAZIL_MIN_LAT,
-                'max_lon': BRAZIL_MAX_LON, 'max_lat': BRAZIL_MAX_LAT,
+                'min_lon': BMIN_LON, 'min_lat': BMIN_LAT,
+                'max_lon': BMAX_LON, 'max_lat': BMAX_LAT,
             }
         }
 
