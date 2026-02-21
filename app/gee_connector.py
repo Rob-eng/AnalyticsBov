@@ -209,10 +209,10 @@ def get_precipitation_heatmap(lat, lon):
 
     try:
         if not initialize_gee():
-            print("GEE initialization failed for heatmap")
+            print("GEE initialization failed for heatmap", flush=True)
             return None
 
-        print(f"Generating Brazil heatmap for {lat}, {lon}")
+        print(f"[HEATMAP] Starting Brazil heatmap for lat={lat}, lon={lon}", flush=True)
 
         # Brazil bounding box
         BMIN_LON, BMAX_LON = -74.0, -28.6
@@ -225,11 +225,12 @@ def get_precipitation_heatmap(lat, lon):
         start_str  = start_date.strftime('%Y-%m-%d')
         end_str    = end_date.strftime('%Y-%m-%d')
 
-        # GPM dataset fallback chain
+        # GPM dataset fallback chain — LATE run first (14h latency vs 2-month for Final)
         GPM_ASSETS = [
-            'NASA/GPM_L3/IMERG_V07',
-            'NASA/GPM_L3/IMERG_V06',
-            'NASA/GPM_L3/IMERG_V06_LATE',
+            'NASA/GPM_L3/IMERG_V06_LATE',   # near real-time, ~14h latency
+            'NASA/GPM_L3/IMERG_V07HHL',      # V07 Late-run if available
+            'NASA/GPM_L3/IMERG_V07',         # Final (~2 months latency)
+            'NASA/GPM_L3/IMERG_V06',         # V06 Final
         ]
         collection = None
         count = 0
@@ -241,15 +242,15 @@ def get_precipitation_heatmap(lat, lon):
                         .select('precipitation'))
                 count = int(coll.size().getInfo())
                 if count > 0:
-                    print(f"Using GPM asset: {asset} ({count} images)")
+                    print(f"Using GPM asset: {asset} ({count} images)", flush=True)
                     collection = coll
                     break
-                print(f"Asset {asset}: 0 images, trying next...")
+                print(f"Asset {asset}: 0 images in 30-day window, trying next...", flush=True)
             except Exception as ae:
-                print(f"Asset {asset} error: {ae}, trying next...")
+                print(f"Asset {asset} error: {ae}, trying next...", flush=True)
 
         if collection is None or count == 0:
-            print("Widening to 60-day window...")
+            print("Widening to 60-day window...", flush=True)
             start_60 = end_date - timedelta(days=60)
             for asset in GPM_ASSETS:
                 try:
@@ -380,7 +381,7 @@ def get_precipitation_heatmap(lat, lon):
         }
 
     except Exception as e:
-        print(f"Heatmap error: {e}")
+        print(f"[HEATMAP ERROR] {e}", flush=True)
         import traceback
-        print(traceback.format_exc())
+        print(traceback.format_exc(), flush=True)
         return None
