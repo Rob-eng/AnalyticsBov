@@ -381,12 +381,21 @@ def get_precipitation_heatmap(lat, lon):
         except Exception as ge:
             print(f"  State borders skipped entirely: {ge}")
 
-        # Red pin marker
-        ax.plot(lon, lat, 'o', markersize=10, color='#DC1E1E',
-                markeredgecolor='white', markeredgewidth=1.5, zorder=5)
+        # Small red pin marker
+        ax.plot(lon, lat, 'o', markersize=5, color='#DC1E1E',
+                markeredgecolor='white', markeredgewidth=0.8, zorder=5)
+
+        # Source attribution
+        ax.text(
+            BMAX_LON - 0.3, BMIN_LAT + 0.3,
+            "Fonte: NASA GPM IMERG · Google Earth Engine",
+            fontsize=6.5, color='white', ha='right', va='bottom',
+            bbox=dict(boxstyle='round,pad=0.2', fc='black', alpha=0.45, ec='none'),
+            zorder=6
+        )
 
         buf = _io.BytesIO()
-        fig.savefig(buf, format='png', dpi=100,
+        fig.savefig(buf, format='png', dpi=120,
                     bbox_inches='tight', pad_inches=0)
         plt.close(fig)
         buf.seek(0)
