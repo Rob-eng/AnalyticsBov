@@ -382,8 +382,8 @@ def get_precipitation_heatmap(lat, lon):
             print(f"  State borders skipped entirely: {ge}")
 
         # Small red pin marker
-        ax.plot(lon, lat, 'o', markersize=5, color='#DC1E1E',
-                markeredgecolor='white', markeredgewidth=0.8, zorder=5)
+        ax.plot(lon, lat, 'o', markersize=2, color='#DC1E1E',
+                markeredgecolor='white', markeredgewidth=0.5, zorder=5)
 
         # Source attribution
         ax.text(
