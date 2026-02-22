@@ -521,26 +521,43 @@ def get_terrain_data(geometry_geojson):
         elev_max = float(np.nanmax(elevation))
         print(f"[MDT] Elevation range: {elev_min:.1f}m – {elev_max:.1f}m, shape={elevation.shape}", flush=True)
 
-        # ── 4. Sentinel-2 RGB thumbnail for 3D texture ──────────────────────
-        print("[MDT] Fetching Sentinel-2 RGB thumbnail...", flush=True)
+        # ── 4. High-quality S2 RGB thumbnail for 3D texture ─────────────────
+        print("[MDT] Fetching satellite background for 3D texture...", flush=True)
         rgb_url = None
         try:
+            # We use a 1-year median to get a "Google Satellite" clean look
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=90)
-            s2 = (
+            start_year = end_date - timedelta(days=365)
+            
+            s2_col = (
                 ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
                 .filterBounds(square)
-                .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
-                .sort('CLOUDY_PIXEL_PERCENTAGE')
-                .first()
+                .filterDate(start_year.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
             )
-            rgb_url = s2.visualize(bands=['B4', 'B3', 'B2'], min=0, max=2500).getThumbURL({
+            
+            # Use median for clean mosaic, fallback to recent first() if empty or small
+            s2_img = s2_col.median().clip(square)
+            
+            # If median is empty (no <5% cloud images), use 30% threshold first()
+            count = s2_col.size().getInfo()
+            if count == 0:
+                s2_img = (
+                    ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                    .filterBounds(square)
+                    .filterDate(start_year.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+                    .sort('CLOUDY_PIXEL_PERCENTAGE')
+                    .first()
+                    .clip(square)
+                )
+
+            rgb_url = s2_img.visualize(bands=['B4', 'B3', 'B2'], min=0, max=3000, gamma=1.2).getThumbURL({
                 'region': square.getInfo(),
-                'dimensions': 512,
+                'dimensions': 1024,  # Increased resolution for 3D texture
                 'format': 'png',
             })
-            print(f"[MDT] RGB URL obtained.", flush=True)
+            print(f"[MDT] Satellite background URL obtained.", flush=True)
         except Exception as re:
             print(f"[MDT] RGB thumbnail failed (will render without texture): {re}", flush=True)
 

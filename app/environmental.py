@@ -407,13 +407,13 @@ def generate_terrain_image_2d(terrain_data, geometry, is_real_car='FALLBACK',
         rings = _extract_rings(geometry)
         for ring in rings:
             xs = [(x - minx) / w for x, y in ring]
-            ys = [1 - (y - miny) / h for x, y in ring]
+            ys = [(y - miny) / h for x, y in ring]
             ax.plot(xs, ys, color=pcolor, linewidth=plw, linestyle=pls, zorder=5)
 
         # ── Pin ────────────────────────────────────────────────────────────
         if pin_coords and region_bbox:
             px = (pin_coords[1] - minx) / w
-            py = 1 - (pin_coords[0] - miny) / h
+            py = (pin_coords[0] - miny) / h
             if 0 <= px <= 1 and 0 <= py <= 1:
                 ax.plot(px, py, 'o', markersize=4, color='#FF3333',
                         markeredgecolor='white', markeredgewidth=0.8, zorder=8)
@@ -499,8 +499,12 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
         x = np.linspace(0, 1, cols)
         y = np.linspace(0, 1, rows)
         X, Y = np.meshgrid(x, y)
-        # Flip Z so north is at back of plot
-        Z = elev_fill
+
+        # Z is North-at-row-0. Matplotlib meshgrid Y is south-to-north (0 to 1).
+        # So we flip Z to match Y.
+        Z = np.flipud(elev_fill)
+        if face_colors is not None:
+            face_colors = np.flipud(face_colors)
 
         fig = plt.figure(figsize=(12, 9), dpi=130)
         fig.patch.set_facecolor('#0d0d1a')
@@ -541,6 +545,7 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
             # Interpolate elevation at each perimeter vertex
             def _elev_at(xn, yn):
                 ci = int(np.clip(xn * (cols - 1), 0, cols - 1))
+                # yn=1 is North (row 0), yn=0 is South (row rows-1)
                 ri = int(np.clip((1 - yn) * (rows - 1), 0, rows - 1))
                 return float(elev_fill[ri, ci]) + 15  # +15m so line sits above surface
             zs = [_elev_at(xn, yn) for xn, yn in zip(xs_n, ys_n)]
@@ -558,7 +563,19 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
                            edgecolors='white', linewidths=0.8, zorder=8)
 
         # ── View angle + style ─────────────────────────────────────────────
-        ax.view_init(elev=30, azim=225)
+        ax.view_init(elev=35, azim=225)
+
+        # Fix aspect ratio: calculate width/height in meters
+        mid_lat = (region_bbox['min_lat'] + region_bbox['max_lat']) / 2
+        deg_lat_m = 111320
+        deg_lon_m = 111320 * np.cos(np.radians(mid_lat))
+        w_m = w * deg_lon_m
+        h_m = h * deg_lat_m
+        z_range = max(10, elev_max - elev_min)
+
+        # Scale vertical aspect for visibility (exaggerate by 3x usually good)
+        ax.set_box_aspect((w_m, h_m, z_range * 4))
+
         ax.set_zlim(elev_min - 5, elev_max + (elev_max - elev_min) * 0.3)
 
         # Clean up panes
