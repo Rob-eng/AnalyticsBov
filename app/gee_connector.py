@@ -414,3 +414,147 @@ def get_precipitation_heatmap(lat, lon):
         import traceback
         print(traceback.format_exc(), flush=True)
         return None
+
+
+# ── Terrain / MDT ──────────────────────────────────────────────────────────────
+
+def get_terrain_data(geometry_geojson):
+    """
+    Fetches Digital Elevation Model data for the given geometry using GEE.
+
+    DEM Priority:
+      1. COPERNICUS/DEM/GLO30  — ESA/TanDEM-X, 30m, best global accuracy
+      2. NASA/NASADEM_HGT/001  — Improved SRTM void-filled
+      3. USGS/SRTMGL1_003      — Classic SRTM 30m
+
+    Returns:
+      {
+        'elevation': np.ndarray,   2-D elevation grid (metres)
+        'rgb_url':   str,          Sentinel-2 true-colour thumbnail URL
+        'region_bbox': dict,       {min_lon, min_lat, max_lon, max_lat}
+        'source':    str,          which DEM was used
+        'elev_min':  float,
+        'elev_max':  float,
+      }
+      or None on failure.
+    """
+    import numpy as np
+    import requests as _requests
+
+    try:
+        if not initialize_gee():
+            return None
+
+        print("[MDT] Initializing terrain data fetch...", flush=True)
+        geom = ee.Geometry(geometry_geojson)
+
+        # ── 1. Build a square region around the geometry ────────────────────
+        bounds = geom.buffer(50).bounds()
+        coords = bounds.coordinates().get(0).getInfo()
+        lons = [c[0] for c in coords]
+        lats = [c[1] for c in coords]
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+
+        cx = (min_lon + max_lon) / 2
+        cy = (min_lat + max_lat) / 2
+        half = max(max_lon - min_lon, max_lat - min_lat) / 2 * 1.15
+
+        square = ee.Geometry.Polygon([[
+            [cx - half, cy - half],
+            [cx + half, cy - half],
+            [cx + half, cy + half],
+            [cx - half, cy + half],
+            [cx - half, cy - half],
+        ]])
+
+        region_bbox = {
+            'min_lon': cx - half, 'min_lat': cy - half,
+            'max_lon': cx + half, 'max_lat': cy + half,
+        }
+
+        # ── 2. Try DEMs in priority order ───────────────────────────────────
+        DEM_SOURCES = [
+            ('COPERNICUS/DEM/GLO30', 'DEM',        'Copernicus GLO-30'),
+            ('NASA/NASADEM_HGT/001', 'elevation',  'NASADEM'),
+            ('USGS/SRTMGL1_003',     'elevation',  'SRTM 30m'),
+        ]
+
+        elevation_img = None
+        source_name = 'Unknown'
+        for asset, band, label in DEM_SOURCES:
+            try:
+                img = ee.Image(asset).select(band).clip(square)
+                # Quick sanity-check: get min value; if it errors, asset is unavailable
+                test = img.reduceRegion(
+                    reducer=ee.Reducer.min(), geometry=square,
+                    scale=30, maxPixels=1e6, bestEffort=True
+                ).getInfo()
+                if test and list(test.values())[0] is not None:
+                    elevation_img = img
+                    source_name = label
+                    print(f"[MDT] Using DEM: {label}", flush=True)
+                    break
+            except Exception as de:
+                print(f"[MDT] {label} unavailable: {de}", flush=True)
+                continue
+
+        if elevation_img is None:
+            print("[MDT] All DEM sources failed.", flush=True)
+            return None
+
+        # ── 3. Sample rectangle → numpy elevation array ─────────────────────
+        print("[MDT] Sampling elevation array...", flush=True)
+        sample = elevation_img.sampleRectangle(region=square, defaultValue=0)
+        elev_list = sample.get('DEM' if source_name == 'Copernicus GLO-30' else 'elevation').getInfo()
+
+        # For Copernicus, band might be named differently — re-try with generic get
+        if elev_list is None:
+            band_key = list(sample.toDictionary().getInfo().keys())[0]
+            elev_list = sample.get(band_key).getInfo()
+
+        elevation = np.array(elev_list, dtype=np.float32)
+        # Replace no-data sentinel values
+        elevation = np.where(elevation < -1000, np.nan, elevation)
+
+        elev_min = float(np.nanmin(elevation))
+        elev_max = float(np.nanmax(elevation))
+        print(f"[MDT] Elevation range: {elev_min:.1f}m – {elev_max:.1f}m, shape={elevation.shape}", flush=True)
+
+        # ── 4. Sentinel-2 RGB thumbnail for 3D texture ──────────────────────
+        print("[MDT] Fetching Sentinel-2 RGB thumbnail...", flush=True)
+        rgb_url = None
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=90)
+            s2 = (
+                ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                .filterBounds(square)
+                .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+                .sort('CLOUDY_PIXEL_PERCENTAGE')
+                .first()
+            )
+            rgb_url = s2.visualize(bands=['B4', 'B3', 'B2'], min=0, max=2500).getThumbURL({
+                'region': square.getInfo(),
+                'dimensions': 512,
+                'format': 'png',
+            })
+            print(f"[MDT] RGB URL obtained.", flush=True)
+        except Exception as re:
+            print(f"[MDT] RGB thumbnail failed (will render without texture): {re}", flush=True)
+
+        return {
+            'elevation':   elevation,
+            'rgb_url':     rgb_url,
+            'region_bbox': region_bbox,
+            'source':      source_name,
+            'elev_min':    elev_min,
+            'elev_max':    elev_max,
+        }
+
+    except Exception as e:
+        print(f"[MDT ERROR] {e}", flush=True)
+        import traceback
+        print(traceback.format_exc(), flush=True)
+        return None

@@ -325,3 +325,278 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         import traceback
         traceback.print_exc()
         return None
+
+
+# ── MDT: 2D Contour Map ────────────────────────────────────────────────────────
+
+def generate_terrain_image_2d(terrain_data, geometry, is_real_car='FALLBACK',
+                               title=None, pin_coords=None):
+    """
+    Generates a 2D hillshaded terrain map with contour lines:
+      - Contours every 5m  : thin grey lines
+      - Contours every 50m : thick white lines with elevation labels
+      - CAR perimeter overlay
+      - Elevation colorbar
+    Returns BytesIO PNG or None.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LightSource
+    from io import BytesIO
+    from shapely.geometry import shape as sh
+
+    try:
+        elevation = terrain_data['elevation']
+        region_bbox = terrain_data['region_bbox']
+        source = terrain_data.get('source', 'DEM')
+        elev_min = terrain_data.get('elev_min', float(np.nanmin(elevation)))
+        elev_max = terrain_data.get('elev_max', float(np.nanmax(elevation)))
+
+        rows, cols = elevation.shape
+        # Fill NaN with min for rendering
+        elev_fill = np.where(np.isnan(elevation), elev_min, elevation)
+
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=130)
+        fig.patch.set_facecolor('#1a1a2e')
+
+        # ── Hillshade ──────────────────────────────────────────────────────
+        ls = LightSource(azdeg=315, altdeg=35)
+        hillshade = ls.shade(elev_fill, cmap=plt.cm.terrain,
+                             blend_mode='overlay',
+                             vert_exag=3,
+                             vmin=elev_min, vmax=elev_max)
+        ax.imshow(hillshade, extent=[0, 1, 0, 1], origin='upper', aspect='auto')
+
+        X = np.linspace(0, 1, cols)
+        Y = np.linspace(1, 0, rows)   # image Y is top-to-bottom
+
+        # ── Contours 5m (fine) ─────────────────────────────────────────────
+        elev_range = elev_max - elev_min
+        if elev_range > 0:
+            levels_5 = np.arange(
+                round(elev_min / 5) * 5,
+                round(elev_max / 5 + 1) * 5,
+                5
+            )
+            levels_50 = np.arange(
+                round(elev_min / 50) * 50,
+                round(elev_max / 50 + 1) * 50,
+                50
+            )
+
+            if len(levels_5) > 1:
+                cs5 = ax.contour(X, Y, elev_fill, levels=levels_5,
+                                 colors='white', linewidths=0.4, alpha=0.45)
+            if len(levels_50) > 1:
+                cs50 = ax.contour(X, Y, elev_fill, levels=levels_50,
+                                  colors='white', linewidths=1.5, alpha=0.85)
+                ax.clabel(cs50, inline=True, fontsize=7, fmt='%d m',
+                          colors='white', inline_spacing=4)
+
+        # ── CAR perimeter ──────────────────────────────────────────────────
+        minx = region_bbox['min_lon']
+        miny = region_bbox['min_lat']
+        w = region_bbox['max_lon'] - minx
+        h = region_bbox['max_lat'] - miny
+
+        color_map = {'OFFICIAL': 'lime', 'NEARBY': 'orange'}
+        pcolor = color_map.get(is_real_car, 'yellow')
+        plw = 2.5 if is_real_car in ('OFFICIAL', 'NEARBY') else 1.5
+        pls = '-' if is_real_car == 'OFFICIAL' else '-.'
+
+        rings = _extract_rings(geometry)
+        for ring in rings:
+            xs = [(x - minx) / w for x, y in ring]
+            ys = [1 - (y - miny) / h for x, y in ring]
+            ax.plot(xs, ys, color=pcolor, linewidth=plw, linestyle=pls, zorder=5)
+
+        # ── Pin ────────────────────────────────────────────────────────────
+        if pin_coords and region_bbox:
+            px = (pin_coords[1] - minx) / w
+            py = 1 - (pin_coords[0] - miny) / h
+            if 0 <= px <= 1 and 0 <= py <= 1:
+                ax.plot(px, py, 'o', markersize=4, color='#FF3333',
+                        markeredgecolor='white', markeredgewidth=0.8, zorder=8)
+
+        # ── Colorbar ───────────────────────────────────────────────────────
+        sm = plt.cm.ScalarMappable(
+            cmap=plt.cm.terrain,
+            norm=plt.Normalize(vmin=elev_min, vmax=elev_max)
+        )
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.04, pad=0.02, shrink=0.7)
+        cbar.set_label('Altitude (m)', color='white', fontsize=9)
+        cbar.ax.yaxis.set_tick_params(color='white')
+        plt.setp(cbar.ax.yaxis.get_ticklabels(), color='white', fontsize=8)
+
+        # ── Cosmetics ──────────────────────────────────────────────────────
+        if title:
+            ax.set_title(f"🏔️ {title}", color='white', fontsize=13,
+                         fontweight='bold', pad=10)
+        ax.axis('off')
+        ax.text(0.99, 0.01,
+                f"Fonte: {source} · GEE  |  Curvas: 5m / 50m",
+                transform=ax.transAxes, fontsize=6.5, color='white',
+                ha='right', va='bottom',
+                bbox=dict(boxstyle='round,pad=0.2', fc='black', alpha=0.5, ec='none'),
+                zorder=9)
+
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=130, bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+        print("[MDT 2D] Image generated.", flush=True)
+        return buf
+
+    except Exception as e:
+        print(f"[MDT 2D ERROR] {e}", flush=True)
+        import traceback; traceback.print_exc()
+        return None
+
+
+# ── MDT: 3D Terrain Model ─────────────────────────────────────────────────────
+
+def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
+                               title=None, pin_coords=None):
+    """
+    Generates a 3D terrain model with Sentinel-2 satellite texture draped over
+    the elevation surface.  CAR perimeter is projected onto the 3D surface.
+    Returns BytesIO PNG or None.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    from io import BytesIO
+    import requests as _req
+
+    try:
+        elevation = terrain_data['elevation']
+        region_bbox = terrain_data['region_bbox']
+        source = terrain_data.get('source', 'DEM')
+        rgb_url = terrain_data.get('rgb_url')
+        elev_min = terrain_data.get('elev_min', float(np.nanmin(elevation)))
+        elev_max = terrain_data.get('elev_max', float(np.nanmax(elevation)))
+
+        rows, cols = elevation.shape
+        elev_fill = np.where(np.isnan(elevation), elev_min, elevation)
+
+        # ── Download and resize satellite texture ──────────────────────────
+        face_colors = None
+        if rgb_url:
+            try:
+                resp = _req.get(rgb_url, timeout=30)
+                if resp.status_code == 200:
+                    from PIL import Image as _PIL
+                    sat_img = _PIL.open(BytesIO(resp.content)).convert('RGB')
+                    sat_img = sat_img.resize((cols, rows), _PIL.LANCZOS)
+                    face_colors = np.array(sat_img) / 255.0
+                    print("[MDT 3D] Satellite texture loaded.", flush=True)
+            except Exception as te:
+                print(f"[MDT 3D] Texture load failed: {te}", flush=True)
+
+        # ── Build meshgrid ─────────────────────────────────────────────────
+        x = np.linspace(0, 1, cols)
+        y = np.linspace(0, 1, rows)
+        X, Y = np.meshgrid(x, y)
+        # Flip Z so north is at back of plot
+        Z = elev_fill
+
+        fig = plt.figure(figsize=(12, 9), dpi=130)
+        fig.patch.set_facecolor('#0d0d1a')
+        ax = fig.add_subplot(111, projection='3d')
+        ax.set_facecolor('#0d0d1a')
+
+        # ── Surface ────────────────────────────────────────────────────────
+        if face_colors is not None:
+            # Drape satellite image as texture
+            ax.plot_surface(X, Y, Z,
+                            facecolors=face_colors,
+                            rstride=1, cstride=1,
+                            linewidth=0, antialiased=False,
+                            shade=False)
+        else:
+            # Fallback: terrain colormap
+            from matplotlib.colors import Normalize
+            norm = Normalize(vmin=elev_min, vmax=elev_max)
+            ax.plot_surface(X, Y, Z,
+                            cmap='terrain', norm=norm,
+                            rstride=1, cstride=1,
+                            linewidth=0, antialiased=False,
+                            alpha=0.95)
+
+        # ── CAR perimeter projected onto terrain ───────────────────────────
+        minx = region_bbox['min_lon']
+        miny = region_bbox['min_lat']
+        w = region_bbox['max_lon'] - minx
+        h = region_bbox['max_lat'] - miny
+
+        color_map = {'OFFICIAL': 'lime', 'NEARBY': 'orange'}
+        pcolor = color_map.get(is_real_car, 'yellow')
+
+        rings = _extract_rings(geometry)
+        for ring in rings:
+            xs_n = [(x - minx) / w for x, y in ring]
+            ys_n = [(y - miny) / h for x, y in ring]
+            # Interpolate elevation at each perimeter vertex
+            def _elev_at(xn, yn):
+                ci = int(np.clip(xn * (cols - 1), 0, cols - 1))
+                ri = int(np.clip((1 - yn) * (rows - 1), 0, rows - 1))
+                return float(elev_fill[ri, ci]) + 15  # +15m so line sits above surface
+            zs = [_elev_at(xn, yn) for xn, yn in zip(xs_n, ys_n)]
+            ax.plot(xs_n, ys_n, zs, color=pcolor, linewidth=2.0, zorder=5)
+
+        # ── Pin ────────────────────────────────────────────────────────────
+        if pin_coords and region_bbox:
+            px = (pin_coords[1] - minx) / w
+            py = (pin_coords[0] - miny) / h
+            if 0 <= px <= 1 and 0 <= py <= 1:
+                ci = int(np.clip(px * (cols - 1), 0, cols - 1))
+                ri = int(np.clip((1 - py) * (rows - 1), 0, rows - 1))
+                pz = float(elev_fill[ri, ci]) + 25
+                ax.scatter([px], [py], [pz], color='#FF3333', s=60,
+                           edgecolors='white', linewidths=0.8, zorder=8)
+
+        # ── View angle + style ─────────────────────────────────────────────
+        ax.view_init(elev=30, azim=225)
+        ax.set_zlim(elev_min - 5, elev_max + (elev_max - elev_min) * 0.3)
+
+        # Clean up panes
+        ax.xaxis.pane.set_visible(False)
+        ax.yaxis.pane.set_visible(False)
+        ax.zaxis.pane.set_visible(False)
+        ax.grid(False)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.zaxis.set_tick_params(labelcolor='white', labelsize=7)
+        ax.set_zlabel('m', color='white', fontsize=8)
+
+        if title:
+            ax.set_title(f"🏔️ {title} — Modelo 3D", color='white',
+                         fontsize=12, fontweight='bold', pad=12)
+
+        fig.text(0.02, 0.02,
+                 f"Fonte: {source} + Sentinel-2 · Google Earth Engine",
+                 color='white', fontsize=6.5, alpha=0.8)
+
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=130, bbox_inches='tight',
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+        print("[MDT 3D] Image generated.", flush=True)
+        return buf
+
+    except Exception as e:
+        print(f"[MDT 3D ERROR] {e}", flush=True)
+        import traceback; traceback.print_exc()
+        return None
+
+
+def _extract_rings(geometry):
+    """Helper: extract coordinate rings from Polygon or MultiPolygon geometry dict."""
+    gtype = geometry.get('type', '')
+    if gtype == 'Polygon':
+        return geometry['coordinates']
+    elif gtype == 'MultiPolygon':
+        return [ring for poly in geometry['coordinates'] for ring in poly]
+    return []

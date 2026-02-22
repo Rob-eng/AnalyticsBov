@@ -22,6 +22,7 @@ WAITING_LOCATION_COORDS = 7
 WAITING_LOCATION_DELETE = 8
 WAITING_FORECAST_PERIOD = 9
 WAITING_WEATHER_MODE = 10
+WAITING_ENV_MODE = 11
 
 MAIN_MENU_BUTTONS = [
     "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação (chuva)",
@@ -736,17 +737,42 @@ async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start environmental analysis conversation"""
+    """Start environmental analysis — show NDVI vs MDT sub-menu."""
+    mode_keyboard = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🌿 NDVI (Vegetação)"), KeyboardButton("🏔️ Terreno (MDT)")],
+            [KeyboardButton("🔙 Voltar ao Menu")]
+        ],
+        resize_keyboard=True, one_time_keyboard=True
+    )
+    await update.message.reply_text(
+        "🌿 *Análise Ambiental*\n\n"
+        "Escolha o tipo de análise:",
+        parse_mode='Markdown',
+        reply_markup=mode_keyboard
+    )
+    return WAITING_ENV_MODE
+
+async def receive_env_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Store env mode choice (ndvi/mdt) and ask for location."""
+    text = update.message.text.strip()
+    if text in MAIN_MENU_BUTTONS or text == "🔙 Voltar ao Menu":
+        return await handle_keyboard_buttons(update, context)
+
+    if 'MDT' in text or 'Terreno' in text:
+        context.user_data['env_mode'] = 'mdt'
+        mode_label = "🏔️ *Terreno (MDT)*"
+    else:
+        context.user_data['env_mode'] = 'ndvi'
+        mode_label = "🌿 *NDVI*"
+
     chat_id = str(update.effective_chat.id)
     help_text = (
-        "🌿 *Análise Ambiental (CAR + NDVI)*\n\n"
-        "Envie uma localização para analisar o vigor vegetativo.\n\n"
-        "📍 *Opções*:\n"
+        f"{mode_label}\n\n"
+        "Envie uma localização para analisar:\n"
         "- Coordenadas (ex: -21.43, -54.78)\n"
         "- Link do Google Maps\n"
     )
-
-    # List properties
     session = SessionLocal()
     try:
         from app.models import FavoriteLocation
@@ -759,11 +785,10 @@ async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE)
         session.close()
 
     help_text += "\nEnvie /cancelar para sair."
-
     await update.message.reply_text(
-        help_text,
-        parse_mode='Markdown',
-        disable_web_page_preview=True
+        help_text, parse_mode='Markdown',
+        disable_web_page_preview=True,
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancelar")]], resize_keyboard=True)
     )
     return WAITING_ENV_LOCATION
 
@@ -815,77 +840,144 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # 2. Fetch CAR Perimeter
         geometry, is_real_car = fetch_car_perimeter(lat, lon)
-        
-        # 3. Get NDVI Analysis
-        analysis = get_ndvi_analysis(geometry)
-        if not analysis:
-            await status_msg.edit_text(
-                "⚠️ *Não foi possível realizar a análise*\n\n"
-                "Verifique se o local selecionado tem cobertura recente de satélite (sem nuvens) "
-                "ou tente novamente mais tarde.",
-                parse_mode='Markdown'
-            )
-            return WAITING_ENV_LOCATION
 
-        # 4. Format Message
-        ndvi_val = analysis.get('stats', {}).get('mean', 0)
-        dt_obj = datetime.fromtimestamp(analysis['dt'])
-        date_str = dt_obj.strftime('%d/%m/%Y')
-        
-        msg = f"🌿 *Análise Ambiental*\n\n"
-        msg += f"📅 *Data da Imagem:* {date_str}\n"
-        msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
-        
-        if is_real_car == 'OFFICIAL' or is_real_car is True:
-            msg += f"✅ *Perímetro:* CAR Oficial\n"
-        elif is_real_car == 'NEARBY':
-            msg += f"⚠️ *Perímetro:* Propriedade Próxima (<11km)\n"
-            msg += f"_Nenhuma propriedade encontrada no ponto exato_\n"
-        else:
-            msg += f"⚠️ *Perímetro:* Área Estimada (1km²)\n"
-            msg += f"_Servidor CAR indisponível_\n"
-        
-        msg += f"🚜 *Uso do Solo (Estimado):* Vegetação/Campo\n\n"
-        msg += "O NDVI varia de -1 a 1:\n"
-        msg += "- > 0.6: Vegetação densa/saudável\n"
-        msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
-        msg += "- < 0.1: Água ou rocha"
-
-        # 5. Generate composite image with CAR perimeter overlay
-        img_url = analysis['ndvi_img']
-        # 4. Generate Image
-        region_bbox = analysis.get('region_bbox')
+        env_mode = context.user_data.pop('env_mode', 'ndvi')
         prop_name = context.user_data.pop('prop_name', None)
-        image_buffer = generate_environmental_image(
-            analysis['ndvi_img'], 
-            geometry, 
-            is_real_car, 
-            region_bbox=region_bbox,
-            title=prop_name,
-            pin_coords=(lat, lon)
-        )
-        
-        if image_buffer:
-            # Send processed image with overlay
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=image_buffer,
-                caption=msg,
-                parse_mode='Markdown',
-                reply_markup=get_keyboard(chat_id)
+
+        # ── MDT branch ────────────────────────────────────────────────────
+        if env_mode == 'mdt':
+            await status_msg.edit_text("🏔️ Buscando dados de elevação (DEM)... Aguarde.")
+
+            loop = asyncio.get_running_loop()
+            from app.gee_connector import get_terrain_data
+            from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
+
+            terrain_data = await loop.run_in_executor(None, get_terrain_data, geometry)
+            if not terrain_data:
+                await status_msg.edit_text(
+                    "⚠️ Não foi possível obter dados de elevação para esta área.\n"
+                    "Tente novamente mais tarde."
+                )
+                return WAITING_ENV_LOCATION
+
+            source = terrain_data.get('source', 'DEM')
+            elev_min = terrain_data.get('elev_min', 0)
+            elev_max = terrain_data.get('elev_max', 0)
+
+            caption_2d = (
+                f"🏔️ *Mapa de Curvas de Nível*\n"
+                f"📍 {prop_name or 'Localização'}\n"
+                f"📏 Altitude: {elev_min:.0f}m – {elev_max:.0f}m\n"
+                f"🗺️ Curvas: 5m (finas) / 50m (grossas)\n"
+                f"📡 Fonte: {source}\n"
             )
+            if is_real_car == 'OFFICIAL':
+                caption_2d += "✅ Perímetro: CAR Oficial\n"
+            elif is_real_car == 'NEARBY':
+                caption_2d += "⚠️ Perímetro: Propriedade Próxima\n"
+            else:
+                caption_2d += "⚠️ Perímetro: Área Estimada\n"
+
+            caption_3d = (
+                f"🏔️ *Modelo 3D do Terreno*\n"
+                f"📍 {prop_name or 'Localização'}\n"
+                f"🛰️ Textura: Sentinel-2 RGB\n"
+                f"📡 DEM: {source}\n"
+            )
+
+            await status_msg.edit_text("🗺️ Gerando mapa 2D de curvas de nível...")
+            img_2d = await loop.run_in_executor(
+                None, generate_terrain_image_2d,
+                terrain_data, geometry, is_real_car, prop_name, (lat, lon)
+            )
+
+            await status_msg.edit_text("🏔️ Gerando modelo 3D com textura de satélite...")
+            img_3d = await loop.run_in_executor(
+                None, generate_terrain_image_3d,
+                terrain_data, geometry, is_real_car, prop_name, (lat, lon)
+            )
+
+            await status_msg.delete()
+
+            if img_2d:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=img_2d,
+                    caption=caption_2d, parse_mode='Markdown'
+                )
+            if img_3d:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=img_3d,
+                    caption=caption_3d, parse_mode='Markdown',
+                    reply_markup=get_keyboard(chat_id)
+                )
+            if not img_2d and not img_3d:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Não foi possível gerar as imagens MDT.",
+                    reply_markup=get_keyboard(chat_id)
+                )
+
+        # ── NDVI branch (original, unchanged) ────────────────────────────
         else:
-            # Fallback to original image if processing fails
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=img_url,
-                caption=msg,
-                parse_mode='Markdown',
-                reply_markup=get_keyboard(chat_id)
+            # 3. Get NDVI Analysis
+            analysis = get_ndvi_analysis(geometry)
+            if not analysis:
+                await status_msg.edit_text(
+                    "⚠️ *Não foi possível realizar a análise*\n\n"
+                    "Verifique se o local selecionado tem cobertura recente de satélite (sem nuvens) "
+                    "ou tente novamente mais tarde.",
+                    parse_mode='Markdown'
+                )
+                return WAITING_ENV_LOCATION
+
+            # 4. Format Message
+            ndvi_val = analysis.get('stats', {}).get('mean', 0)
+            dt_obj = datetime.fromtimestamp(analysis['dt'])
+            date_str = dt_obj.strftime('%d/%m/%Y')
+
+            msg = f"🌿 *Análise Ambiental*\n\n"
+            msg += f"📅 *Data da Imagem:* {date_str}\n"
+            msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
+
+            if is_real_car == 'OFFICIAL' or is_real_car is True:
+                msg += f"✅ *Perímetro:* CAR Oficial\n"
+            elif is_real_car == 'NEARBY':
+                msg += f"⚠️ *Perímetro:* Propriedade Próxima (<11km)\n"
+                msg += f"_Nenhuma propriedade encontrada no ponto exato_\n"
+            else:
+                msg += f"⚠️ *Perímetro:* Área Estimada (1km²)\n"
+                msg += f"_Servidor CAR indisponível_\n"
+
+            msg += f"🚜 *Uso do Solo (Estimado):* Vegetação/Campo\n\n"
+            msg += "O NDVI varia de -1 a 1:\n"
+            msg += "- > 0.6: Vegetação densa/saudável\n"
+            msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
+            msg += "- < 0.1: Água ou rocha"
+
+            region_bbox = analysis.get('region_bbox')
+            image_buffer = generate_environmental_image(
+                analysis['ndvi_img'],
+                geometry, is_real_car,
+                region_bbox=region_bbox,
+                title=prop_name,
+                pin_coords=(lat, lon)
             )
-        
-        await status_msg.delete()
-        
+
+            if image_buffer:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=image_buffer,
+                    caption=msg, parse_mode='Markdown',
+                    reply_markup=get_keyboard(chat_id)
+                )
+            else:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=analysis['ndvi_img'],
+                    caption=msg, parse_mode='Markdown',
+                    reply_markup=get_keyboard(chat_id)
+                )
+
+            await status_msg.delete()
+
     except Exception as e:
         print(f"Error in env_analysis: {e}")
         await status_msg.edit_text("❌ Ocorreu um erro ao processar a análise ambiental.")
@@ -1378,7 +1470,8 @@ def create_bot_application(post_init=None):
             MessageHandler(filters.Regex("^🌿 Análise Ambiental$"), start_env_analysis)
         ],
         states={
-            WAITING_ENV_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_env_location)]
+            WAITING_ENV_MODE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_env_mode)],
+            WAITING_ENV_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_env_location)],
         },
         fallbacks=[CommandHandler("cancelar", cancel_env)]
     )
