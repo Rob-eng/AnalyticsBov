@@ -1243,7 +1243,7 @@ async def toggle_ndvi_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # Show current status list
         msg = "🔔 *Alertas NDVI por Propriedade*\n\n"
-        msg += "Você receberá uma mensagem automática a cada 12h quando houver uma nova imagem de satélite com céu claro dentro do seu polígono.\n\n"
+        msg += "Você receberá uma mensagem automática quando houver uma nova imagem de satélite com céu claro dentro do seu polígono.\n\n"
         for i, loc in enumerate(locs, 1):
             status_icon = "✅" if loc.ndvi_alerts_enabled else "❌"
             last = f" _· última: {loc.last_ndvi_date}_" if loc.last_ndvi_date else ""
