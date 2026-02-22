@@ -266,29 +266,49 @@ def get_precipitation_heatmap(lat, lon):
                     pass
 
         if collection is None or count == 0:
-            print("Heatmap: no data found.")
+            print("Heatmap: no data found.", flush=True)
             return None
 
-        print(f"Heatmap: {count} images found.")
+        print(f"Heatmap: {count} images found. Aggregating to daily...", flush=True)
 
-        # Aggregate: mm/hr × 30min intervals → total mm
-        total_precip = collection.reduce(ee.Reducer.sum()).multiply(0.5)
+        # ── Aggregate to daily totals first (reduces ~1386 → 30 images) ──
+        # This dramatically speeds up GEE thumbnail computation.
+        start_date_ee = ee.Date(start_str)
+        n_days = (end_date - start_date).days
 
-        # Simple thumbnail — plain heatmap, no GEE-side compositing
+        def daily_total(offset):
+            d = start_date_ee.advance(offset, 'day')
+            daily = collection.filterDate(d, d.advance(1, 'day'))
+            # sum of mm/hr × 0.5hr = total mm for the day
+            return (daily.reduce(ee.Reducer.sum())
+                         .multiply(0.5)
+                         .rename('precipitation')
+                         .set('system:time_start', d.millis()))
+
+        daily_col = ee.ImageCollection(
+            ee.List.sequence(0, n_days - 1).map(daily_total)
+        )
+        total_precip = daily_col.reduce(ee.Reducer.sum())
+
+        print("Daily aggregation done. Getting thumbnail URL...", flush=True)
+
+        # Use native GPM scale (0.25° ≈ 27750m) — no resampling needed,
+        # much faster than a fixed pixel dimension.
         url = total_precip.getThumbURL({
             'min': 1,
             'max': 300,
             'palette': ['f0f0f0', 'aad4f5', '3399ff', '003580', '2d0055'],
-            'dimensions': 900,
+            'scale': 27750,          # native GPM resolution (0.25°)
             'region': brazil.getInfo(),
             'format': 'png',
+            'bestEffort': True,
         })
-        print(f"Heatmap URL: {url}")
+        print(f"Heatmap URL obtained.", flush=True)
 
         # Download image
-        resp = _req.get(url, timeout=90)
+        resp = _req.get(url, timeout=120)
         if resp.status_code != 200:
-            print(f"Heatmap download failed: HTTP {resp.status_code}")
+            print(f"Heatmap download failed: HTTP {resp.status_code}", flush=True)
             return None
 
         # ── Overlay state borders with matplotlib + geopandas ────────────
