@@ -140,26 +140,22 @@ def get_ndvi_analysis(geometry_geojson):
         result = get_ndvi_image(geometry_geojson)
         
         if not result:
-            print("GEE returned no data.")
+            print("GEE returned no data.", flush=True)
             return None
             
-        print("✓ GEE NDVI Data Retrieved")
+        print("✓ GEE NDVI Data Retrieved. Downloading thumbnail...", flush=True)
         
         # Download the image from the URL provided by GEE
         img_url = result['image_url']
         try:
-            resp = requests.get(img_url)
+            resp = requests.get(img_url, timeout=45)  # timeout was missing!
             if resp.status_code != 200:
-                print(f"Failed to download GEE thumbnail: {resp.status_code}")
+                print(f"Failed to download GEE thumbnail: HTTP {resp.status_code}", flush=True)
                 return None
             img_bytes = BytesIO(resp.content)
+            print(f"✓ NDVI thumbnail downloaded ({len(resp.content)//1024}KB)", flush=True)
         except Exception as e:
-            print(f"Download error: {e}")
-            # The following lines were part of the user's provided "Code Edit" but appear to be
-            # misplaced from a different function (e.g., get_precipitation_heatmap)
-            # and would cause a NameError if inserted here.
-            # url = total_precip.getThumbURL(vis_params)
-            # print(f"Heatmap URL generated: {url}")
+            print(f"Download error: {e}", flush=True)
             return None
             
         return {
@@ -217,6 +213,7 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
         from shapely.geometry import shape as shapely_shape
         
         poly = shapely_shape(geometry)
+        print(f"CAR polygon type: {geometry['type']}, bounds: {poly.bounds}", flush=True)
         
         # Get bounds
         if region_bbox:
@@ -238,6 +235,7 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
             rings = geometry['coordinates']
         elif geometry['type'] == 'MultiPolygon':
             rings = [ring for poly_coords in geometry['coordinates'] for ring in poly_coords]
+            print(f"MultiPolygon: {len(geometry['coordinates'])} sub-polygons", flush=True)
         else:
             rings = []
 
@@ -267,6 +265,7 @@ def generate_environmental_image(ndvi_source, geometry, is_real_car=False, regio
             
         for ring in coords:
             xs, ys = zip(*ring)
+            print(f"  Drawing polygon ring: x=[{min(xs):.2f}..{max(xs):.2f}] y=[{min(ys):.2f}..{max(ys):.2f}]", flush=True)
             ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle=linestyle, label=label)
         
         # 4.5 Draw Pin
