@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, create_engine, text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, create_engine, text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -26,6 +26,9 @@ class FavoriteLocation(Base):
     latitude = Column(Float)
     longitude = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # NDVI alert tracking
+    last_ndvi_date = Column(String, nullable=True)        # 'YYYY-MM-DD' of last image sent
+    ndvi_alerts_enabled = Column(Boolean, default=True)  # user opt-in/out per property
 
 class PriceHistory(Base):
     __tablename__ = 'price_history'
@@ -195,7 +198,7 @@ def init_db():
     except Exception as e:
         print(f"⚠️ CAR DB Note: {e}")
 
-    # 3. Essential legacy migrations
+    # 3. Essential migrations (idempotent)
     try:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT USING chat_id::text;"))
@@ -203,6 +206,23 @@ def init_db():
                 conn.commit()
     except Exception:
         pass
+
+    # 4. NDVI alert columns (safe ADD IF NOT EXISTS)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE favorite_locations "
+                "ADD COLUMN IF NOT EXISTS last_ndvi_date TEXT"
+            ))
+            conn.execute(text(
+                "ALTER TABLE favorite_locations "
+                "ADD COLUMN IF NOT EXISTS ndvi_alerts_enabled BOOLEAN DEFAULT TRUE"
+            ))
+            if hasattr(conn, 'commit'):
+                conn.commit()
+        print("✓ NDVI alert columns ensured.")
+    except Exception as e:
+        print(f"⚠️ NDVI column migration note: {e}")
 
 def get_recent_prices(days=1095):
     """Retrieve price history for the last N days (default 3 years)."""

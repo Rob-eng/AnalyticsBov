@@ -1046,6 +1046,7 @@ def get_location_keyboard():
     keyboard = [
         [KeyboardButton("📋 Listar Minhas Propriedades")],
         [KeyboardButton("➕ Adicionar Nova"), KeyboardButton("❌ Excluir Propriedade")],
+        [KeyboardButton("🔔 Alertas NDVI")],
         [KeyboardButton("🔙 Voltar ao Menu Principal")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -1207,17 +1208,82 @@ async def cancel_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Voltando ao menu principal...", reply_markup=get_keyboard(chat_id))
     return ConversationHandler.END
 
+async def toggle_ndvi_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show NDVI alert status for each property and let user toggle by number."""
+    chat_id = str(update.effective_chat.id)
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if not locs:
+            await update.message.reply_text(
+                "Você ainda não tem propriedades cadastradas.\nUse ➕ Adicionar Nova para começar.",
+                reply_markup=get_location_keyboard()
+            )
+            return WAITING_LOCATION_MENU
+
+        # Check if this is a toggle command (number sent)
+        text = update.message.text.strip()
+        if text.isdigit():
+            idx = int(text) - 1
+            if 0 <= idx < len(locs):
+                loc = locs[idx]
+                loc.ndvi_alerts_enabled = not loc.ndvi_alerts_enabled
+                session.commit()
+                status_word = "ativado ✅" if loc.ndvi_alerts_enabled else "desativado ❌"
+                await update.message.reply_text(
+                    f"🔔 Alerta NDVI *{status_word}* para *{loc.name}*.",
+                    parse_mode='Markdown',
+                    reply_markup=get_location_keyboard()
+                )
+                return WAITING_LOCATION_MENU
+            else:
+                await update.message.reply_text("⚠️ Número inválido.")
+                return WAITING_LOCATION_MENU
+
+        # Show current status list
+        msg = "🔔 *Alertas NDVI por Propriedade*\n\n"
+        msg += "Você receberá uma mensagem automática a cada 12h quando houver uma nova imagem de satélite com céu claro dentro do seu polígono.\n\n"
+        for i, loc in enumerate(locs, 1):
+            status_icon = "✅" if loc.ndvi_alerts_enabled else "❌"
+            last = f" _· última: {loc.last_ndvi_date}_" if loc.last_ndvi_date else ""
+            msg += f"{i}. {status_icon} *{loc.name}*{last}\n"
+        msg += "\n*Digite o número* da propriedade para ativar/desativar o alerta."
+
+        context.user_data['location_action'] = 'alerts'  # flag for digit routing
+        await update.message.reply_text(
+            msg,
+            parse_mode='Markdown',
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("🔙 Voltar ao Menu Principal")]],
+                resize_keyboard=True
+            )
+        )
+    finally:
+        session.close()
+    return WAITING_LOCATION_MENU
+
 async def handle_location_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text in MAIN_MENU_BUTTONS:
         return await handle_keyboard_buttons(update, context)
-        
+
+    # If user typed a digit while in 'alerts' sub-mode, route to toggle handler
+    if text.strip().isdigit() and context.user_data.get('location_action') == 'alerts':
+        context.user_data.pop('location_action', None)
+        return await toggle_ndvi_alerts(update, context)
+
+    # Clear the sub-mode flag on any menu button press
+    context.user_data.pop('location_action', None)
+
     if text == "📋 Listar Minhas Propriedades":
         return await list_user_locations(update, context)
     elif text == "➕ Adicionar Nova":
         return await start_add_location(update, context)
     elif text == "❌ Excluir Propriedade":
         return await start_delete_location(update, context)
+    elif text == "🔔 Alertas NDVI":
+        return await toggle_ndvi_alerts(update, context)
     elif text == "🔙 Voltar ao Menu Principal":
         return await cancel_locations(update, context)
     return WAITING_LOCATION_MENU
