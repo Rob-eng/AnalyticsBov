@@ -618,8 +618,8 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
 
         # ── Animation ──────────────────────────────────────────────────────
         print("[MDT 3D] Generating 360 rotation video...", flush=True)
-        # Reduced frames and fps to save memory and processing time
-        frames = 60  
+        # 120 frames at 12 fps = 10 seconds rotation
+        frames = 120  
         
         def update(frame):
             # Rotate from 225 to 225+360
@@ -636,7 +636,7 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
 
         try:
             # Requires FFmpeg installed on the system
-            ani.save(tmp_name, writer='ffmpeg', fps=10, dpi=100, 
+            ani.save(tmp_name, writer='ffmpeg', fps=12, dpi=100, 
                      savefig_kwargs={'facecolor': fig.get_facecolor()})
             print("[MDT 3D] Video saved to temp file.", flush=True)
             
