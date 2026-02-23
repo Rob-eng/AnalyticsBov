@@ -479,6 +479,11 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
     import requests as _req
     import tempfile
     import os
+    import gc
+
+    # Force Matplotlib to use system ffmpeg (Linux path) if available
+    if os.path.exists('/usr/bin/ffmpeg'):
+        plt.rcParams['animation.ffmpeg_path'] = '/usr/bin/ffmpeg'
 
     try:
         elevation = terrain_data['elevation']
@@ -516,7 +521,9 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
         if face_colors is not None:
             face_colors = np.flipud(face_colors)
 
-        fig = plt.figure(figsize=(12, 9), dpi=130)
+        # ── Optimize Ram Usage ──
+        # Reduce Figure size and DPI to avoid OOM kills in Railway
+        fig = plt.figure(figsize=(8, 6), dpi=100)
         fig.patch.set_facecolor('#0d0d1a')
         ax = fig.add_subplot(111, projection='3d')
         ax.set_facecolor('#0d0d1a')
@@ -611,7 +618,8 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
 
         # ── Animation ──────────────────────────────────────────────────────
         print("[MDT 3D] Generating 360 rotation video...", flush=True)
-        frames = 90  # 90 frames for a smooth 360-degree rotation
+        # Reduced frames and fps to save memory and processing time
+        frames = 60  
         
         def update(frame):
             # Rotate from 225 to 225+360
@@ -619,16 +627,16 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
             ax.view_init(elev=35, azim=az)
             return fig,
 
+        # We pass blit=False. It's safe.
         ani = FuncAnimation(fig, update, frames=frames, interval=100, blit=False)
         
         # We need a temporary file because ffmpeg writer needs a real file path
-        # bytesio doesn't work out of the box with most matplotlib video writers
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
             tmp_name = tmp.name
 
         try:
             # Requires FFmpeg installed on the system
-            ani.save(tmp_name, writer='ffmpeg', fps=15, dpi=130, 
+            ani.save(tmp_name, writer='ffmpeg', fps=10, dpi=100, 
                      savefig_kwargs={'facecolor': fig.get_facecolor()})
             print("[MDT 3D] Video saved to temp file.", flush=True)
             
@@ -640,11 +648,12 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
             buf.seek(0)
             
         finally:
-            # Clean up temp file
+            # Clean up temp file and force memory clearing
             if os.path.exists(tmp_name):
                 os.remove(tmp_name)
 
-        plt.close(fig)
+        plt.close('all')
+        gc.collect()
         return buf
 
     except Exception as e:
