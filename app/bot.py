@@ -390,10 +390,16 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         user_list = "👥 *Lista de Usuários Cadastrados*\n\n"
         for idx, user in enumerate(users, 1):
+            try:
+                chat = await context.bot.get_chat(user.chat_id)
+                first_name = escape_markdown(chat.first_name) if chat.first_name else "Sem nome"
+            except Exception:
+                first_name = "Desconhecido"
+                
             username_clean = escape_markdown(user.username) if user.username else "Sem username"
             username_display = f"@{username_clean}" if user.username else "Sem username"
             created = user.created_at.strftime('%d/%m/%Y') if user.created_at else "N/A"
-            line = f"{idx}. {username_display}\n   ID: `{user.chat_id}`\n   Cadastro: {created}\n\n"
+            line = f"{idx}. *{first_name}* ({username_display})\n   ID: `{user.chat_id}`\n   Cadastro: {created}\n\n"
             
             # Check for Telegram message limit (4096)
             if len(user_list) + len(line) > 3900:
@@ -1400,9 +1406,23 @@ async def list_all_locations_admin(update: Update, context: ContextTypes.DEFAULT
             return
             
         msg = "🌎 *Todas as Localidades do Sistema (Admin)*\n\n"
+        name_cache = {}
         for loc, user in data:
+            if user.chat_id not in name_cache:
+                try:
+                    chat = await context.bot.get_chat(user.chat_id)
+                    name_cache[user.chat_id] = escape_markdown(chat.first_name) if chat.first_name else "Sem nome"
+                except Exception:
+                    name_cache[user.chat_id] = "Desconhecido"
+                    
+            first_name = name_cache[user.chat_id]
             username_clean = escape_markdown(user.username) if user.username else None
-            user_info = f"@{username_clean}" if username_clean else f"ID:{user.chat_id}"
+            
+            if username_clean:
+                user_info = f"*{first_name}* (@{username_clean})"
+            else:
+                user_info = f"*{first_name}* ({user.chat_id})"
+                
             loc_name_clean = escape_markdown(loc.name)
             msg += f"👤 {user_info}\n🏠 *{loc_name_clean}*\n📍 `{loc.latitude:.4f}, {loc.longitude:.4f}`\n\n"
             
