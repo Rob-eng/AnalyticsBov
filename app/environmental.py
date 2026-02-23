@@ -468,14 +468,17 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
                                title=None, pin_coords=None):
     """
     Generates a 3D terrain model with Sentinel-2 satellite texture draped over
-    the elevation surface.  CAR perimeter is projected onto the 3D surface.
-    Returns BytesIO PNG or None.
+    the elevation surface. CAR perimeter is projected onto the 3D surface.
+    Returns BytesIO containing an MP4 video of the rotating 3D model, or None.
     """
     import numpy as np
     import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     from io import BytesIO
     import requests as _req
+    import tempfile
+    import os
 
     try:
         elevation = terrain_data['elevation']
@@ -574,6 +577,7 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
                            edgecolors='white', linewidths=0.8, zorder=8)
 
         # ── View angle + style ─────────────────────────────────────────────
+        # Initial view
         ax.view_init(elev=35, azim=225)
 
         # Fix aspect ratio: calculate width/height in meters
@@ -586,7 +590,6 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
 
         # Scale vertical aspect for visibility (exaggerate by 3x usually good)
         ax.set_box_aspect((w_m, h_m, z_range * 4))
-
         ax.set_zlim(elev_min - 5, elev_max + (elev_max - elev_min) * 0.3)
 
         # Clean up panes
@@ -606,12 +609,42 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
                  f"Fonte: {source} + Sentinel-2 · Google Earth Engine",
                  color='white', fontsize=6.5, alpha=0.8)
 
-        buf = BytesIO()
-        fig.savefig(buf, format='png', dpi=130, bbox_inches='tight',
-                    facecolor=fig.get_facecolor())
+        # ── Animation ──────────────────────────────────────────────────────
+        print("[MDT 3D] Generating 360 rotation video...", flush=True)
+        frames = 90  # 90 frames for a smooth 360-degree rotation
+        
+        def update(frame):
+            # Rotate from 225 to 225+360
+            az = 225 + (360 * frame / frames)
+            ax.view_init(elev=35, azim=az)
+            return fig,
+
+        ani = FuncAnimation(fig, update, frames=frames, interval=100, blit=False)
+        
+        # We need a temporary file because ffmpeg writer needs a real file path
+        # bytesio doesn't work out of the box with most matplotlib video writers
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+            tmp_name = tmp.name
+
+        try:
+            # Requires FFmpeg installed on the system
+            ani.save(tmp_name, writer='ffmpeg', fps=15, dpi=130, 
+                     savefig_kwargs={'facecolor': fig.get_facecolor()})
+            print("[MDT 3D] Video saved to temp file.", flush=True)
+            
+            # Read back into BytesIO
+            with open(tmp_name, "rb") as f:
+                video_bytes = f.read()
+                
+            buf = BytesIO(video_bytes)
+            buf.seek(0)
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+
         plt.close(fig)
-        buf.seek(0)
-        print("[MDT 3D] Image generated.", flush=True)
         return buf
 
     except Exception as e:

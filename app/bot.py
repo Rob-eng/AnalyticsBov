@@ -77,11 +77,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Seu assistente completo para o agronegócio, focado em mercado, clima e inteligência geoespacial.\n\n"
             "🚀 *Principais Funcionalidades:*\n\n"
             "📊 *Mercado e Cotações:*\n"
-            "- Cotação atual do Boi Gordo da Scot (/atual)\n"
+            "- Cotação atual do Boi Gordo no Mundo (/atual)\n"
             "- Acompanhamento do Mercado Futuro da B3 (/futuro)\n"
             "- Relatório automático toda segunda-feira às 8h.\n\n"
             "🌦️ *Clima e Previsão:*\n"
-            "- Previsão do tempo detalhada para 15 dias (/clima)\n"
+            "- Previsão de chuvas para 1/5/10 dias (/clima)\n"
             "- Histórico de chuvas espacializado (Heatmap)\n\n"
             "🌿 *Monitoramento por Satélite:*\n"
             "- *NDVI:* Análise de vigor vegetativo da pastagem\n"
@@ -908,8 +908,8 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
                     caption=caption_2d, parse_mode='Markdown'
                 )
             if img_3d:
-                await context.bot.send_photo(
-                    chat_id=chat_id, photo=img_3d,
+                await context.bot.send_video(
+                    chat_id=chat_id, video=img_3d,
                     caption=caption_3d, parse_mode='Markdown',
                     reply_markup=get_keyboard(chat_id)
                 )
