@@ -359,13 +359,20 @@ def generate_terrain_image_2d(terrain_data, geometry, is_real_car='FALLBACK',
         fig, ax = plt.subplots(figsize=(10, 10), dpi=130)
         fig.patch.set_facecolor('#1a1a2e')
 
+        # ── Custom Topo Colormap (no blue) ─────────────────────────────────
+        # Lowlands (green) -> mid (tan) -> high (brown) -> peaks (white)
+        topo_colors = ['#4A7A25', '#7F9E43', '#BDB76B', '#D2B48C', '#A0522D', '#8B4513', '#FFFFFF']
+        from matplotlib.colors import LinearSegmentedColormap
+        topo_cmap = LinearSegmentedColormap.from_list('custom_topo', topo_colors)
+
         # ── Hillshade ──────────────────────────────────────────────────────
         ls = LightSource(azdeg=315, altdeg=35)
-        hillshade = ls.shade(elev_fill, cmap=plt.cm.terrain,
+        hillshade = ls.shade(elev_fill, cmap=topo_cmap,
                              blend_mode='overlay',
                              vert_exag=3,
                              vmin=elev_min, vmax=elev_max)
         ax.imshow(hillshade, extent=[0, 1, 0, 1], origin='upper', aspect='auto')
+
 
         X = np.linspace(0, 1, cols)
         Y = np.linspace(1, 0, rows)   # image Y is top-to-bottom
@@ -420,7 +427,7 @@ def generate_terrain_image_2d(terrain_data, geometry, is_real_car='FALLBACK',
 
         # ── Colorbar ───────────────────────────────────────────────────────
         sm = plt.cm.ScalarMappable(
-            cmap=plt.cm.terrain,
+            cmap=topo_cmap,
             norm=plt.Normalize(vmin=elev_min, vmax=elev_max)
         )
         sm.set_array([])
@@ -520,11 +527,15 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
                             linewidth=0, antialiased=False,
                             shade=False)
         else:
-            # Fallback: terrain colormap
+            # Fallback: custom topo colormap
             from matplotlib.colors import Normalize
+            topo_colors = ['#4A7A25', '#7F9E43', '#BDB76B', '#D2B48C', '#A0522D', '#8B4513', '#FFFFFF']
+            from matplotlib.colors import LinearSegmentedColormap
+            topo_cmap = LinearSegmentedColormap.from_list('custom_topo', topo_colors)
+            
             norm = Normalize(vmin=elev_min, vmax=elev_max)
             ax.plot_surface(X, Y, Z,
-                            cmap='terrain', norm=norm,
+                            cmap=topo_cmap, norm=norm,
                             rstride=1, cstride=1,
                             linewidth=0, antialiased=False,
                             alpha=0.95)
