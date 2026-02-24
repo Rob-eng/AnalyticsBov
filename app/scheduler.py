@@ -9,7 +9,7 @@ import asyncio
 def setup_scheduler(application):
     scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
 
-    # ── Weekly market report (Monday 06:30 BRT) ───────────────────────────
+    # ── Weekly market report (Monday 08:00 BRT) ───────────────────────────
     async def weekly_report_job():
         print("Running weekly market report...", flush=True)
         loop = asyncio.get_running_loop()
@@ -21,7 +21,7 @@ def setup_scheduler(application):
 
     scheduler.add_job(
         weekly_report_job,
-        CronTrigger(day_of_week='mon', hour=10, minute=30, timezone="America/Sao_Paulo"),
+        CronTrigger(day_of_week='mon', hour=8, minute=0, timezone="America/Sao_Paulo"),
         id='weekly_report',
         replace_existing=True,
     )
