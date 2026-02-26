@@ -15,6 +15,12 @@ class User(Base):
     chat_id = Column(String, primary_key=True)
     username = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # SaaS & Platform fields
+    platform = Column(String, default='telegram')  # 'telegram' ou 'whatsapp'
+    plan_type = Column(String, default='FREE')     # 'FREE', 'STARTER', 'PRO', 'ENTERPRISE'
+    stripe_subscription_id = Column(String, nullable=True)
+    
     locations = relationship("FavoriteLocation", backref="user", cascade="all, delete-orphan")
 
 class FavoriteLocation(Base):
@@ -202,10 +208,16 @@ def init_db():
     try:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT USING chat_id::text;"))
+            
+            # SaaS and Platform Migrations
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS platform VARCHAR DEFAULT 'telegram';"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_type VARCHAR DEFAULT 'FREE';"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR;"))
+            
             if hasattr(conn, 'commit'):
                 conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ User column migration note: {e}")
 
     # 4. NDVI alert columns (safe ADD IF NOT EXISTS)
     try:

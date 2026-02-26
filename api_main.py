@@ -9,7 +9,10 @@ import json
 import os
 from starlette.status import HTTP_403_FORBIDDEN
 
+from app.whatsapp.webhook import router as whatsapp_router
+
 app = FastAPI(title="CAR Spatial API", description="API to query CAR properties from PostGIS")
+app.include_router(whatsapp_router)
 
 # Security: Basic API Key
 API_KEY = os.getenv("CAR_API_KEY", "your-default-secure-key")
