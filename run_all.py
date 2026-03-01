@@ -67,13 +67,19 @@ def run_bot_process():
 
         print("✅ Bot Polling Started Successfully!", flush=True)
 
-        # Keep the bot running
+        # Keep the bot running and monitor polling status
         try:
-            stop_signal = asyncio.Event()
-            await stop_signal.wait()
+            while application.updater.running:
+                await asyncio.sleep(5)
+            
+            # Se saiu do loop mas não mandamos, a polling crashou (Conflict)
+            print("⚠️ Telegram Polling parou inesperadamente. Disparando retry...", flush=True)
+            raise RuntimeError("Conflict: Telegram Polling parado.")
+            
         finally:
             print("🛑 Bot shutting down...", flush=True)
-            await application.updater.stop()
+            if application.updater.running:
+                await application.updater.stop()
             await application.stop()
             await application.shutdown()
 
