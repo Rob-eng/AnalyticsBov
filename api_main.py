@@ -33,9 +33,18 @@ async def get_api_key(
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
-@app.get("/")
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
 def read_root():
-    return {"status": "online", "service": "CAR Spatial API", "version": "1.1.0"}
+    """Retorna a Landing Page Institucional exigida pela Meta Business Verification"""
+    import os
+    html_path = os.path.join(os.path.dirname(__file__), "app", "templates", "landing.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return f"<h1>AnalyticsBov</h1><p>Plataforma de inteligência Agro rodando online.</p>"
 
 @app.get("/property/at")
 def get_property_at(lat: float = Query(..., description="Latitude"), 
