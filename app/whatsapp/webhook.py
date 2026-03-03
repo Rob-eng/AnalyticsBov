@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 import os
 import json
 from app.whatsapp.sender import send_whatsapp_text
+from app.agent import process_whatsapp_message
 
 router = APIRouter(prefix="/webhook/whatsapp", tags=["WhatsApp"])
 
@@ -24,7 +25,7 @@ async def verify_webhook(
     raise HTTPException(status_code=403, detail="Token de verificação inválido")
 
 @router.post("/")
-async def receive_message(request: Request):
+async def receive_message(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint que recebe TODAS as mensagens ativas, botões clicados e recibos de leitura do WhatsApp.
     """
@@ -50,12 +51,12 @@ async def receive_message(request: Request):
                             elif interactive.get("type") == "list_reply":
                                 texto = interactive.get("list_reply", {}).get("id", "")
                         
-                        print(f"[{sender_phone}] mandou: {texto}")
+                        print(f"[Webhook] {sender_phone} disse: {texto}")
                         
-                        # ⚠️ TESTE: Auto-Reply Básico Habilitado
+                        # ⚠️ Delega a resposta e o pensamento da IA para uma BackgroundTask do FastAPI
+                        # Isso garante que a Meta receba o '200 OK' em 1s, enquanto o ChatGPT tem o tempo dele
                         if texto:
-                            mensagem_teste = f"🐂 Olá! O robô AgroAnalytics conectou com sucesso na nuvem do Meta. Você disse: '{texto}'"
-                            send_whatsapp_text(sender_phone, mensagem_teste)
+                            background_tasks.add_task(process_whatsapp_message, sender_phone, texto)
 
     # A Meta sempre espera um 200 OK
     return {"status": "ok"}
