@@ -37,6 +37,21 @@ def get_tools_definition():
                      "required": []
                  }
              }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "analisar_camada_ambiental_teste",
+                 "description": "Manda uma coordenada (Latitude e Longitude) para a nuvem do Google Earth Engine para cruzar a fazenda do produtor com o Shapefile guardado na nuvem (TESTE_GEO). O produtor DEVE informar uma coordenada para acionar essa função.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "lat": {"type": "number", "description": "Latitude da fazenda (ex: -20.5)"},
+                         "lon": {"type": "number", "description": "Longitude da fazenda (ex: -54.6)"}
+                     },
+                     "required": ["lat", "lon"]
+                 }
+             }
         }
     ]
 
@@ -49,7 +64,7 @@ def _ajustar_historico(phone):
 
 async def run_tool(name: str, arguments: dict) -> str:
     """Roda a funcao especifica que o modelo solicitou."""
-    print(f"[Agent] IA decidiu rodar a tool: {name}")
+    print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
         if name == "consultar_mercado_futuro":
             # Para nao travar o loop assincrono com raspagem pesada do BS4:
@@ -68,6 +83,36 @@ async def run_tool(name: str, arguments: dict) -> str:
                 # Retorna os dados como string pro bot
                 return f"Última cotação inserida no banco: Boe {prices[0].price} na data {prices[0].date}. (Fonte: Scot/MS)"
             return "Ainda não há cotação registrada hoje para o mercado físico."
+
+        elif name == "analisar_camada_ambiental_teste":
+            lat = arguments.get('lat')
+            lon = arguments.get('lon')
+            if not lat or not lon:
+                return "O produtor não informou latitude e longitude válidas."
+            
+            from app.environmental import fetch_car_perimeter
+            from app.gee_connector import get_asset_intersection_area
+            
+            # Buscar a geometria da fazenda no Supabase/CAR
+            loop = asyncio.get_event_loop()
+            geom_result = await loop.run_in_executor(None, fetch_car_perimeter, float(lat), float(lon))
+            
+            if not geom_result:
+                 return "Não foi possível encontrar a geometria desta fazenda."
+                 
+            geometria, status_busca = geom_result
+            
+            # ID Exato gravado pelo Robson lá no Google Earth Engine
+            asset_id = "projects/ee-ranjos/assets/TESTE_GEO"
+            
+            # Subir a geometria temporariamente no supercomputador pra cruzar o mapa
+            area_ha = await loop.run_in_executor(None, get_asset_intersection_area, asset_id, geometria)
+            
+            return (
+                f"Busca da borda no CAR: {status_busca}. "
+                f"O Google cruzou os satélites com a camada TESTE_GEO. A área da fazenda ({lat}, {lon}) que cruza "
+                f"com a sua camada privada é de exatamente {area_ha:.2f} Hectares."
+            )
             
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
