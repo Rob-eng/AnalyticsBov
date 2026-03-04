@@ -1136,9 +1136,19 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "💬 Feedback":
         await start_feedback(update, context)
         return WAITING_FEEDBACK
-    elif text == "🌧️ Precipitação":
+    elif text == "🌧️ Precipitação (chuva)":
         await start_weather(update, context)
         return WAITING_WEATHER_LOCATION
+    else:
+        # Fallback inteligente para o Agente OpenAI (se o produtor mandar texto livre)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+        from app.agent import get_agent_response
+        resposta = await get_agent_response(
+            user_id=str(update.effective_chat.id),
+            user_text=text,
+            context_info="O usuário está conversando via Telegram. Pode usar Markdown básico se precisar formular listas."
+        )
+        await update.message.reply_text(resposta)
     
     return ConversationHandler.END
 
