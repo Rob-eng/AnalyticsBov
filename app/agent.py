@@ -41,13 +41,28 @@ def get_tools_definition():
         {
              "type": "function",
              "function": {
-                 "name": "analisar_camada_ambiental_teste",
-                 "description": "Manda uma coordenada (Latitude e Longitude) para a nuvem do Google Earth Engine para cruzar a fazenda do produtor com o Shapefile guardado na nuvem (TESTE_GEO). O produtor DEVE informar uma coordenada para acionar essa função.",
+                 "name": "verificar_previsao_chuva",
+                 "description": "Busca a previsão oficial de chuva (precipitação) para os próximos dias em uma coordenada específica.",
                  "parameters": {
                      "type": "object",
                      "properties": {
-                         "lat": {"type": "number", "description": "Latitude da fazenda (ex: -20.5)"},
-                         "lon": {"type": "number", "description": "Longitude da fazenda (ex: -54.6)"}
+                         "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
+                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"}
+                     },
+                     "required": ["lat", "lon"]
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "analisar_saude_pasto_ndvi",
+                 "description": "Acessa satélites do Google Earth Engine para avaliar o verde do pasto (NDVI / Fotossíntese) na fazenda cruzando o perímetro do CAR. Exige coordenada.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
+                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"}
                      },
                      "required": ["lat", "lon"]
                  }
@@ -67,7 +82,6 @@ async def run_tool(name: str, arguments: dict) -> str:
     print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
         if name == "consultar_mercado_futuro":
-            # Para nao travar o loop assincrono com raspagem pesada do BS4:
             from app.scraper import scrape_mercado_futuro
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, scrape_mercado_futuro)
@@ -80,40 +94,47 @@ async def run_tool(name: str, arguments: dict) -> str:
             loop = asyncio.get_event_loop()
             prices = await loop.run_in_executor(None, get_recent_prices, 1)
             if prices:
-                # Retorna os dados como string pro bot
-                return f"Última cotação inserida no banco: Boe {prices[0].price} na data {prices[0].date}. (Fonte: Scot/MS)"
+                return f"Última cotação física no banco: Boi Gordo R${prices[0].price} em {prices[0].date}. (Fonte: Scot/Cepea)"
             return "Ainda não há cotação registrada hoje para o mercado físico."
 
-        elif name == "analisar_camada_ambiental_teste":
-            lat = arguments.get('lat')
-            lon = arguments.get('lon')
-            if not lat or not lon:
-                return "O produtor não informou latitude e longitude válidas."
+        elif name == "verificar_previsao_chuva":
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            if not lat or not lon: return "Coordenadas inválidas. Peça ao produtor latitude e longitude reais."
             
-            from app.environmental import fetch_car_perimeter
-            from app.gee_connector import get_asset_intersection_area
-            
-            # Buscar a geometria da fazenda no Supabase/CAR
+            from app.weather import get_precipitation_data
             loop = asyncio.get_event_loop()
+            chuva_data = await loop.run_in_executor(None, get_precipitation_data, float(lat), float(lon))
+            if chuva_data:
+                return json.dumps(chuva_data, ensure_ascii=False)
+            return "Não foi possível obter dados climáticos. Talvez os satélites de clima estejam offline."
+            
+        elif name == "analisar_saude_pasto_ndvi":
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            if not lat or not lon: return "Coordenadas inválidas."
+            
+            from app.environmental import fetch_car_perimeter, get_ndvi_analysis
+            loop = asyncio.get_event_loop()
+            
+            # Buscar limitrofes do CAR
             geom_result = await loop.run_in_executor(None, fetch_car_perimeter, float(lat), float(lon))
-            
             if not geom_result:
-                 return "Não foi possível encontrar a geometria desta fazenda."
-                 
-            geometria, status_busca = geom_result
+                return "Aviso: Nenhuma geometria de fazenda detectada pelo CAR nessa coordenada para cortar o satélite."
             
-            # ID Exato gravado pelo Robson lá no Google Earth Engine
-            asset_id = "projects/ee-ranjos/assets/TESTE_GEO"
+            geometria, _ = geom_result
             
-            # Subir a geometria temporariamente no supercomputador pra cruzar o mapa
-            area_ha = await loop.run_in_executor(None, get_asset_intersection_area, asset_id, geometria)
+            # Analisar os satélites com essa geometria
+            ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometria)
+            if ndvi_result and isinstance(ndvi_result, dict):
+                # We return only the text summary so the LLM can talk back.
+                # Images urls are ignored by the text LLM for now.
+                mean = ndvi_result.get('stats', {}).get('mean', 0)
+                data_img = ndvi_result.get('date', 'Desconhecida')
+                return f"Análise de Satélite (NDVI) realizada na data: {data_img}. O valor médio de Fotossíntese/Vigor do Pasto foi de {mean:.2f} (escala de -1 a 1). Baseado nisso, diga a ele o diagnóstico aproximado do pasto."
             
-            return (
-                f"Busca da borda no CAR: {status_busca}. "
-                f"O Google cruzou os satélites com a camada TESTE_GEO. A área da fazenda ({lat}, {lon}) que cruza "
-                f"com a sua camada privada é de exatamente {area_ha:.2f} Hectares."
-            )
-            
+            return "Ocorreu um erro ao consultar as imagens limpas do Sentinel-2 no núcleo do Earth Engine. Pode haver excesso de nuvens nos últimos meses."
+
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
@@ -121,7 +142,6 @@ async def run_tool(name: str, arguments: dict) -> str:
 async def get_agent_response(user_id: str, user_text: str, context_info: str = "") -> str:
     """
     Motor central da IA. Processa o texto, chama ferramentas se precisar e retorna a resposta final em texto.
-    O `context_info` pode ser usado para dar dicas (como 'O usuário está no Telegram').
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -132,14 +152,14 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     
     if user_id not in _conversation_memory:
         s_prompt = (
-            "Você é o AnalyticsBov, um consultor agropecuário focado na pecuária de corte (Boi Gordo). "
-            "Responda ao produtor rural de forma objetiva, profissional e amigável. "
+            "Você é o AnalyticsBov, um consultor agropecuário tecnológico focado na pecuária de corte.\n"
             "SUAS REGRAS DE OURO:\n"
-            "1. NÃO ofereça cotação de Milho, Soja ou outras culturas, monitoramos exclusivamente o BOI GORDO.\n"
-            "2. Nunca invente valores financeiros: Se pedirem a cotação (física ou futura), você DEVE rodar as suas tools acopladas para buscar o dado real.\n"
-            "3. Se o produtor perguntar sobre Previsão de Chuva ou Análise de NDVI (Pasto), Diga a ele com educação que essa função "
-            "deve ser acionada diretamente pelos botões do Menu Principal ou enviando a localização GPS dele diretamente na conversa.\n"
-            "Evite listas gigantes no WhatsApp, resuma os principais meses da B3 se ele quiser."
+            "1. NÃO ofereça cotação de Milho/Soja. O AnalyticsBov atende exclusivamente pecuaristas (BOI GORDO).\n"
+            "2. Responda amigavelmente (Use 'amigo', 'parceiro'). Resuma listas longas de B3.\n"
+            "3. Se perguntarem da Cotação do boi firme ou futura, USE as ferramentas `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro`.\n"
+            "4. Se o produtor pedir Previsão de Chuva OU Condição do Pasto (NDVI) fornecendo uma coordenada (Latitude e Longitude), "
+            "você TEM PERMISSÃO para rodar essas ferramentas para entregar os dados a ele (verificar_previsao_chuva ou analisar_saude_pasto_ndvi).\n"
+            "5. NUNCA invente números."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
