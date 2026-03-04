@@ -18,7 +18,7 @@ def get_tools_definition():
             "type": "function",
             "function": {
                 "name": "consultar_mercado_futuro",
-                "description": "Busca a cotação futura do Boi Gordo e do Milho em tempo real da bolsa B3.",
+                "description": "Busca a cotação futura APENAS do Boi Gordo (BGI) em tempo real da bolsa B3.",
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -30,7 +30,7 @@ def get_tools_definition():
              "type": "function",
              "function": {
                  "name": "obter_cotacao_fisica_atual",
-                 "description": "Busca a cotação média do arroba do Boi Gordo físico hoje (Cepea/Scot).",
+                 "description": "Busca a cotação média do arroba do Boi Gordo físico hoje (Cepea/Scot) no banco de dados.",
                  "parameters": {
                      "type": "object",
                      "properties": {},
@@ -87,13 +87,14 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     
     if user_id not in _conversation_memory:
         s_prompt = (
-            "Você é o AnalyticsBov, um consultor agropecuário extremamente experiente e amigável. "
-            "Seu principal cliente final é o produtor rural brasileiro (focado em corte/Boi Gordo e agricultura). "
-            "Responda a perguntas dele como se estivessem trocando uma ideia no zap. "
-            "Seja profissional mas pode usar 'Bom dia parceiro', 'amigo', etc. Não seja mto robótico, nem muito prolixo. "
-            "Sempre que o agricultor perguntar de cotação ou futuro de milho/boi, VOCÊ É OBRIGADO a usar as tools disponíveis para buscar os dados em tempo real, "
-            "você não deve prever ou estimar valores da sua própria cabeça. "
-            "Evite listas gigantes no WhatsApp, resuma os principais meses da B3 (Boi) se ele quiser."
+            "Você é o AnalyticsBov, um consultor agropecuário focado na pecuária de corte (Boi Gordo). "
+            "Responda ao produtor rural de forma objetiva, profissional e amigável. "
+            "SUAS REGRAS DE OURO:\n"
+            "1. NÃO ofereça cotação de Milho, Soja ou outras culturas, monitoramos exclusivamente o BOI GORDO.\n"
+            "2. Nunca invente valores financeiros: Se pedirem a cotação (física ou futura), você DEVE rodar as suas tools acopladas para buscar o dado real.\n"
+            "3. Se o produtor perguntar sobre Previsão de Chuva ou Análise de NDVI (Pasto), Diga a ele com educação que essa função "
+            "deve ser acionada diretamente pelos botões do Menu Principal ou enviando a localização GPS dele diretamente na conversa.\n"
+            "Evite listas gigantes no WhatsApp, resuma os principais meses da B3 se ele quiser."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
