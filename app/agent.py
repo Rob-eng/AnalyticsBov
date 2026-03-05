@@ -77,7 +77,7 @@ def _ajustar_historico(phone):
         # Mantem o system prompt e pega as ultimas 10 interacoes
         _conversation_memory[phone] = [msgs[0]] + msgs[-10:]
 
-async def run_tool(name: str, arguments: dict) -> str:
+async def run_tool(name: str, arguments: dict, media_list: list) -> str:
     """Roda a funcao especifica que o modelo solicitou."""
     print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
@@ -102,10 +102,13 @@ async def run_tool(name: str, arguments: dict) -> str:
             lon = arguments.get("lon")
             if not lat or not lon: return "Coordenadas inválidas. Peça ao produtor latitude e longitude reais."
             
-            from app.weather import get_precipitation_data
+            from app.weather import get_precipitation_data, get_forecast_image
             loop = asyncio.get_event_loop()
             chuva_data = await loop.run_in_executor(None, get_precipitation_data, float(lat), float(lon))
             if chuva_data:
+                # Gerar o grafico de chuva
+                img_buffer = await loop.run_in_executor(None, get_forecast_image, chuva_data, "Previsão via IA", (lat, lon))
+                if img_buffer: media_list.append(img_buffer)
                 return json.dumps(chuva_data, ensure_ascii=False)
             return "Não foi possível obter dados climáticos. Talvez os satélites de clima estejam offline."
             
@@ -114,7 +117,7 @@ async def run_tool(name: str, arguments: dict) -> str:
             lon = arguments.get("lon")
             if not lat or not lon: return "Coordenadas inválidas."
             
-            from app.environmental import fetch_car_perimeter, get_ndvi_analysis
+            from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
             loop = asyncio.get_event_loop()
             
             # Buscar limitrofes do CAR
@@ -127,8 +130,10 @@ async def run_tool(name: str, arguments: dict) -> str:
             # Analisar os satélites com essa geometria
             ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometria)
             if ndvi_result and isinstance(ndvi_result, dict):
-                # We return only the text summary so the LLM can talk back.
-                # Images urls are ignored by the text LLM for now.
+                # Generates the HD Map Image
+                img_buffer = await loop.run_in_executor(None, generate_environmental_image, ndvi_result['image_url'], ndvi_result['date'], ndvi_result['stats'], "Análise NDVI via IA", (lat, lon))
+                if img_buffer: media_list.append(img_buffer)
+                
                 mean = ndvi_result.get('stats', {}).get('mean', 0)
                 data_img = ndvi_result.get('date', 'Desconhecida')
                 return f"Análise de Satélite (NDVI) realizada na data: {data_img}. O valor médio de Fotossíntese/Vigor do Pasto foi de {mean:.2f} (escala de -1 a 1). Baseado nisso, diga a ele o diagnóstico aproximado do pasto."
@@ -139,16 +144,18 @@ async def run_tool(name: str, arguments: dict) -> str:
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
 
-async def get_agent_response(user_id: str, user_text: str, context_info: str = "") -> str:
+async def get_agent_response(user_id: str, user_text: str, context_info: str = "") -> tuple:
     """
     Motor central da IA. Processa o texto, chama ferramentas se precisar e retorna a resposta final em texto.
+    Retorna uma tuple: (texto_str, media_list_buffers)
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("[Agent WARNING] OPENAI_API_KEY não localizada.")
-        return "Opa! Pelo visto o chefe ainda não configurou o meu Cérebro IA lá no servidor. Volto já!"
+        return ("Opa! Pelo visto o chefe ainda não configurou o meu Cérebro IA lá no servidor. Volto já!", [])
 
     client = AsyncOpenAI(api_key=api_key)
+    media_list = []
     
     if user_id not in _conversation_memory:
         s_prompt = (
@@ -187,7 +194,7 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                 func_name = tool_call.function.name
                 args_dict = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
                 
-                tool_result_str = await run_tool(func_name, args_dict)
+                tool_result_str = await run_tool(func_name, args_dict, media_list)
                 
                 _conversation_memory[user_id].append({
                     "role": "tool",
@@ -203,23 +210,28 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             
             final_text = second_response.choices[0].message.content
             _conversation_memory[user_id].append({"role": "assistant", "content": final_text})
-            return final_text
+            return (final_text, media_list)
             
         else:
             final_text = response_msg.content
             _conversation_memory[user_id].append({"role": "assistant", "content": final_text})
-            return final_text
+            return (final_text, media_list)
             
     except Exception as e:
         print(f"[Agent Error] {e}")
-        return "Eita! Meu cérebro de inteligência artificial aqui deu um soluço. Me dá um tempinho e tenta mandar a mensagem de novo?"
+        return ("Eita! Meu cérebro de inteligência artificial aqui deu um soluço. Me dá um tempinho e tenta mandar a mensagem de novo?", [])
 
 async def process_whatsapp_message(sender_phone: str, user_text: str):
     """
     Funcao principal chamada pelo webhook do Meta/WhatsApp.
     """
     try:
-        resposta = await get_agent_response(sender_phone, user_text, context_info="O usuário está conversando via WhatsApp.")
-        send_whatsapp_text(sender_phone, resposta)
+        resposta_txt, media_list = await get_agent_response(sender_phone, user_text, context_info="O usuário está conversando via WhatsApp.")
+        # Meta API WhatsApp não processa buffers brutos nativamente aqui ainda.
+        # Caso o bot do Telegram construa imagens, manda um aviso fofo.
+        if media_list:
+            resposta_txt += "\n\n*(PS: Meus satélites geraram um Mapa Gráfico de altíssima definição pra você, mas ele só é visível na minha versão do Telegram. Mas acima você já tem o meu diagnóstico por voz!)*"
+
+        send_whatsapp_text(sender_phone, resposta_txt)
     except Exception as e:
         print(f"[WhatsApp Worker Error] {e}")

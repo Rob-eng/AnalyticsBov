@@ -1143,12 +1143,22 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         # Fallback inteligente para o Agente OpenAI (se o produtor mandar texto livre)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
         from app.agent import get_agent_response
-        resposta = await get_agent_response(
+        resposta_txt, media_list = await get_agent_response(
             user_id=str(update.effective_chat.id),
             user_text=text,
             context_info="O usuário está conversando via Telegram. Pode usar Markdown básico se precisar formular listas."
         )
-        await update.message.reply_text(resposta)
+        
+        # Envia as imagens contruídas pelas ferramentas nativas, se houver
+        if media_list:
+             for media_buffer in media_list:
+                 await context.bot.send_photo(
+                     chat_id=update.effective_chat.id, 
+                     photo=media_buffer
+                 )
+        
+        # Envia a conclusao da IA em texto
+        await update.message.reply_text(resposta_txt)
     
     return ConversationHandler.END
 
