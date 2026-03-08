@@ -149,56 +149,16 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
         elif name == "verificar_previsao_chuva":
             lat = arguments.get("lat")
             lon = arguments.get("lon")
-            if not lat or not lon: return "Coordenadas inválidas. Peça ao produtor latitude e longitude reais."
-            
-            from app.weather import get_precipitation_data, get_forecast_image
-            loop = asyncio.get_event_loop()
-            chuva_data = await loop.run_in_executor(None, get_precipitation_data, float(lat), float(lon))
-            if chuva_data:
-                # Gerar o grafico de chuva
-                img_buffer = await loop.run_in_executor(None, get_forecast_image, chuva_data, "Previsão via IA", (lat, lon))
-                if img_buffer: media_list.append(img_buffer)
-                return json.dumps(chuva_data, ensure_ascii=False)
-            return "Não foi possível obter dados climáticos. Talvez os satélites de clima estejam offline."
+            if not lat or not lon: return "Coordenadas inválidas."
+            # Delegamos para o fluxo nativo para manter o padrão de cores/legenda dos botões
+            return f"TRIGGER_FLOW: CLIMA | {lat} | {lon} | Propriedade Selecionada"
             
         elif name == "analisar_saude_pasto_ndvi":
             lat = arguments.get("lat")
             lon = arguments.get("lon")
             if not lat or not lon: return "Coordenadas inválidas."
-            
-            from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
-            loop = asyncio.get_event_loop()
-            
-            # Buscar limitrofes do CAR
-            geom_result = await loop.run_in_executor(None, fetch_car_perimeter, float(lat), float(lon))
-            # fetch_car_perimeter returns (geometry, status). The tuple itself is always truthy if it returned something.
-            if not geom_result or not isinstance(geom_result, tuple) or len(geom_result) < 2:
-                return "Aviso: Nenhuma geometria de fazenda detectada pelo CAR nessa coordenada para cortar o satélite."
-            
-            geometria, status = geom_result
-            
-            # Analisar os satélites com essa geometria
-            ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometria)
-            if ndvi_result and isinstance(ndvi_result, dict):
-                # Generates the HD Map Image
-                # FIX: Correct arguments for generate_environmental_image
-                img_buffer = await loop.run_in_executor(
-                    None, 
-                    generate_environmental_image, 
-                    ndvi_result['ndvi_img'], # GEE thumbnail BytesIO or URL
-                    geometria, # The actual GeoJSON
-                    status, # 'OFFICIAL', 'NEARBY', or 'FALLBACK'
-                    ndvi_result.get('region_bbox'), # Correct bounding box for overlay
-                    "Análise NDVI via IA", # Title
-                    (float(lat), float(lon)) # Pin coordinates
-                )
-                if img_buffer: media_list.append(img_buffer)
-                
-                mean = ndvi_result.get('stats', {}).get('mean', 0)
-                data_img = ndvi_result.get('date', 'Desconhecida')
-                return f"Análise de Satélite (NDVI) realizada na data: {data_img}. O valor médio de Fotossíntese/Vigor do Pasto foi de {mean:.2f} (escala de -1 a 1). Baseado nisso, diga a ele o diagnóstico aproximado do pasto."
-            
-            return "Ocorreu um erro ao consultar as imagens limpas do Sentinel-2 no núcleo do Earth Engine. Pode haver excesso de nuvens nos últimos meses."
+            # Delegamos para o fluxo nativo (botão) para manter perfeitamente o padrão visual
+            return f"TRIGGER_FLOW: NDVI | {lat} | {lon} | Propriedade Selecionada"
 
         elif name == "listar_propriedades":
             from app.models import SessionLocal, FavoriteLocation

@@ -1160,6 +1160,9 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                 lon_val = float(match.group(3))
                 nome_prop = match.group(4).strip()
                 
+                # Limpa a resposta da IA para não mostrar o código do gatilho ao usuário
+                follow_up_txt = re.sub(r"TRIGGER_FLOW:.*", "", resposta_txt).strip()
+                
                 # Preparamos o context.user_data para simular o estado do botão
                 context.user_data['prop_name'] = nome_prop
                 if fluxo_tipo == 'NDVI':
@@ -1167,19 +1170,23 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                 elif fluxo_tipo == 'MDT':
                     context.user_data['env_mode'] = 'mdt'
                 elif fluxo_tipo == 'CLIMA':
-                    # Para o clima, simulamos o fluxo de previsão de 5 dias por padrão
                     context.user_data['wx_mode'] = 'forecast'
                     context.user_data['wx_days'] = 5
                 
                 # Injetamos os dados e chamamos a função de processamento de localização do bot
-                # Simulamos o recebimento da mensagem de texto com as coordenadas
                 update.message.text = f"{lat_val}, {lon_val}"
                 
-                # Redirecionamos para a função correta
+                # Executa o fluxo nativo (que enviará mapas e legendas oficiais)
                 if fluxo_tipo in ['NDVI', 'MDT']:
-                    return await receive_env_location(update, context)
+                    await receive_env_location(update, context)
                 elif fluxo_tipo == 'CLIMA':
-                    return await receive_weather_location(update, context)
+                    await receive_weather_location(update, context)
+                
+                # Se sobrar texto da IA (comentário extra), envia depois do mapa
+                if follow_up_txt:
+                    await update.message.reply_text(follow_up_txt)
+                
+                return ConversationHandler.END
 
         # Envia as imagens contruídas pelas ferramentas nativas, se houver
         if media_list:
