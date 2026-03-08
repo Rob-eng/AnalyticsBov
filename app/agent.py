@@ -57,7 +57,7 @@ def get_tools_definition():
              "type": "function",
              "function": {
                  "name": "analisar_saude_pasto_ndvi",
-                 "description": "Acessa satélites do Google Earth Engine para avaliar o verde do pasto (NDVI / Fotossíntese) na fazenda cruzando o perímetro do CAR. Exige coordenada.",
+                 "description": "Acessa satélites do Google Earth Engine para avaliar o verde do pasto (NDVI / Fotossíntese) na fazenda. Se o usuário não fornecer coordenadas mas tiver propriedades cadastradas, use 'listar_propriedades' primeiro.",
                  "parameters": {
                      "type": "object",
                      "properties": {
@@ -65,6 +65,34 @@ def get_tools_definition():
                          "lon": {"type": "number", "description": "Longitude. Ex: -54.6"}
                      },
                      "required": ["lat", "lon"]
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "listar_propriedades",
+                 "description": "Lista todas as propriedades (fazendas) cadastradas do usuário com seus nomes e coordenadas.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {},
+                     "required": []
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "cadastrar_propriedade",
+                 "description": "Cadastra uma nova propriedade (fazenda) para o usuário.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "nome": {"type": "string", "description": "Nome da fazenda/propriedade."},
+                         "lat": {"type": "number", "description": "Latitude da sede ou centro da fazenda."},
+                         "lon": {"type": "number", "description": "Longitude da sede ou centro da fazenda."}
+                     },
+                     "required": ["nome", "lat", "lon"]
                  }
              }
         }
@@ -77,7 +105,7 @@ def _ajustar_historico(phone):
         # Mantem o system prompt e pega as ultimas 10 interacoes
         _conversation_memory[phone] = [msgs[0]] + msgs[-10:]
 
-async def run_tool(name: str, arguments: dict, media_list: list) -> str:
+async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -> str:
     """Roda a funcao especifica que o modelo solicitou."""
     print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
@@ -140,6 +168,48 @@ async def run_tool(name: str, arguments: dict, media_list: list) -> str:
             
             return "Ocorreu um erro ao consultar as imagens limpas do Sentinel-2 no núcleo do Earth Engine. Pode haver excesso de nuvens nos últimos meses."
 
+        elif name == "listar_propriedades":
+            from app.models import SessionLocal, FavoriteLocation
+            session = SessionLocal()
+            try:
+                props = session.query(FavoriteLocation).filter(FavoriteLocation.user_id == user_id).all()
+                if not props:
+                    return "O usuário ainda não possui propriedades cadastradas."
+                
+                res = []
+                for p in props:
+                    res.append({"nome": p.name, "lat": p.latitude, "lon": p.longitude})
+                return json.dumps(res, ensure_ascii=False)
+            finally:
+                session.close()
+
+        elif name == "cadastrar_propriedade":
+            nome = arguments.get("nome")
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            if not nome or lat is None or lon is None:
+                return "Dados incompletos para cadastro. Preciso de nome, latitude e longitude."
+            
+            from app.models import SessionLocal, FavoriteLocation, User
+            session = SessionLocal()
+            try:
+                # Garantir que o usuário existe
+                user = session.query(User).filter(User.chat_id == user_id).first()
+                if not user:
+                    user = User(chat_id=user_id, platform='whatsapp' if 'whatsapp' in user_id else 'telegram')
+                    session.add(user)
+                    session.flush()
+
+                new_prop = FavoriteLocation(user_id=user_id, name=nome, latitude=float(lat), longitude=float(lon))
+                session.add(new_prop)
+                session.commit()
+                return f"Propriedade '{nome}' cadastrada com sucesso!"
+            except Exception as e:
+                session.rollback()
+                return f"Erro ao cadastrar propriedade: {e}"
+            finally:
+                session.close()
+
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
@@ -164,9 +234,13 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "1. NÃO ofereça cotação de Milho/Soja. O AnalyticsBov atende exclusivamente pecuaristas (BOI GORDO).\n"
             "2. Responda amigavelmente (Use 'amigo', 'parceiro'). Resuma listas longas de B3.\n"
             "3. Se perguntarem da Cotação do boi firme ou futura, USE as ferramentas `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro`.\n"
-            "4. Se o produtor pedir Previsão de Chuva OU Condição do Pasto (NDVI) fornecendo uma coordenada (Latitude e Longitude), "
-            "você TEM PERMISSÃO para rodar essas ferramentas para entregar os dados a ele (verificar_previsao_chuva ou analisar_saude_pasto_ndvi).\n"
-            "5. NUNCA invente números."
+            "4. Se o produtor pedir Previsão de Chuva OU Condição do Pasto (NDVI):\n"
+            "   - Verifique se ele informou o NOME de uma fazenda.\n"
+            "   - Se sim, use `listar_propriedades` para achar as coordenadas dela.\n"
+            "   - Se ele não informou e você não sabe as coordenadas, use `listar_propriedades` para ver se ele já tem algo cadastrado e pergunte qual ele quer usar.\n"
+            "   - Se ele não tiver propriedades cadastradas, peça as coordenadas (Lat/Lon) e ofereça para cadastrar a fazenda usando `cadastrar_propriedade` para facilitar no futuro.\n"
+            "5. Quando perguntarem quais ferramentas você tem, LISTE TODAS com detalhes (B3, Cotação Física, Clima, NDVI, Gestão de Propriedades).\n"
+            "6. NUNCA invente números."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
@@ -194,7 +268,7 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                 func_name = tool_call.function.name
                 args_dict = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
                 
-                tool_result_str = await run_tool(func_name, args_dict, media_list)
+                tool_result_str = await run_tool(func_name, args_dict, media_list, user_id)
                 
                 _conversation_memory[user_id].append({
                     "role": "tool",

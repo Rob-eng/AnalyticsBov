@@ -415,7 +415,47 @@ def get_precipitation_heatmap(lat, lon):
         print(traceback.format_exc(), flush=True)
         return None
 
-
+def get_asset_intersection_area(asset_id: str, geometry_geojson: dict) -> float:
+    """
+    Calculates the intersected area (in hectares) between a given geometry
+    (like the boundaries of a farm) and a GEE FeatureCollection Asset 
+    (like Reserva Legal, APP, Uso Consolidado borders).
+    
+    Returns the total intersecting area in hectares.
+    """
+    try:
+        if not initialize_gee():
+            print("[GEE ASSET] Falha na autenticação do Google Earth Engine.")
+            return 0.0
+            
+        farm_geom = ee.Geometry(geometry_geojson)
+        asset_collection = ee.FeatureCollection(asset_id)
+        
+        # Otimização espacial rápida: pega apenas feições que colidem com a fazenda
+        intersecting_features = asset_collection.filterBounds(farm_geom)
+        
+        # Função para aplicar a interseção matemática dentro do supercomputador do GEE
+        def calc_intersection(feature):
+            # Recorta a camada secundária no limite exato da fazenda principal
+            intersection = feature.geometry().intersection(farm_geom)
+            # st_area() retorna em metros quadrados
+            area_sqm = intersection.area()
+            # Converte m² para hectares
+            area_ha = ee.Number(area_sqm).divide(10000)
+            return feature.set('intersected_area_ha', area_ha)
+            
+        # Processa todas as feições (pode ser mais de 1 APP encostando na fazenda)
+        processed = intersecting_features.map(calc_intersection)
+        
+        # Soma todas as partes cortadas e traz o resultado matemático (reduce/aggregate)
+        total_area_ha = processed.aggregate_sum('intersected_area_ha').getInfo()
+        
+        print(f"[GEE ASSET] Interseção calculada com sucesso: {total_area_ha:.2f} ha", flush=True)
+        return float(total_area_ha)
+        
+    except Exception as e:
+        print(f"[GEE ASSET ERROR] Erro ao calcular interseção na Cloud: {e}", flush=True)
+        return 0.0
 # ── Terrain / MDT ──────────────────────────────────────────────────────────────
 
 def get_terrain_data(geometry_geojson):
