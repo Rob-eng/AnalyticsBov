@@ -1139,7 +1139,6 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "🌧️ Precipitação (chuva)":
         await start_weather(update, context)
         return WAITING_WEATHER_LOCATION
-    else:
         # Fallback inteligente para o Agente OpenAI (se o produtor mandar texto livre)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
         from app.agent import get_agent_response
@@ -1149,6 +1148,38 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
             context_info="O usuário está conversando via Telegram. Pode usar Markdown básico se precisar formular listas."
         )
         
+        # ── INTERCEPTOR DE FLUXOS AUTOMÁTICOS ──
+        # Se a resposta contiver TRIGGER_FLOW, nós interceptamos e rodamos a lógica do botão
+        if "TRIGGER_FLOW:" in resposta_txt:
+            import re
+            match = re.search(r"TRIGGER_FLOW:\s*(\w+)\s*\|\s*([\d\.-]+)\s*\|\s*([\d\.-]+)\s*\|\s*(.*)", resposta_txt)
+            if match:
+                fluxo_tipo = match.group(1).upper()
+                lat_val = float(match.group(2))
+                lon_val = float(match.group(3))
+                nome_prop = match.group(4).strip()
+                
+                # Preparamos o context.user_data para simular o estado do botão
+                context.user_data['prop_name'] = nome_prop
+                if fluxo_tipo == 'NDVI':
+                    context.user_data['env_mode'] = 'ndvi'
+                elif fluxo_tipo == 'MDT':
+                    context.user_data['env_mode'] = 'mdt'
+                elif fluxo_tipo == 'CLIMA':
+                    # Para o clima, simulamos o fluxo de previsão de 5 dias por padrão
+                    context.user_data['wx_mode'] = 'forecast'
+                    context.user_data['wx_days'] = 5
+                
+                # Injetamos os dados e chamamos a função de processamento de localização do bot
+                # Simulamos o recebimento da mensagem de texto com as coordenadas
+                update.message.text = f"{lat_val}, {lon_val}"
+                
+                # Redirecionamos para a função correta
+                if fluxo_tipo in ['NDVI', 'MDT']:
+                    return await receive_env_location(update, context)
+                elif fluxo_tipo == 'CLIMA':
+                    return await receive_weather_location(update, context)
+
         # Envia as imagens contruídas pelas ferramentas nativas, se houver
         if media_list:
              for media_buffer in media_list:

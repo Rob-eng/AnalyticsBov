@@ -81,21 +81,42 @@ def get_tools_definition():
              }
         },
         {
-             "type": "function",
-             "function": {
-                 "name": "cadastrar_propriedade",
-                 "description": "Cadastra uma nova propriedade (fazenda) para o usuário.",
-                 "parameters": {
-                     "type": "object",
-                     "properties": {
-                         "nome": {"type": "string", "description": "Nome da fazenda/propriedade."},
-                         "lat": {"type": "number", "description": "Latitude da sede ou centro da fazenda."},
-                         "lon": {"type": "number", "description": "Longitude da sede ou centro da fazenda."}
-                     },
-                     "required": ["nome", "lat", "lon"]
-                 }
-             }
-        }
+                "type": "function",
+                "function": {
+                    "name": "cadastrar_propriedade",
+                    "description": "Cadastra uma nova fazenda/propriedade para o usuário usando nome e coordenadas.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "nome": {"type": "string", "description": "Nome da fazenda"},
+                            "lat": {"type": "number", "description": "Latitude decimal"},
+                            "lon": {"type": "number", "description": "Longitude decimal"}
+                        },
+                        "required": ["nome", "lat", "lon"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "disparar_fluxo_automatico",
+                    "description": "Dispara um fluxo automático (botão) do sistema. Use isso como BACKUP se o NDVI falhar ou se o usuário pedir 'pela ferramenta padrão' ou 'pelo botão'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "fluxo": {
+                                "type": "string",
+                                "enum": ["NDVI", "CLIMA", "MDT"],
+                                "description": "O fluxo/botão a ser acionado"
+                            },
+                            "lat": {"type": "number", "description": "Latitude decimal"},
+                            "lon": {"type": "number", "description": "Longitude decimal"},
+                            "nome_propriedade": {"type": "string", "description": "Nome da propriedade (opcional)"}
+                        },
+                        "required": ["fluxo", "lat", "lon"]
+                    }
+                }
+            }
     ]
 
 def _ajustar_historico(phone):
@@ -221,6 +242,17 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             finally:
                 session.close()
 
+        elif name == "disparar_fluxo_automatico":
+            fluxo = arguments.get("fluxo")
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
+            
+            # Retornamos uma string especial amigável para o bot.py interceptar
+            # ou para o usuário entender que o fluxo foi delegado.
+            # No bot.py, vamos interceptar o retorno do agente.
+            return f"TRIGGER_FLOW: {fluxo} | {lat} | {lon} | {nome}"
+
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
@@ -240,18 +272,19 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     
     if user_id not in _conversation_memory:
         s_prompt = (
-            "Você é o AnalyticsBov, um consultor agropecuário tecnológico focado na pecuária de corte.\n"
+            "Você é o AnalyticsBov, um consultor agropecuário tecnológico e operador da plataforma Agro Analytics.\n"
             "SUAS REGRAS DE OURO:\n"
             "1. NÃO ofereça cotação de Milho/Soja. O AnalyticsBov atende exclusivamente pecuaristas (BOI GORDO).\n"
             "2. Responda amigavelmente (Use 'amigo', 'parceiro'). Resuma listas longas de B3.\n"
             "3. Se perguntarem da Cotação do boi firme ou futura, USE as ferramentas `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro`.\n"
             "4. Se o produtor pedir Previsão de Chuva OU Condição do Pasto (NDVI):\n"
-            "   - Verifique se ele informou o NOME de uma fazenda.\n"
-            "   - Se sim, use `listar_propriedades` para achar as coordenadas dela.\n"
-            "   - Se ele não informou e você não sabe as coordenadas, use `listar_propriedades` para ver se ele já tem algo cadastrado e pergunte qual ele quer usar.\n"
-            "   - Se ele não tiver propriedades cadastradas, peça as coordenadas (Lat/Lon) e ofereça para cadastrar a fazenda usando `cadastrar_propriedade` para facilitar no futuro.\n"
-            "5. Quando perguntarem quais ferramentas você tem, LISTE TODAS com detalhes (B3, Cotação Física, Clima, NDVI, Gestão de Propriedades).\n"
-            "6. NUNCA invente números."
+            "   - Tente primeiro a ferramenta de alta precisão `analisar_saude_pasto_ndvi`.\n"
+            "   - SE ela retornar erro de perímetro ou falha no Satélite, você DEVE acionar o fluxo automático do botão usando `disparar_fluxo_automatico`.\n"
+            "   - Diga ao usuário: 'A análise detalhada teve um problema, mas vou acionar a ferramenta padrão para você agora!'\n"
+            "5. Se o usuário falar 'aperte o botão', 'use a ferramenta padrão' ou algo similar, use `disparar_fluxo_automatico` imediatamente.\n"
+            "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
+            "7. LISTE TODAS as ferramentas com detalhes quando perguntado (B3, Clima, MDT, NDVI, Cadastro).\n"
+            "8. NUNCA invente números."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
