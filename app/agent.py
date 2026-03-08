@@ -262,19 +262,29 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     _ajustar_historico(user_id)
     
     try:
-        print(f"[Agent] Consultando a nuvem OpenAI para {user_id}...")
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=_conversation_memory[user_id],
-            tools=get_tools_definition(),
-            tool_choice="auto"
-        )
+        max_iterations = 5
+        iteration = 0
         
-        response_msg = response.choices[0].message
-        
-        if response_msg.tool_calls:
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"[Agent] Consultando a nuvem OpenAI (Rodada {iteration}) para {user_id}...")
+            
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=_conversation_memory[user_id],
+                tools=get_tools_definition(),
+                tool_choice="auto"
+            )
+            
+            response_msg = response.choices[0].message
             _conversation_memory[user_id].append(response_msg)
             
+            if not response_msg.tool_calls:
+                # Se não houver mais chamadas de ferramenta, terminamos
+                final_text = response_msg.content or ""
+                return (final_text, media_list)
+            
+            # Executar todas as ferramentas solicitadas nesta rodada
             for tool_call in response_msg.tool_calls:
                 func_name = tool_call.function.name
                 args_dict = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
@@ -286,21 +296,15 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                     "tool_call_id": tool_call.id,
                     "content": tool_result_str
                 })
-                
-            print("[Agent] Re-enviando resultados da ferramenta para IA sumarizar.")
-            second_response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=_conversation_memory[user_id]
-            )
-            
-            final_text = second_response.choices[0].message.content
-            _conversation_memory[user_id].append({"role": "assistant", "content": final_text})
-            return (final_text, media_list)
-            
-        else:
-            final_text = response_msg.content
-            _conversation_memory[user_id].append({"role": "assistant", "content": final_text})
-            return (final_text, media_list)
+        
+        print(f"[Agent Warning] Limite de {max_iterations} iterações atingido.")
+        # Se atingir o limite, tenta uma última resposta sem ferramentas
+        final_response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=_conversation_memory[user_id]
+        )
+        final_text = final_response.choices[0].message.content
+        return (final_text, media_list)
             
     except Exception as e:
         print(f"[Agent Error] {e}")
