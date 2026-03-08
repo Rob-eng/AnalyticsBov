@@ -1139,6 +1139,7 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
     elif text == "🌧️ Precipitação (chuva)":
         await start_weather(update, context)
         return WAITING_WEATHER_LOCATION
+    else:
         # Fallback inteligente para o Agente OpenAI (se o produtor mandar texto livre)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
         from app.agent import get_agent_response

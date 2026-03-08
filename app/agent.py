@@ -314,7 +314,7 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             
             if not response_msg.tool_calls:
                 # Se não houver mais chamadas de ferramenta, terminamos
-                final_text = response_msg.content or ""
+                final_text = response_msg.content or "Entendi! Como posso te ajudar mais?"
                 return (final_text, media_list)
             
             # Executar todas as ferramentas solicitadas nesta rodada
