@@ -240,8 +240,7 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "4. Se o produtor pedir Previsão de Chuva, NDVI ou MDT (Terreno):\n"
             "   - Use as ferramentas correspondentes (`verificar_previsao_chuva` ou `analisar_saude_pasto_ndvi`).\n"
             "   - Essas ferramentas acionam os relatórios oficiais e automáticos da plataforma (padrão 'botão').\n"
-            "   - Quando a ferramenta retornar uma string 'TRIGGER_FLOW', você DEVE incluir essa string EXATAMENTE no final da sua resposta para o sistema processar a imagem.\n"
-            "   - Diga algo como: 'Com certeza, parceiro! Vou gerar agora o relatório oficial para você. Veja abaixo:'\n"
+            "   - Diga algo amigável como: 'Com certeza, parceiro! Vou gerar agora o relatório oficial para você. Veja abaixo:'\n"
             "5. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
             "6. LISTE TODAS as ferramentas com detalhes quando perguntado (B3, Clima, MDT, NDVI, Cadastro).\n"
             "7. NUNCA invente números."
@@ -257,6 +256,7 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     try:
         max_iterations = 5
         iteration = 0
+        pending_trigger = None
         
         while iteration < max_iterations:
             iteration += 1
@@ -275,6 +275,11 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             if not response_msg.tool_calls:
                 # Se não houver mais chamadas de ferramenta, terminamos
                 final_text = response_msg.content or "Entendi! Como posso te ajudar mais?"
+                
+                # Se capturamos um TRIGGER_FLOW nas rodadas anteriores e ele não está no texto final, anexamos.
+                if pending_trigger and pending_trigger not in final_text:
+                    final_text += f"\n\n{pending_trigger}"
+                
                 return (final_text, media_list)
             
             # Executar todas as ferramentas solicitadas nesta rodada
@@ -284,6 +289,10 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                 
                 tool_result_str = await run_tool(func_name, args_dict, media_list, user_id)
                 
+                # Detectar se o retorno da ferramenta é um gatilho para o bot
+                if tool_result_str.startswith("TRIGGER_FLOW:"):
+                    pending_trigger = tool_result_str
+
                 _conversation_memory[user_id].append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,

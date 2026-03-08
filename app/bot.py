@@ -1153,15 +1153,16 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         # Se a resposta contiver TRIGGER_FLOW, nós interceptamos e rodamos a lógica do botão
         if "TRIGGER_FLOW:" in resposta_txt:
             import re
-            match = re.search(r"TRIGGER_FLOW:\s*(\w+)\s*\|\s*([\d\.-]+)\s*\|\s*([\d\.-]+)\s*\|\s*(.*)", resposta_txt)
+            # Regex mais robusta que ignora possíveis marcas de negrito (**) da IA
+            match = re.search(r"TRIGGER_FLOW:\s*(\w+)\s*\|\s*([\d\.-]+)\s*\|\s*([\d\.-]+)\s*\|\s*([^|*\n]+)", resposta_txt)
             if match:
                 fluxo_tipo = match.group(1).upper()
                 lat_val = float(match.group(2))
                 lon_val = float(match.group(3))
-                nome_prop = match.group(4).strip()
+                nome_prop = match.group(4).strip().replace("*", "")
                 
-                # Limpa a resposta da IA para não mostrar o código do gatilho ao usuário
-                follow_up_txt = re.sub(r"TRIGGER_FLOW:.*", "", resposta_txt).strip()
+                # Limpa a resposta da IA removendo o comando de gatilho (e possíveis markdown ao redor)
+                follow_up_txt = re.sub(r"\**TRIGGER_FLOW:.*", "", resposta_txt).strip()
                 
                 # Preparamos o context.user_data para simular o estado do botão
                 context.user_data['prop_name'] = nome_prop
