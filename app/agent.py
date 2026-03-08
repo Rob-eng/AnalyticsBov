@@ -150,16 +150,27 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             
             # Buscar limitrofes do CAR
             geom_result = await loop.run_in_executor(None, fetch_car_perimeter, float(lat), float(lon))
-            if not geom_result:
+            # fetch_car_perimeter returns (geometry, status). The tuple itself is always truthy if it returned something.
+            if not geom_result or not isinstance(geom_result, tuple) or len(geom_result) < 2:
                 return "Aviso: Nenhuma geometria de fazenda detectada pelo CAR nessa coordenada para cortar o satélite."
             
-            geometria, _ = geom_result
+            geometria, status = geom_result
             
             # Analisar os satélites com essa geometria
             ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometria)
             if ndvi_result and isinstance(ndvi_result, dict):
                 # Generates the HD Map Image
-                img_buffer = await loop.run_in_executor(None, generate_environmental_image, ndvi_result['image_url'], ndvi_result['date'], ndvi_result['stats'], "Análise NDVI via IA", (lat, lon))
+                # FIX: Correct arguments for generate_environmental_image
+                img_buffer = await loop.run_in_executor(
+                    None, 
+                    generate_environmental_image, 
+                    ndvi_result['ndvi_img'], # GEE thumbnail BytesIO or URL
+                    geometria, # The actual GeoJSON
+                    status, # 'OFFICIAL', 'NEARBY', or 'FALLBACK'
+                    ndvi_result.get('region_bbox'), # Correct bounding box for overlay
+                    "Análise NDVI via IA", # Title
+                    (float(lat), float(lon)) # Pin coordinates
+                )
                 if img_buffer: media_list.append(img_buffer)
                 
                 mean = ndvi_result.get('stats', {}).get('mean', 0)
