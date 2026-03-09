@@ -646,10 +646,15 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             return ConversationHandler.END
 
         # ── HISTORICO mode: precipitation data + heatmap ─────────────────
-        data = get_precipitation_data(lat, lon)
+        print(f"[WEATHER] Modo histórico para {lat}, {lon}", flush=True)
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, get_precipitation_data, lat, lon)
         if not data:
+            print("[WEATHER] get_precipitation_data retornou None", flush=True)
             await status_msg.edit_text("❌ Erro ao buscar dados meteorológicos para este local.")
             return WAITING_WEATHER_LOCATION
+
+        print(f"[WEATHER] Dados obtidos: last_24h={data.get('last_24h')}, dias={len(data.get('daily_history', []))}", flush=True)
 
         # Format text message
         precip_val = data.get('last_24h', 0)
@@ -663,24 +668,25 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
 
         # Get Regional Heatmap (GEE) — non-blocking; skip on failure
-        status_msg = await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
+        await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
+        heatmap = None
         try:
             from app.gee_connector import get_precipitation_heatmap
-            heatmap = get_precipitation_heatmap(lat, lon)
+            heatmap = await loop.run_in_executor(None, get_precipitation_heatmap, lat, lon)
+            print(f"[WEATHER] Heatmap: {'OK' if heatmap else 'Vazio'}", flush=True)
         except Exception as ge:
-            print(f"  Heatmap skipped: {ge}", flush=True)
-            heatmap = None
+            print(f"[WEATHER] Heatmap skipped: {ge}", flush=True)
 
         # Get static map
         prop_name = context.user_data.pop('prop_name', None)
         from app.weather import generate_weather_map_with_title
-        map_image = generate_weather_map_with_title(lat, lon, title=prop_name)
+        map_image = await loop.run_in_executor(None, generate_weather_map_with_title, lat, lon, prop_name)
+        print(f"[WEATHER] Map image: {'OK' if map_image else 'Falhou'}", flush=True)
 
         # Send photos
         try:
             if heatmap:
                 try:
-                    # gee_connector now returns a pre-rendered BytesIO buffer
                     heatmap_photo = heatmap.get('buffer') or heatmap.get('image_url')
                     await context.bot.send_photo(
                         chat_id=chat_id,
@@ -692,20 +698,23 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                         parse_mode='Markdown'
                     )
                 except Exception as he:
-                    print(f"  Heatmap send failed: {he}", flush=True)
-                    # Fall through — still send the main map
+                    print(f"[WEATHER] Heatmap send failed: {he}", flush=True)
 
+            photo = map_image if map_image else get_static_map_url(lat, lon)
             await context.bot.send_photo(
                 chat_id=chat_id,
-                photo=map_image if map_image else get_static_map_url(lat, lon),
+                photo=photo,
                 caption=msg,
                 parse_mode='Markdown',
                 reply_markup=get_keyboard(chat_id)
             )
             await status_msg.delete()
+            print("[WEATHER] Histórico enviado com sucesso!", flush=True)
 
         except Exception as spe:
-            print(f"Error sending historical photo: {spe}")
+            print(f"[WEATHER] Error sending photo: {spe}", flush=True)
+            import traceback
+            traceback.print_exc()
             try:
                 await status_msg.edit_text(msg, parse_mode='Markdown')
             except Exception:
