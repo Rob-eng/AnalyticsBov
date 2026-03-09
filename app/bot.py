@@ -1348,6 +1348,62 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                                 reply_markup=get_keyboard(chat_id)
                             )
                         print("[TRIGGER_FLOW] MDT enviado com sucesso!", flush=True)
+                    
+                    elif fluxo_tipo == 'HISTORICO':
+                        status_msg = await update.message.reply_text("🌧️ Buscando histórico de precipitação... Aguarde.")
+                        
+                        loop = asyncio.get_running_loop()
+                        
+                        # 1. Dados de precipitação
+                        data = await loop.run_in_executor(None, get_precipitation_data, lat_val, lon_val)
+                        if not data:
+                            await status_msg.edit_text("❌ Erro ao buscar dados meteorológicos para este local.")
+                            return ConversationHandler.END
+                        
+                        # 2. Texto
+                        precip_val = data.get('last_24h', 0)
+                        msg = f"🌧️ *Dados de Precipitação*\n"
+                        msg += f"📍 *Local:* {nome_prop}\n"
+                        msg += f"🕒 *Últimas 24h:* {precip_val:.1f} mm\n\n"
+                        msg += f"📅 *Histórico Recente (Últimos 7 dias):*\n"
+                        for date_val, val in data.get('daily_history', []):
+                            d_fmt = datetime.strptime(date_val, '%Y-%m-%d').strftime('%d/%m')
+                            msg += f"• {d_fmt}: {val:.1f} mm\n"
+                        msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat_val},{lon_val})"
+                        
+                        # 3. Heatmap regional
+                        await status_msg.edit_text("🛰️ Gerando mapa de calor regional... Aguarde.")
+                        heatmap = None
+                        try:
+                            from app.gee_connector import get_precipitation_heatmap
+                            heatmap = await loop.run_in_executor(None, get_precipitation_heatmap, lat_val, lon_val)
+                        except Exception:
+                            pass
+                        
+                        # 4. Mapa estático
+                        from app.weather import generate_weather_map_with_title
+                        map_image = await loop.run_in_executor(None, generate_weather_map_with_title, lat_val, lon_val, nome_prop)
+                        
+                        # 5. Enviar
+                        if heatmap:
+                            try:
+                                heatmap_photo = heatmap.get('buffer') or heatmap.get('image_url')
+                                await context.bot.send_photo(
+                                    chat_id=chat_id, photo=heatmap_photo,
+                                    caption="🌍 *Precipitação Acumulada — 30 dias | Brasil*\nCinza = seco · Azul claro = 50mm · Azul escuro = 300mm+",
+                                    parse_mode='Markdown'
+                                )
+                            except Exception:
+                                pass
+                        
+                        await context.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=map_image if map_image else get_static_map_url(lat_val, lon_val),
+                            caption=msg, parse_mode='Markdown',
+                            reply_markup=get_keyboard(chat_id)
+                        )
+                        await status_msg.delete()
+                        print("[TRIGGER_FLOW] Histórico de chuva enviado com sucesso!", flush=True)
                 
                 except Exception as e:
                     import traceback

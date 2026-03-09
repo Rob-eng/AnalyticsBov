@@ -42,13 +42,29 @@ def get_tools_definition():
              "type": "function",
              "function": {
                  "name": "verificar_previsao_chuva",
-                 "description": "Busca a previsão oficial de chuva (precipitação) para os próximos dias em uma coordenada específica.",
+                 "description": "Gera mapa de PREVISÃO de chuva para os PRÓXIMOS 5 dias (futuro). Use quando o usuário perguntar 'vai chover?', 'previsão de chuva', 'precipitação nos próximos dias'.",
                  "parameters": {
                      "type": "object",
                      "properties": {
-                         "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
-                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"},
-                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade (use o nome retornado por listar_propriedades)"}
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"}
+                     },
+                     "required": ["lat", "lon"]
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "verificar_historico_chuva",
+                 "description": "Gera mapa de HISTÓRICO de chuva dos ÚLTIMOS 7-30 dias (passado). Use quando o usuário perguntar 'choveu?', 'histórico de chuva', 'quanto choveu', 'precipitação dos últimos dias'.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"}
                      },
                      "required": ["lat", "lon"]
                  }
@@ -58,13 +74,29 @@ def get_tools_definition():
              "type": "function",
              "function": {
                  "name": "analisar_saude_pasto_ndvi",
-                 "description": "Acessa satélites do Google Earth Engine para avaliar o verde do pasto (NDVI / Fotossíntese) na fazenda. Se o usuário não fornecer coordenadas mas tiver propriedades cadastradas, use 'listar_propriedades' primeiro.",
+                 "description": "Gera mapa NDVI (verde do pasto / saúde da vegetação) via satélite. Use para 'NDVI', 'verde do pasto', 'saúde do pasto', 'análise ambiental'. NÃO use para terreno/relevo.",
                  "parameters": {
                      "type": "object",
                      "properties": {
-                         "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
-                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"},
-                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade (use o nome retornado por listar_propriedades)"}
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"}
+                     },
+                     "required": ["lat", "lon"]
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
+                 "name": "analisar_terreno_mdt",
+                 "description": "Gera mapa MDT (Modelo Digital de Terreno) com curvas de nível 2D e modelo 3D. Use para 'MDT', 'terreno', 'elevação', 'relevo', 'curvas de nível', 'topografia'. NÃO use para vegetação/NDVI.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"}
                      },
                      "required": ["lat", "lon"]
                  }
@@ -154,6 +186,13 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             nome = arguments.get("nome_propriedade", "Local Selecionado")
             if not lat or not lon: return "Coordenadas inválidas."
             return f"TRIGGER_FLOW: CLIMA | {lat} | {lon} | {nome}"
+
+        elif name == "verificar_historico_chuva":
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
+            if not lat or not lon: return "Coordenadas inválidas."
+            return f"TRIGGER_FLOW: HISTORICO | {lat} | {lon} | {nome}"
             
         elif name == "analisar_saude_pasto_ndvi":
             lat = arguments.get("lat")
@@ -161,6 +200,13 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             nome = arguments.get("nome_propriedade", "Local Selecionado")
             if not lat or not lon: return "Coordenadas inválidas."
             return f"TRIGGER_FLOW: NDVI | {lat} | {lon} | {nome}"
+
+        elif name == "analisar_terreno_mdt":
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
+            if not lat or not lon: return "Coordenadas inválidas."
+            return f"TRIGGER_FLOW: MDT | {lat} | {lon} | {nome}"
 
         elif name == "listar_propriedades":
             from app.models import SessionLocal, FavoriteLocation
