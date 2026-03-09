@@ -1231,11 +1231,49 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                         print("[TRIGGER_FLOW] Mapa NDVI enviado com sucesso!", flush=True)
                     
                     elif fluxo_tipo == 'CLIMA':
-                        context.user_data['wx_mode'] = 'forecast'
-                        context.user_data['wx_days'] = 5
-                        context.user_data['prop_name'] = nome_prop
-                        update.message.text = f"{lat_val}, {lon_val}"
-                        await receive_weather_location(update, context)
+                        status_msg = await update.message.reply_text("⏳ Baixando previsão de chuva... Aguarde.")
+                        
+                        loop = asyncio.get_running_loop()
+                        days = 5
+                        loc_name = nome_prop
+                        
+                        # Buscar polígono CAR para detalhe
+                        polygon = None
+                        try:
+                            import json as _json
+                            car_result = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
+                            if car_result and car_result[0]:
+                                polygon = _json.dumps(car_result[0])
+                        except Exception:
+                            pass
+                        
+                        wide_buf, close_buf, err_detail = await loop.run_in_executor(
+                            None, get_forecast_image, lat_val, lon_val, days, polygon
+                        )
+                        
+                        sent_any = False
+                        if wide_buf:
+                            await context.bot.send_photo(
+                                chat_id=chat_id, photo=wide_buf,
+                                caption=f"🌎 *Previsão ECMWF — {days} dias acumulado*\n📍 {loc_name}",
+                                parse_mode='Markdown'
+                            )
+                            sent_any = True
+                        if close_buf:
+                            await context.bot.send_photo(
+                                chat_id=chat_id, photo=close_buf,
+                                caption=f"🏡 *Detalhe — {days} dias*\n_Res: 0.25° | ECMWF Open Data_",
+                                parse_mode='Markdown', reply_markup=get_keyboard(chat_id)
+                            )
+                            sent_any = True
+                        if sent_any:
+                            await status_msg.delete()
+                            print("[TRIGGER_FLOW] Previsão CLIMA enviada com sucesso!", flush=True)
+                        else:
+                            detail = f"\n`{err_detail[:300]}`" if err_detail else ""
+                            await status_msg.edit_text(
+                                f"❌ Não foi possível gerar a previsão.{detail}", parse_mode='Markdown'
+                            )
                 
                 except Exception as e:
                     import traceback
