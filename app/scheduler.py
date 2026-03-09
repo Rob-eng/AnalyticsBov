@@ -1,43 +1,44 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from app.scraper import run_scraping_cycle
 from app.bot import broadcast_report
 from app.ndvi_alerts import run_ndvi_alert_scan
 import asyncio
 
-def setup_scheduler(application):
-    scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
+# Fuso horário do usuário: UTC-4 (sem horário de verão)
+USER_TZ = "America/Manaus"
 
-    # ── Weekly market report (Monday 08:00 BRT) ───────────────────────────
+def setup_scheduler(application):
+    scheduler = AsyncIOScheduler(timezone=USER_TZ)
+
+    # ── Relatório semanal de cotação (Segunda-feira 08:00 local) ──────────
     async def weekly_report_job():
-        print("Running weekly market report...", flush=True)
+        print("[Scheduler] Running weekly market report...", flush=True)
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, run_scraping_cycle)
         if data:
             await broadcast_report(application, data)
         else:
-            print("No market data collected, skipping broadcast.", flush=True)
+            print("[Scheduler] No market data collected, skipping broadcast.", flush=True)
 
     scheduler.add_job(
         weekly_report_job,
-        CronTrigger(day_of_week='mon', hour=8, minute=0, timezone="America/Sao_Paulo"),
+        CronTrigger(day_of_week='mon', hour=8, minute=0, timezone=USER_TZ),
         id='weekly_report',
         replace_existing=True,
     )
 
-    # ── NDVI alert scan every 12 hours ───────────────────────────────────
+    # ── Alerta NDVI diário (06:00 local) ─────────────────────────────────
     async def ndvi_alert_job():
         await run_ndvi_alert_scan(application)
 
     scheduler.add_job(
         ndvi_alert_job,
-        IntervalTrigger(hours=12),
+        CronTrigger(hour=6, minute=0, timezone=USER_TZ),
         id='ndvi_alert_scan',
         replace_existing=True,
-        # Small initial delay so GEE is not hit at the same second as startup
-        next_run_time=None,  # will compute first run 12h from now
     )
 
-    print("✓ Scheduler configured: weekly_report + ndvi_alert_scan (12h)", flush=True)
+    print(f"✓ Scheduler configured (tz={USER_TZ}): weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00)", flush=True)
     return scheduler
+

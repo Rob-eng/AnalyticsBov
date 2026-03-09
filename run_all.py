@@ -56,6 +56,12 @@ def run_bot_process():
 
         application = create_bot_application()
 
+        # ── SCHEDULER: Ativar tarefas agendadas (cotação semanal + NDVI diário) ──
+        from app.scheduler import setup_scheduler
+        scheduler = setup_scheduler(application)
+        scheduler.start()
+        print("✅ Scheduler started!", flush=True)
+
         # Start Polling
         print("Starting Bot Polling...", flush=True)
         await application.initialize()
