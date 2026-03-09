@@ -175,9 +175,10 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
         elif name == "obter_cotacao_fisica_atual":
             from app.models import get_recent_prices
             loop = asyncio.get_event_loop()
-            prices = await loop.run_in_executor(None, get_recent_prices, 1)
+            prices = await loop.run_in_executor(None, get_recent_prices, 7)
             if prices:
-                return f"Última cotação física no banco: Boi Gordo R${prices[0].price} em {prices[0].date}. (Fonte: Scot/Cepea)"
+                latest = prices[-1]  # O mais recente (lista vem ordenada por data ASC)
+                return f"Última cotação física no banco: Boi Gordo R${latest['price']}/@ em {latest['date']}. (Fonte: Scot/Cepea)"
             return "Ainda não há cotação registrada hoje para o mercado físico."
 
         elif name == "verificar_previsao_chuva":
