@@ -1150,58 +1150,104 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
         )
         
         # ── INTERCEPTOR DE FLUXOS AUTOMÁTICOS ──
-        # Se a resposta contiver TRIGGER_FLOW, nós interceptamos e rodamos a lógica do botão
         if "TRIGGER_FLOW:" in resposta_txt:
             import re
-            # Regex mais robusta que ignora possíveis marcas de negrito (**) da IA
             match = re.search(r"TRIGGER_FLOW:\s*(\w+)\s*\|\s*([\d\.-]+)\s*\|\s*([\d\.-]+)\s*\|\s*([^|*\n]+)", resposta_txt)
             if match:
                 fluxo_tipo = match.group(1).upper()
                 lat_val = float(match.group(2))
                 lon_val = float(match.group(3))
                 nome_prop = match.group(4).strip().replace("*", "")
+                chat_id = str(update.effective_chat.id)
                 
-                print(f"[TRIGGER_FLOW] Interceptado: {fluxo_tipo} | lat={lat_val} | lon={lon_val} | nome={nome_prop}", flush=True)
-                
-                # Limpa a resposta da IA removendo o comando de gatilho (e possíveis markdown ao redor)
-                follow_up_txt = re.sub(r"\**TRIGGER_FLOW:.*", "", resposta_txt).strip()
-                
-                # Preparamos o context.user_data para simular o estado do botão
-                context.user_data['prop_name'] = nome_prop
-                if fluxo_tipo == 'NDVI':
-                    context.user_data['env_mode'] = 'ndvi'
-                elif fluxo_tipo == 'MDT':
-                    context.user_data['env_mode'] = 'mdt'
-                elif fluxo_tipo == 'CLIMA':
-                    context.user_data['wx_mode'] = 'forecast'
-                    context.user_data['wx_days'] = 5
-                
-                # Injetamos os dados e chamamos a função de processamento de localização do bot
-                update.message.text = f"{lat_val}, {lon_val}"
+                print(f"[TRIGGER_FLOW] Executando inline: {fluxo_tipo} | lat={lat_val} | lon={lon_val} | nome={nome_prop}", flush=True)
                 
                 try:
-                    # Executa o fluxo nativo (que enviará mapas e legendas oficiais)
                     if fluxo_tipo in ['NDVI', 'MDT']:
-                        await receive_env_location(update, context)
-                    elif fluxo_tipo == 'CLIMA':
-                        await receive_weather_location(update, context)
+                        status_msg = await update.message.reply_text("🛰️ Processando imagens de satélite... Aguarde.")
+                        
+                        loop = asyncio.get_running_loop()
+                        
+                        # 1. Buscar perímetro
+                        print("[TRIGGER_FLOW] Buscando perímetro CAR...", flush=True)
+                        geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
+                        print(f"[TRIGGER_FLOW] Perímetro: {car_status}", flush=True)
+                        
+                        # 2. Análise NDVI
+                        print("[TRIGGER_FLOW] Iniciando análise NDVI via GEE...", flush=True)
+                        analysis = await loop.run_in_executor(None, get_ndvi_analysis, geometry)
+                        
+                        if not analysis:
+                            await status_msg.edit_text(
+                                "⚠️ *Não foi possível realizar a análise*\n\n"
+                                "Verifique se o local selecionado tem cobertura recente de satélite (sem nuvens) "
+                                "ou tente novamente mais tarde.",
+                                parse_mode='Markdown'
+                            )
+                            return ConversationHandler.END
+                        
+                        print("[TRIGGER_FLOW] Análise NDVI concluída. Gerando imagem...", flush=True)
+                        
+                        # 3. Gerar imagem (mesma lógica exata do botão)
+                        ndvi_val = analysis.get('stats', {}).get('mean', 0)
+                        dt_obj = datetime.fromtimestamp(analysis['dt'])
+                        date_str = dt_obj.strftime('%d/%m/%Y')
+                        region_bbox = analysis.get('region_bbox')
+                        
+                        image_buffer = await loop.run_in_executor(
+                            None, generate_environmental_image,
+                            analysis['ndvi_img'], geometry, car_status,
+                            region_bbox, nome_prop, (lat_val, lon_val)
+                        )
+                        
+                        # 4. Montar caption (idêntica ao botão)
+                        msg = f"🌿 *Análise Ambiental*\n\n"
+                        msg += f"📍 *Propriedade:* {nome_prop}\n"
+                        msg += f"📅 *Data da Imagem:* {date_str}\n"
+                        msg += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
+                        
+                        if car_status == 'OFFICIAL' or car_status is True:
+                            msg += "✅ *Perímetro:* CAR Oficial\n"
+                        elif car_status == 'NEARBY':
+                            msg += "⚠️ *Perímetro:* Propriedade Próxima (<11km)\n"
+                        else:
+                            msg += "⚠️ *Perímetro:* Área Estimada (1km²)\n"
+                        
+                        msg += "\nO NDVI varia de -1 a 1:\n"
+                        msg += "- > 0.6: Vegetação densa/saudável\n"
+                        msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
+                        msg += "- < 0.1: Água ou rocha"
+                        
+                        # 5. Enviar foto
+                        photo = image_buffer if image_buffer else analysis.get('ndvi_img')
+                        if photo:
+                            await context.bot.send_photo(
+                                chat_id=chat_id, photo=photo,
+                                caption=msg, parse_mode='Markdown',
+                                reply_markup=get_keyboard(chat_id)
+                            )
+                        
+                        await status_msg.delete()
+                        print("[TRIGGER_FLOW] Mapa NDVI enviado com sucesso!", flush=True)
                     
-                    # Se sobrar texto da IA (comentário extra), envia depois do mapa
-                    if follow_up_txt:
-                        await update.message.reply_text(follow_up_txt)
+                    elif fluxo_tipo == 'CLIMA':
+                        context.user_data['wx_mode'] = 'forecast'
+                        context.user_data['wx_days'] = 5
+                        context.user_data['prop_name'] = nome_prop
+                        update.message.text = f"{lat_val}, {lon_val}"
+                        await receive_weather_location(update, context)
+                
                 except Exception as e:
                     import traceback
                     print(f"[TRIGGER_FLOW ERROR] {traceback.format_exc()}", flush=True)
                     await update.message.reply_text(
-                        f"⚠️ Houve um problema ao gerar o relatório automático: {str(e)[:200]}\n\n"
+                        f"⚠️ Houve um problema ao gerar o relatório: {str(e)[:200]}\n\n"
                         f"Tente usar o botão '🌿 Análise Ambiental' diretamente."
                     )
                 
                 return ConversationHandler.END
-            else:
-                print(f"[TRIGGER_FLOW WARN] Regex não encontrou match em: {resposta_txt[-200:]}", flush=True)
 
-        # Envia as imagens contruídas pelas ferramentas nativas, se houver
+        # Envia as imagens construídas pelas ferramentas nativas, se houver
         if media_list:
              for media_buffer in media_list:
                  await context.bot.send_photo(
@@ -1209,7 +1255,7 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                      photo=media_buffer
                  )
         
-        # Envia a conclusao da IA em texto
+        # Envia a conclusão da IA em texto
         await update.message.reply_text(resposta_txt)
     
     return ConversationHandler.END
