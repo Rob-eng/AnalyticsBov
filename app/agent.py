@@ -285,8 +285,11 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                 
                 # ── SHORT-CIRCUIT: Se a ferramenta retornou um gatilho, retornamos IMEDIATAMENTE ──
                 # Não mandamos de volta para a OpenAI — ela vai corromper/resumir o código.
+                # IMPORTANTE: Limpamos a memória porque ela ficou com tool_call sem resultado,
+                # o que faz a OpenAI rejeitar a próxima requisição.
                 if tool_result_str.startswith("TRIGGER_FLOW:"):
-                    print(f"[Agent] TRIGGER_FLOW detectado. Retornando direto ao bot.", flush=True)
+                    print(f"[Agent] TRIGGER_FLOW detectado. Limpando memória e retornando direto ao bot.", flush=True)
+                    _conversation_memory.pop(user_id, None)
                     return (tool_result_str, media_list)
 
                 _conversation_memory[user_id].append({
