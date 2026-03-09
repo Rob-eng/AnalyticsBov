@@ -256,7 +256,6 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
     try:
         max_iterations = 5
         iteration = 0
-        pending_trigger = None
         
         while iteration < max_iterations:
             iteration += 1
@@ -275,11 +274,6 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             if not response_msg.tool_calls:
                 # Se não houver mais chamadas de ferramenta, terminamos
                 final_text = response_msg.content or "Entendi! Como posso te ajudar mais?"
-                
-                # Se capturamos um TRIGGER_FLOW nas rodadas anteriores e ele não está no texto final, anexamos.
-                if pending_trigger and pending_trigger not in final_text:
-                    final_text += f"\n\n{pending_trigger}"
-                
                 return (final_text, media_list)
             
             # Executar todas as ferramentas solicitadas nesta rodada
@@ -289,9 +283,11 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
                 
                 tool_result_str = await run_tool(func_name, args_dict, media_list, user_id)
                 
-                # Detectar se o retorno da ferramenta é um gatilho para o bot
+                # ── SHORT-CIRCUIT: Se a ferramenta retornou um gatilho, retornamos IMEDIATAMENTE ──
+                # Não mandamos de volta para a OpenAI — ela vai corromper/resumir o código.
                 if tool_result_str.startswith("TRIGGER_FLOW:"):
-                    pending_trigger = tool_result_str
+                    print(f"[Agent] TRIGGER_FLOW detectado. Retornando direto ao bot.", flush=True)
+                    return (tool_result_str, media_list)
 
                 _conversation_memory[user_id].append({
                     "role": "tool",
