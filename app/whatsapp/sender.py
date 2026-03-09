@@ -4,9 +4,9 @@ import json
 from io import BytesIO
 from app.saas.plans import META_ACCESS_TOKEN, META_PHONE_ID
 
-# A API da Meta usa versões. A v19.0 é estável.
-GRAPH_API_URL = f"https://graph.facebook.com/v19.0/{META_PHONE_ID}/messages"
-MEDIA_UPLOAD_URL = f"https://graph.facebook.com/v19.0/{META_PHONE_ID}/media"
+# A API da Meta usa versões. A v22.0 é a mais recente.
+GRAPH_API_URL = f"https://graph.facebook.com/v22.0/{META_PHONE_ID}/messages"
+MEDIA_UPLOAD_URL = f"https://graph.facebook.com/v22.0/{META_PHONE_ID}/media"
 
 HEADERS = {
     "Authorization": f"Bearer {META_ACCESS_TOKEN}",
