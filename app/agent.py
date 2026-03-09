@@ -369,12 +369,35 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
     Funcao principal chamada pelo webhook do Meta/WhatsApp.
     """
     try:
-        resposta_txt, media_list = await get_agent_response(sender_phone, user_text, context_info="O usuário está conversando via WhatsApp.")
-        # Meta API WhatsApp não processa buffers brutos nativamente aqui ainda.
-        # Caso o bot do Telegram construa imagens, manda um aviso fofo.
-        if media_list:
-            resposta_txt += "\n\n*(PS: Meus satélites geraram um Mapa Gráfico de altíssima definição pra você, mas ele só é visível na minha versão do Telegram. Mas acima você já tem o meu diagnóstico por voz!)*"
+        resposta_txt, media_list = await get_agent_response(
+            sender_phone, user_text,
+            context_info="O usuário está conversando via WhatsApp."
+        )
 
-        send_whatsapp_text(sender_phone, resposta_txt)
+        # Interceptar TRIGGER_FLOW — delega para o handler visual do WhatsApp
+        if resposta_txt and "TRIGGER_FLOW" in resposta_txt:
+            print(f"[WA] TRIGGER_FLOW detectado: {resposta_txt[:100]}", flush=True)
+            from app.whatsapp.trigger_handler import handle_wa_trigger_flow
+            await handle_wa_trigger_flow(sender_phone, resposta_txt)
+            return
+
+        # Enviar mídia se houver
+        if media_list:
+            from app.whatsapp.sender import send_whatsapp_image
+            for media_buffer in media_list:
+                try:
+                    send_whatsapp_image(sender_phone, media_buffer, "")
+                except Exception as me:
+                    print(f"[WA] Erro ao enviar mídia: {me}", flush=True)
+
+        # Enviar texto
+        if resposta_txt:
+            send_whatsapp_text(sender_phone, resposta_txt)
+
     except Exception as e:
-        print(f"[WhatsApp Worker Error] {e}")
+        import traceback
+        print(f"[WhatsApp Worker Error] {traceback.format_exc()}", flush=True)
+        try:
+            send_whatsapp_text(sender_phone, "⚠️ Desculpe, tive um problema técnico. Tente novamente em instantes.")
+        except Exception:
+            pass

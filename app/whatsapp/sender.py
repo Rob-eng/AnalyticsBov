@@ -1,26 +1,52 @@
 import os
 import requests
 import json
+from io import BytesIO
 from app.saas.plans import META_ACCESS_TOKEN, META_PHONE_ID
 
-# A API da Meta usa versões. A v18.0 ou v19.0 são as mais recentes e estáveis.
+# A API da Meta usa versões. A v19.0 é estável.
 GRAPH_API_URL = f"https://graph.facebook.com/v19.0/{META_PHONE_ID}/messages"
+MEDIA_UPLOAD_URL = f"https://graph.facebook.com/v19.0/{META_PHONE_ID}/media"
+
+HEADERS = {
+    "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+}
+
+
+def _check_credentials():
+    if not META_ACCESS_TOKEN or not META_PHONE_ID:
+        print("❌ ERRO: META_ACCESS_TOKEN ou META_PHONE_ID não configurados.", flush=True)
+        return False
+    return True
+
+
+def _send_message(payload):
+    """Envia uma mensagem via Graph API."""
+    headers = {**HEADERS, "Content-Type": "application/json"}
+    try:
+        response = requests.post(GRAPH_API_URL, headers=headers, json=payload, timeout=15)
+        if response.status_code in (200, 201):
+            return True
+        else:
+            print(f"❌ WA send error ({response.status_code}): {response.text[:300]}", flush=True)
+            return False
+    except Exception as e:
+        print(f"⚠️ WA connection error: {e}", flush=True)
+        return False
+
 
 def send_whatsapp_text(to_phone: str, message_body: str):
     """
     Envia uma mensagem de texto simples usando a API Oficial do WhatsApp Cloud.
     to_phone: O telefone do destinatário com DDI (Ex: 5511999999999)
     """
-    
-    if not META_ACCESS_TOKEN or not META_PHONE_ID:
-        print("❌ ERRO: META_ACCESS_TOKEN ou META_PHONE_ID não configurados.")
+    if not _check_credentials():
         return False
 
-    headers = {
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
+    # WhatsApp tem limite de 4096 chars por mensagem
+    if len(message_body) > 4096:
+        message_body = message_body[:4090] + "\n..."
+
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -31,18 +57,170 @@ def send_whatsapp_text(to_phone: str, message_body: str):
             "body": message_body
         }
     }
-    
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA texto enviado para {to_phone}", flush=True)
+    return success
+
+
+def _upload_media(file_buffer, mime_type, filename="file"):
+    """
+    Faz upload de um arquivo de mídia para a Meta e retorna o media_id.
+    file_buffer: BytesIO ou bytes
+    mime_type: 'image/png', 'image/jpeg', 'video/mp4'
+    """
+    if not _check_credentials():
+        return None
+
+    if isinstance(file_buffer, BytesIO):
+        file_buffer.seek(0)
+        file_data = file_buffer.read()
+    elif isinstance(file_buffer, bytes):
+        file_data = file_buffer
+    else:
+        print(f"❌ WA upload: tipo de buffer não suportado: {type(file_buffer)}", flush=True)
+        return None
+
+    # Meta espera multipart/form-data
+    files = {
+        'file': (filename, file_data, mime_type),
+    }
+    data = {
+        'messaging_product': 'whatsapp',
+        'type': mime_type,
+    }
+
     try:
-        response = requests.post(GRAPH_API_URL, headers=headers, json=payload, timeout=10)
-        
+        response = requests.post(
+            MEDIA_UPLOAD_URL,
+            headers=HEADERS,
+            files=files,
+            data=data,
+            timeout=60
+        )
+
         if response.status_code in (200, 201):
-            print(f"✅ Mensagem WA enviada para {to_phone}")
-            return True
+            media_id = response.json().get('id')
+            print(f"✅ WA media uploaded: {media_id} ({mime_type})", flush=True)
+            return media_id
         else:
-            print(f"❌ Erro ao enviar WA ({response.status_code}): {response.text}")
-            return False
-            
+            print(f"❌ WA upload error ({response.status_code}): {response.text[:300]}", flush=True)
+            return None
     except Exception as e:
-        print(f"⚠️ Erro de conexão com a Graph API: {e}")
+        print(f"⚠️ WA upload connection error: {e}", flush=True)
+        return None
+
+
+def send_whatsapp_image(to_phone: str, image_buffer, caption: str = ""):
+    """
+    Envia uma imagem via WhatsApp Cloud API.
+    image_buffer: BytesIO buffer contendo PNG ou JPEG (máx 5MB)
+    caption: texto opcional (máx 1024 chars)
+    """
+    if not _check_credentials():
         return False
 
+    # Limpar formatação Markdown (WhatsApp usa *bold* mas não suporta _italic_ igual)
+    caption = caption.replace('_', '').strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+
+    # Upload da imagem primeiro
+    media_id = _upload_media(image_buffer, "image/png", "map.png")
+    if not media_id:
+        # Fallback: envia só o texto
+        print("⚠️ WA: Upload falhou, enviando só texto", flush=True)
+        return send_whatsapp_text(to_phone, caption or "Não foi possível enviar a imagem.")
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "image",
+        "image": {
+            "id": media_id,
+            "caption": caption
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA imagem enviada para {to_phone}", flush=True)
+    return success
+
+
+def send_whatsapp_video(to_phone: str, video_buffer, caption: str = ""):
+    """
+    Envia um vídeo via WhatsApp Cloud API.
+    video_buffer: BytesIO buffer contendo MP4 H.264 (máx 16MB)
+    caption: texto opcional (máx 1024 chars)
+    """
+    if not _check_credentials():
+        return False
+
+    caption = caption.replace('_', '').strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+
+    media_id = _upload_media(video_buffer, "video/mp4", "terrain.mp4")
+    if not media_id:
+        print("⚠️ WA: Upload de vídeo falhou, enviando só texto", flush=True)
+        return send_whatsapp_text(to_phone, caption or "Não foi possível enviar o vídeo.")
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "video",
+        "video": {
+            "id": media_id,
+            "caption": caption
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA vídeo enviado para {to_phone}", flush=True)
+    return success
+
+
+def send_whatsapp_buttons(to_phone: str, body_text: str, buttons: list):
+    """
+    Envia uma mensagem com botões interativos (Reply Buttons — máx 3).
+    buttons: lista de dicts com 'id' e 'title' (máx 20 chars cada)
+    Exemplo: [{"id": "btn_ndvi", "title": "🌿 NDVI"}, ...]
+    """
+    if not _check_credentials():
+        return False
+
+    # Limitar a 3 botões (limite da Meta API)
+    buttons = buttons[:3]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body_text[:1024]},
+            "action": {
+                "buttons": [
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": btn["id"][:256],
+                            "title": btn["title"][:20]
+                        }
+                    }
+                    for btn in buttons
+                ]
+            }
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA buttons enviados para {to_phone}", flush=True)
+    return success
