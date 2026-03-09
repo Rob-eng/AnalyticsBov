@@ -47,7 +47,8 @@ def get_tools_definition():
                      "type": "object",
                      "properties": {
                          "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
-                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"}
+                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade (use o nome retornado por listar_propriedades)"}
                      },
                      "required": ["lat", "lon"]
                  }
@@ -62,7 +63,8 @@ def get_tools_definition():
                      "type": "object",
                      "properties": {
                          "lat": {"type": "number", "description": "Latitude. Ex: -20.5"},
-                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"}
+                         "lon": {"type": "number", "description": "Longitude. Ex: -54.6"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade (use o nome retornado por listar_propriedades)"}
                      },
                      "required": ["lat", "lon"]
                  }
@@ -149,16 +151,16 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
         elif name == "verificar_previsao_chuva":
             lat = arguments.get("lat")
             lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
             if not lat or not lon: return "Coordenadas inválidas."
-            # Delegamos para o fluxo nativo para manter o padrão de cores/legenda dos botões
-            return f"TRIGGER_FLOW: CLIMA | {lat} | {lon} | Propriedade Selecionada"
+            return f"TRIGGER_FLOW: CLIMA | {lat} | {lon} | {nome}"
             
         elif name == "analisar_saude_pasto_ndvi":
             lat = arguments.get("lat")
             lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
             if not lat or not lon: return "Coordenadas inválidas."
-            # Delegamos para o fluxo nativo (botão) para manter perfeitamente o padrão visual
-            return f"TRIGGER_FLOW: NDVI | {lat} | {lon} | Propriedade Selecionada"
+            return f"TRIGGER_FLOW: NDVI | {lat} | {lon} | {nome}"
 
         elif name == "listar_propriedades":
             from app.models import SessionLocal, FavoriteLocation

@@ -1274,6 +1274,80 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                             await status_msg.edit_text(
                                 f"❌ Não foi possível gerar a previsão.{detail}", parse_mode='Markdown'
                             )
+                    
+                    elif fluxo_tipo == 'MDT':
+                        status_msg = await update.message.reply_text("🏔️ Buscando dados de elevação (DEM)... Aguarde.")
+                        
+                        loop = asyncio.get_running_loop()
+                        from app.gee_connector import get_terrain_data
+                        from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
+                        
+                        # 1. Perímetro
+                        geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
+                        
+                        # 2. Dados de terreno
+                        terrain_data = await loop.run_in_executor(None, get_terrain_data, geometry)
+                        if not terrain_data:
+                            await status_msg.edit_text("⚠️ Não foi possível obter dados de elevação para esta área.")
+                            return ConversationHandler.END
+                        
+                        source = terrain_data.get('source', 'DEM')
+                        elev_min = terrain_data.get('elev_min', 0)
+                        elev_max = terrain_data.get('elev_max', 0)
+                        
+                        caption_2d = (
+                            f"🏔️ *Mapa de Curvas de Nível*\n"
+                            f"📍 {nome_prop}\n"
+                            f"📏 Altitude: {elev_min:.0f}m – {elev_max:.0f}m\n"
+                            f"🗺️ Curvas: 5m (finas) / 50m (grossas)\n"
+                            f"📡 Fonte: {source}\n"
+                        )
+                        if car_status == 'OFFICIAL':
+                            caption_2d += "✅ Perímetro: CAR Oficial\n"
+                        elif car_status == 'NEARBY':
+                            caption_2d += "⚠️ Perímetro: Propriedade Próxima\n"
+                        else:
+                            caption_2d += "⚠️ Perímetro: Área Estimada\n"
+                        
+                        caption_3d = (
+                            f"🏔️ *Modelo 3D do Terreno*\n"
+                            f"📍 {nome_prop}\n"
+                            f"🛰️ Textura: Sentinel-2 RGB\n"
+                            f"📡 DEM: {source}\n"
+                        )
+                        
+                        await status_msg.edit_text("🗺️ Gerando mapa 2D de curvas de nível...")
+                        img_2d = await loop.run_in_executor(
+                            None, generate_terrain_image_2d,
+                            terrain_data, geometry, car_status, nome_prop, (lat_val, lon_val)
+                        )
+                        
+                        await status_msg.edit_text("🏔️ Gerando modelo 3D com textura de satélite...")
+                        img_3d = await loop.run_in_executor(
+                            None, generate_terrain_image_3d,
+                            terrain_data, geometry, car_status, nome_prop, (lat_val, lon_val)
+                        )
+                        
+                        await status_msg.delete()
+                        
+                        if img_2d:
+                            await context.bot.send_photo(
+                                chat_id=chat_id, photo=img_2d,
+                                caption=caption_2d, parse_mode='Markdown'
+                            )
+                        if img_3d:
+                            await context.bot.send_video(
+                                chat_id=chat_id, video=img_3d,
+                                caption=caption_3d, parse_mode='Markdown',
+                                reply_markup=get_keyboard(chat_id)
+                            )
+                        if not img_2d and not img_3d:
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text="❌ Não foi possível gerar as imagens MDT.",
+                                reply_markup=get_keyboard(chat_id)
+                            )
+                        print("[TRIGGER_FLOW] MDT enviado com sucesso!", flush=True)
                 
                 except Exception as e:
                     import traceback
