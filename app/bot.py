@@ -1161,6 +1161,8 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                 lon_val = float(match.group(3))
                 nome_prop = match.group(4).strip().replace("*", "")
                 
+                print(f"[TRIGGER_FLOW] Interceptado: {fluxo_tipo} | lat={lat_val} | lon={lon_val} | nome={nome_prop}", flush=True)
+                
                 # Limpa a resposta da IA removendo o comando de gatilho (e possíveis markdown ao redor)
                 follow_up_txt = re.sub(r"\**TRIGGER_FLOW:.*", "", resposta_txt).strip()
                 
@@ -1177,17 +1179,27 @@ async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_
                 # Injetamos os dados e chamamos a função de processamento de localização do bot
                 update.message.text = f"{lat_val}, {lon_val}"
                 
-                # Executa o fluxo nativo (que enviará mapas e legendas oficiais)
-                if fluxo_tipo in ['NDVI', 'MDT']:
-                    await receive_env_location(update, context)
-                elif fluxo_tipo == 'CLIMA':
-                    await receive_weather_location(update, context)
-                
-                # Se sobrar texto da IA (comentário extra), envia depois do mapa
-                if follow_up_txt:
-                    await update.message.reply_text(follow_up_txt)
+                try:
+                    # Executa o fluxo nativo (que enviará mapas e legendas oficiais)
+                    if fluxo_tipo in ['NDVI', 'MDT']:
+                        await receive_env_location(update, context)
+                    elif fluxo_tipo == 'CLIMA':
+                        await receive_weather_location(update, context)
+                    
+                    # Se sobrar texto da IA (comentário extra), envia depois do mapa
+                    if follow_up_txt:
+                        await update.message.reply_text(follow_up_txt)
+                except Exception as e:
+                    import traceback
+                    print(f"[TRIGGER_FLOW ERROR] {traceback.format_exc()}", flush=True)
+                    await update.message.reply_text(
+                        f"⚠️ Houve um problema ao gerar o relatório automático: {str(e)[:200]}\n\n"
+                        f"Tente usar o botão '🌿 Análise Ambiental' diretamente."
+                    )
                 
                 return ConversationHandler.END
+            else:
+                print(f"[TRIGGER_FLOW WARN] Regex não encontrou match em: {resposta_txt[-200:]}", flush=True)
 
         # Envia as imagens contruídas pelas ferramentas nativas, se houver
         if media_list:
