@@ -308,7 +308,11 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
         return (final_text, media_list)
             
     except Exception as e:
-        print(f"[Agent Error] {e}")
+        import traceback
+        print(f"[Agent Error] {e}", flush=True)
+        print(f"[Agent Error Traceback] {traceback.format_exc()}", flush=True)
+        # Limpa a memória para evitar erros em cascata (ex: tool_call sem resultado)
+        _conversation_memory.pop(user_id, None)
         return ("Eita! Meu cérebro de inteligência artificial aqui deu um soluço. Me dá um tempinho e tenta mandar a mensagem de novo?", [])
 
 async def process_whatsapp_message(sender_phone: str, user_text: str):
