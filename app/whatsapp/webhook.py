@@ -11,6 +11,7 @@ router = APIRouter(prefix="/webhook/whatsapp", tags=["WhatsApp"])
 VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "meu_token_secreto_agro_123")
 
 @router.get("/")
+@router.get("")
 async def verify_webhook(
     mode: str = Query(None, alias="hub.mode"),
     token: str = Query(None, alias="hub.verify_token"),
@@ -25,6 +26,7 @@ async def verify_webhook(
     raise HTTPException(status_code=403, detail="Token de verificação inválido")
 
 @router.post("/")
+@router.post("")
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint que recebe TODAS as mensagens ativas, botões clicados e recibos de leitura do WhatsApp.
