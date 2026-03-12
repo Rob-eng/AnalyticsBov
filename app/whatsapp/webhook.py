@@ -32,6 +32,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
     Endpoint que recebe TODAS as mensagens ativas, botões clicados e recibos de leitura do WhatsApp.
     """
     body = await request.json()
+    print(f"📦 [RAW Webhook Payload]: {json.dumps(body)}", flush=True)
     
     if body.get("object") == "whatsapp_business_account":
         for entry in body.get("entry", []):
