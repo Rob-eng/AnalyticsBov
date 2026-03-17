@@ -11,7 +11,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 
 # WhatsApp Meta API 
 META_WABA_ID = os.getenv("META_WABA_ID", "2090195198222305")
-META_PHONE_ID = os.getenv("META_PHONE_ID", "924062610801050")
+META_PHONE_ID = os.getenv("META_PHONE_ID", "954772111063161")
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")
 
 # The unified dictionary for bot behavior based on SaaS tier
