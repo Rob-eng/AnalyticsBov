@@ -39,16 +39,12 @@ def generate_chart(data):
         'China': '#fa8072'         # Salmon
     }
     
-    # Brand / Theme Colors - NAVY THEME
-    BG_COLOR = '#001F3F' # Classic Navy Blue or #0a0e1c for more modern
-    TEXT_COLOR = '#FFFFFF'
-    CYAN_BRAND = '#00B4FF'
-    GRID_COLOR = '#112D4E'
+    # Brand / Theme Colors - WHITE THEME
+    BG_COLOR = '#FFFFFF' 
+    TEXT_COLOR = '#000000'
+    GRID_COLOR = '#E0E0E0'
     
-    # Adjust specific colors for dark mode visibility
-    for c, col in country_colors.items():
-        if col == '#000000':
-            country_colors[c] = '#E0E0E0' # Light grey instead of black
+    # Adjust specific colors for dark mode visibility (removed since background is white now)
     
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8), facecolor=BG_COLOR)
@@ -119,34 +115,34 @@ def generate_chart(data):
     # --- STYLING ---
     
     plt.title('🐂 Preço da @ em Dólar 📊', fontsize=26, fontweight='bold', 
-              color='#FFFFFF', loc='center', pad=50) # TITLE TO WHITE
+              color=TEXT_COLOR, loc='center', pad=50) # TITLE
     
     ax.yaxis.tick_right()
     ax.yaxis.set_label_position("right")
     
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
-    ax.spines['right'].set_color('#112D4E')
-    ax.spines['bottom'].set_color('#112D4E')
+    ax.spines['right'].set_color(GRID_COLOR)
+    ax.spines['bottom'].set_color(GRID_COLOR)
     
     # X-Axis: Years as major ticks
     ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4, 7, 10]))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
     
-    # Tick Styles - ALL TO WHITE
-    ax.tick_params(axis='x', which='major', length=10, width=1.5, color='#FFFFFF', labelsize=11, labelcolor='#FFFFFF')
-    ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#444444')
+    # Tick Styles 
+    ax.tick_params(axis='x', which='major', length=10, width=1.5, color=TEXT_COLOR, labelsize=11, labelcolor=TEXT_COLOR)
+    ax.tick_params(axis='x', which='minor', length=4, width=0.8, color='#888888')
     
-    # Y-Axis Ticks: Every 10 units - ALL TO WHITE
+    # Y-Axis Ticks: Every 10 units 
     max_val = df['price'].max()
-    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color='#FFFFFF')
-    ax.tick_params(axis='y', colors='#FFFFFF')
+    plt.yticks(np.arange(0, max_val + 20, 10), fontsize=11, color=TEXT_COLOR)
+    ax.tick_params(axis='y', colors=TEXT_COLOR)
     ax.set_ylim(0, max_val + 10)
     
     # Grid: Subtle horizontal at 10 units, sutil dotted at each year
-    ax.yaxis.grid(True, linestyle='-', color='#0a192f', alpha=0.5, zorder=1)
-    ax.xaxis.grid(True, which='major', linestyle=':', color='#0a192f', alpha=0.5, zorder=1)
+    ax.yaxis.grid(True, linestyle='-', color=GRID_COLOR, alpha=0.9, zorder=1)
+    ax.xaxis.grid(True, which='major', linestyle=':', color=GRID_COLOR, alpha=0.9, zorder=1)
     ax.xaxis.grid(False, which='minor') # Don't grid quarters
     
     plt.xticks(rotation=0, ha='center')
@@ -205,10 +201,10 @@ def generate_future_table(data_dict):
     if not data_dict or not data_dict.get('rows'):
         return None
         
-    BG_COLOR = '#001F3F'
-    TEXT_COLOR = '#FFFFFF'
-    HEADER_COLOR = '#00B4FF' # Cyan brand
-    BORDER_COLOR = '#112D4E'
+    BG_COLOR = '#FFFFFF'
+    TEXT_COLOR = '#000000'
+    HEADER_COLOR = '#00B4FF'
+    BORDER_COLOR = '#E0E0E0'
     
     rows = data_dict['rows']
     headers = data_dict['headers']
@@ -255,7 +251,7 @@ def generate_future_table(data_dict):
         else:
             # Alternate row coloring for readability
             if row % 2 == 0:
-                cell.set_facecolor('#002b55')
+                cell.set_facecolor('#F8F8F8')
             
             # Special handling for variation column
             if col == var_col_idx:
@@ -301,6 +297,65 @@ def generate_future_table(data_dict):
 
     output_path = '/tmp/future_table.png'
     plt.savefig(output_path, dpi=140, facecolor=BG_COLOR, bbox_inches='tight')
+    plt.close()
+    
+    return output_path
+
+def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 dias)"):
+    if not daily_history:
+        return None
+        
+    BG_COLOR = '#FFFFFF'
+    TEXT_COLOR = '#000000'
+    BAR_COLOR = '#00B4FF'
+    GRID_COLOR = '#E0E0E0'
+    
+    # Sort history by date ascending for the chart
+    sorted_history = sorted(daily_history, key=lambda x: x[0])
+    
+    dates = []
+    values = []
+    
+    from datetime import datetime
+    for date_str, val in sorted_history:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        dates.append(dt.strftime('%d/%m'))
+        values.append(float(val))
+        
+    fig, ax = plt.subplots(figsize=(10, 6), facecolor=BG_COLOR)
+    ax.set_facecolor(BG_COLOR)
+    
+    # Title
+    plt.title(f'🌧️ {title}', fontsize=20, fontweight='bold', color=TEXT_COLOR, pad=20)
+    
+    # Bars
+    bars = ax.bar(dates, values, color=BAR_COLOR, alpha=0.9, width=0.6, edgecolor='white', linewidth=1, zorder=3)
+    
+    # Styling
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color(GRID_COLOR)
+    ax.spines['bottom'].set_color(GRID_COLOR)
+    
+    ax.tick_params(axis='x', colors=TEXT_COLOR, labelsize=12)
+    ax.tick_params(axis='y', colors=TEXT_COLOR, labelsize=12)
+    
+    ax.yaxis.grid(True, linestyle='--', color=GRID_COLOR, alpha=0.9, zorder=0)
+    ax.set_ylabel('Precipitação (mm)', color=TEXT_COLOR, fontsize=14, labelpad=15)
+    
+    # Values on top of bars
+    for bar in bars:
+        height = bar.get_height()
+        if height > 0:
+            ax.annotate(f'{height:.1f}',
+                        xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 5),  
+                        textcoords="offset points",
+                        ha='center', va='bottom', color=TEXT_COLOR, fontweight='bold')
+    
+    plt.tight_layout()
+    output_path = '/tmp/precip_history.png'
+    plt.savefig(output_path, dpi=120, facecolor=BG_COLOR, bbox_inches='tight')
     plt.close()
     
     return output_path

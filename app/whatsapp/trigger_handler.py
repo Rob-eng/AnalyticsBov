@@ -111,7 +111,8 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
     caption += "O NDVI varia de -1 a 1:\n"
     caption += "- > 0.6: Vegetação densa/saudável\n"
     caption += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
-    caption += "- < 0.1: Água ou rocha"
+    caption += "- < 0.1: Água ou rocha\n\n"
+    caption += "📡 *Fonte:* Sentinel-2 / Google Earth Engine"
     
     send_whatsapp_image(phone, img, caption)
     print("[WA TRIGGER] NDVI enviado com sucesso!", flush=True)
@@ -193,11 +194,21 @@ async def _handle_historico(phone, lat, lon, nome, loop):
     
     # 4. Mapa estático
     map_image = await loop.run_in_executor(None, generate_weather_map_with_title, lat, lon, nome)
-    
     if map_image:
         send_whatsapp_image(phone, map_image, msg)
     else:
         send_whatsapp_text(phone, msg)
+
+    # 5. Gráfico de barras
+    from app.charts import generate_precipitation_chart
+    chart_path = await loop.run_in_executor(None, generate_precipitation_chart, data.get('daily_history', []), f"Histórico de Chuva - {nome}")
+    if chart_path:
+        try:
+            with open(chart_path, "rb") as f:
+                chart_bytes = f.read()
+            send_whatsapp_image(phone, chart_bytes, "📊 Gráfico de Chuva Diária (7 Dias)")
+        except Exception as e:
+            print(f"Error sending rain chart: {e}")
     
     print("[WA TRIGGER] Histórico enviado com sucesso!", flush=True)
 
@@ -263,7 +274,8 @@ async def _handle_cotacao(phone, loop):
     
     from app.scraper import run_scraping_cycle
     from app.models import get_recent_prices
-    from app.bot import generate_chart, format_chart_caption
+    from app.charts import generate_chart
+    from app.bot import format_chart_caption
     
     # 1. Scrape data
     data = await loop.run_in_executor(None, lambda: run_scraping_cycle(save=False))
@@ -295,7 +307,7 @@ async def _handle_mercado_futuro(phone, loop):
     send_whatsapp_text(phone, "🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
     
     from app.scraper import scrape_mercado_futuro
-    from app.bot import generate_future_table
+    from app.charts import generate_future_table
     
     # 1. Scrape data
     data_dict = await loop.run_in_executor(None, scrape_mercado_futuro)

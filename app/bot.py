@@ -661,10 +661,7 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
         msg = f"🌧️ *Dados de Precipitação*\n"
         msg += f"📍 *Local:* {loc_name}\n"
         msg += f"🕒 *Últimas 24h:* {precip_val:.1f} mm\n\n"
-        msg += f"📅 *Histórico Recente (Últimos 7 dias):*\n"
-        for date, val in data.get('daily_history', []):
-            d_fmt = datetime.strptime(date, '%Y-%m-%d').strftime('%d/%m')
-            msg += f"• {d_fmt}: {val:.1f} mm\n"
+        msg += f"📅 *Histórico Recente (Últimos 7 dias):* _Veja o gráfico abaixo_\n"
         msg += f"\n📍 [Ver no Google Maps](https://www.google.com/maps?q={lat},{lon})"
 
         # Get Regional Heatmap (GEE) — non-blocking; skip on failure
@@ -678,10 +675,13 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             print(f"[WEATHER] Heatmap skipped: {ge}", flush=True)
 
         # Get static map
-        prop_name = context.user_data.pop('prop_name', None)
-        from app.weather import generate_weather_map_with_title
-        map_image = await loop.run_in_executor(None, generate_weather_map_with_title, lat, lon, prop_name)
+        await status_msg.edit_text("🗺️ Desenhando mapa... Aguarde.")
+        map_image = await loop.run_in_executor(None, generate_weather_map_with_title, lat, lon, loc_name)
         print(f"[WEATHER] Map image: {'OK' if map_image else 'Falhou'}", flush=True)
+
+        # Get chart
+        from app.charts import generate_precipitation_chart
+        chart_path = await loop.run_in_executor(None, generate_precipitation_chart, data.get('daily_history', []), f"Histórico de Chuvas - {loc_name}")
 
         # Send photos
         try:
@@ -700,14 +700,28 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 except Exception as he:
                     print(f"[WEATHER] Heatmap send failed: {he}", flush=True)
 
+            # Send static map with caption
             photo = map_image if map_image else get_static_map_url(lat, lon)
             await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=msg,
-                parse_mode='Markdown',
-                reply_markup=get_keyboard(chat_id)
+                parse_mode='Markdown'
             )
+
+            # --- NEW: Send Rain Bar Chart ---
+            if chart_path and os.path.exists(chart_path):
+                try:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=open(chart_path, 'rb'),
+                        caption="📊 *Gráfico de Histórico de Chuvas (7 dias)*",
+                        parse_mode='Markdown',
+                        reply_markup=get_keyboard(chat_id)
+                    )
+                except Exception as ce:
+                    print(f"[WEATHER] Chart send failed: {ce}", flush=True)
+
             await status_msg.delete()
             print("[WEATHER] Histórico enviado com sucesso!", flush=True)
 
@@ -970,7 +984,8 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
             msg += "O NDVI varia de -1 a 1:\n"
             msg += "- > 0.6: Vegetação densa/saudável\n"
             msg += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
-            msg += "- < 0.1: Água ou rocha"
+            msg += "- < 0.1: Água ou rocha\n\n"
+            msg += "📡 *Fonte:* Sentinel-2 / Google Earth Engine"
 
             region_bbox = analysis.get('region_bbox')
             image_buffer = generate_environmental_image(
