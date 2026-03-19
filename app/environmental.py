@@ -667,9 +667,78 @@ def generate_terrain_image_3d(terrain_data, geometry, is_real_car='FALLBACK',
 
 def _extract_rings(geometry):
     """Helper: extract coordinate rings from Polygon or MultiPolygon geometry dict."""
+    if not geometry: return []
     gtype = geometry.get('type', '')
     if gtype == 'Polygon':
         return geometry['coordinates']
     elif gtype == 'MultiPolygon':
         return [ring for poly in geometry['coordinates'] for ring in poly]
     return []
+
+def process_car_zip(zip_bytes):
+    """
+    Extrai shapefiles de um buffer ZIP e retorna um dicionário de GeoDataFrames.
+    Busca por camadas padrão do SICAR: AREA_IMOVEL, RESERVA_LEGAL, APP, etc.
+    Retorna: (gdfs_dict, error_msg)
+    """
+    import zipfile
+    import shutil
+    import tempfile
+    import geopandas as gpd
+    import os
+    
+    tmp_extract_dir = tempfile.mkdtemp()
+    try:
+        # 1. Salvar ZIP em temp e descompactar
+        zip_path = os.path.join(tmp_extract_dir, "car.zip")
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+        
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            z.extractall(tmp_extract_dir)
+            
+        # 2. Localizar e ler shapefiles
+        gdfs = {}
+        # Mapeamento de nomes padrão do SICAR
+        layers = {
+            'AREA_IMOVEL': 'imovel',
+            'RESERVA_LEGAL': 'reserva',
+            'APP': 'app',
+            'VEGETACAO_NATIVA': 'vegetacao',
+            'AREA_CONSOLIDADA': 'consolidada',
+            'HIDROGRAFIA': 'agua',
+            'CURSO_DAGUA': 'agua'
+        }
+        
+        found_any = False
+        for root, dirs, files in os.walk(tmp_extract_dir):
+            for file in files:
+                if file.lower().endswith('.shp'):
+                    # Tentar bater o nome do arquivo com as camadas conhecidas
+                    for key, label in layers.items():
+                        if key.upper() in file.upper():
+                            try:
+                                full_path = os.path.join(root, file)
+                                # Ignora se já leu (prioriza arquivos menores/específicos)
+                                if label in gdfs: continue
+                                
+                                gdf = gpd.read_file(full_path)
+                                if not gdf.empty:
+                                    # Normalizar para WGS84 para plotagem e integração GEE
+                                    if gdf.crs and gdf.crs.to_epsg() != 4326:
+                                        gdf = gdf.to_crs(epsg=4326)
+                                    gdfs[label] = gdf
+                                    found_any = True
+                            except Exception as e:
+                                print(f"Erro ao ler shapefile {file}: {e}")
+        
+        if not found_any:
+            return None, "Não localizei as camadas AREA_IMOVEL ou RESERVA_LEGAL dentro do ZIP. Verifique se o arquivo enviado é o ZIP completo do SICAR."
+            
+        return gdfs, None
+        
+    except Exception as e:
+        print(f"Erro no processamento do ZIP: {e}")
+        return None, f"Erro interno ao processar o arquivo ZIP: {str(e)}"
+    finally:
+        shutil.rmtree(tmp_extract_dir, ignore_errors=True)

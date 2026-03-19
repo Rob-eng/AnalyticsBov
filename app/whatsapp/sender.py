@@ -112,6 +112,42 @@ def _upload_media(file_buffer, mime_type, filename="file"):
         return None
 
 
+def download_whatsapp_media(media_id: str):
+    """
+    Downloads media from Meta using media_id.
+    1. Gets the URL for the media.
+    2. Downloads the actual bytes from that URL.
+    """
+    if not _check_credentials():
+        return None
+        
+    media_info_url = f"https://graph.facebook.com/v22.0/{media_id}"
+    
+    try:
+        # Step 1: Get the download URL
+        response = requests.get(media_info_url, headers=HEADERS, timeout=15)
+        if response.status_code == 200:
+            media_url = response.json().get('url')
+            if not media_url:
+                print(f"❌ WA media: No URL found in response for {media_id}", flush=True)
+                return None
+            
+            # Step 2: Download the file bytes
+            # Note: The download request must ALSO have the Authorization header
+            media_response = requests.get(media_url, headers=HEADERS, timeout=60)
+            if media_response.status_code == 200:
+                print(f"✅ WA media downloaded: {len(media_response.content)//1024} KB", flush=True)
+                return media_response.content
+            else:
+                print(f"❌ WA media download failed ({media_response.status_code})", flush=True)
+        else:
+            print(f"❌ WA media info failed ({response.status_code}): {response.text[:300]}", flush=True)
+    except Exception as e:
+        print(f"⚠️ WA media download connection error: {e}", flush=True)
+        
+    return None
+
+
 def send_whatsapp_image(to_phone: str, image_buffer, caption: str = ""):
     """
     Envia uma imagem via WhatsApp Cloud API.

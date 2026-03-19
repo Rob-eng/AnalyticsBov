@@ -358,3 +358,42 @@ async def _send_car_zip_guide(phone, cod_imovel):
         f"Assim que receber, eu monto o seu mapa de alta qualidade. 🚜💨"
     )
     send_whatsapp_text(phone, msg)
+
+async def process_whatsapp_zip_upload(phone, media_id):
+    """Downloads ZIP, processes it, and sends the Pro Map."""
+    from app.whatsapp.sender import download_whatsapp_media, send_whatsapp_text, send_whatsapp_image
+    from app.environmental import process_car_zip
+    from app.charts import generate_pro_car_map
+    import asyncio
+    
+    loop = asyncio.get_running_loop()
+    
+    send_whatsapp_text(phone, "📥 Arquivo ZIP recebido! Iniciando a geração do seu *Relatório Profissional*... Aguarde.")
+    
+    # 1. Download
+    zip_bytes = await loop.run_in_executor(None, download_whatsapp_media, media_id)
+    if not zip_bytes:
+        send_whatsapp_text(phone, "❌ Erro ao baixar o arquivo ZIP.")
+        return
+
+    # 2. Process ZIP (extract GDFs)
+    gdfs, error = await loop.run_in_executor(None, process_car_zip, zip_bytes)
+    if error:
+        send_whatsapp_text(phone, f"⚠️ Erro ao processar o ZIP: {error}")
+        return
+
+    # 3. Generate Pro Map
+    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs)
+    if not map_bytes:
+        send_whatsapp_text(phone, "⚠️ Erro ao renderizar o mapa profissional.")
+        return
+
+    # 4. Send back
+    caption = (
+        "🗺️ *RELATÓRIO AMBIENTAL PROFISSIONAL*\n\n"
+        "Este mapa foi gerado automaticamente a partir do arquivo ZIP enviado.\n"
+        "📈 Inclui grade de coordenadas, escala e legenda oficial.\n\n"
+        "Desenvolvido por *Agro Analytics*"
+    )
+    send_whatsapp_image(phone, map_bytes, caption)
+    print(f"[WA] Relatório Profissional enviado para {phone}", flush=True)

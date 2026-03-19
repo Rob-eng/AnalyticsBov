@@ -1871,8 +1871,8 @@ def create_bot_application(post_init=None):
     app.add_handler(CommandHandler("users", list_users))
     app.add_handler(CommandHandler("admin_locais", list_all_locations_admin))
     
-    # 3. Main Menu Buttons / Catch-All
-    # This handles buttons that are NOT conversation entry points (e.g. Cotação Atual, Status, admin buttons managed by handle_keyboard_buttons logic)
+    # 3. Message Handlers
+    app.add_handler(MessageHandler(filters.Document.MimeType("application/zip"), receive_car_zip_tg))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
     
     app.add_error_handler(error_handler)
@@ -1897,3 +1897,55 @@ async def _send_tg_car_zip_guide(update, context, cod_imovel):
         parse_mode='Markdown',
         disable_web_page_preview=True
     )
+
+async def receive_car_zip_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lida com arquivos ZIP do CAR enviados pelo usuário no Telegram."""
+    doc = update.message.document
+    if not doc or not doc.file_name.lower().endswith(".zip"):
+        return
+    
+    chat_id = update.effective_chat.id
+    status_msg = await update.message.reply_text("📥 Recebi o seu ZIP! Iniciando processamento do Mapa Profissional... 🛰️")
+    
+    try:
+        from app.environmental import process_car_zip
+        from app.charts import generate_pro_car_map
+        import asyncio
+        
+        loop = asyncio.get_running_loop()
+        # 1. Download
+        file = await context.bot.get_file(doc.file_id)
+        # For python-telegram-bot v20+, the file is downloaded to bytes
+        zip_bytes = await file.download_as_bytearray()
+        
+        # 2. Process
+        gdfs, error = await loop.run_in_executor(None, process_car_zip, bytes(zip_bytes))
+        if error:
+            await status_msg.edit_text(f"⚠️ Erro no processamento: {error}")
+            return
+            
+        # 3. Generate Map
+        map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs)
+        if not map_bytes:
+            await status_msg.edit_text("⚠️ Erro ao renderizar o mapa profissional. Verifique se o ZIP contém os arquivos .shp.")
+            return
+            
+        # 4. Send
+        caption = (
+            "🗺️ *RELATÓRIO AMBIENTAL PROFISSIONAL*\n\n"
+            "Análise cartográfica completa gerada a partir do seu arquivo CAR.\n"
+            "📈 Legenda, escala e grade incluídas.\n\n"
+            "Desenvolvido por *Agro Analytics*"
+        )
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=map_bytes,
+            caption=caption,
+            parse_mode='Markdown'
+        )
+        await status_msg.delete()
+        
+    except Exception as e:
+        print(f"[TG ZIP Error] {e}")
+        import traceback; traceback.print_exc()
+        await status_msg.edit_text("❌ Falha ao processar o arquivo ZIP.")

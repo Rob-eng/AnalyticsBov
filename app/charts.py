@@ -359,3 +359,119 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
     plt.close()
     
     return output_path
+def generate_pro_car_map(gdfs):
+    """
+    Gera um mapa cartográfico profissional a partir dos GeoDataFrames extraídos do ZIP.
+    Inclui grade, norte, escala (estimada), legenda e logo.
+    """
+    import os
+    import matplotlib.pyplot as plt
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    from io import BytesIO
+    import numpy as np
+    from datetime import datetime
+    
+    # 1. Configuração da Figura
+    fig, ax = plt.subplots(figsize=(10, 12), facecolor='white')
+    ax.set_facecolor('#fdfdfd')
+    
+    # Definição de Cores e Estilos SICAR
+    COLORS = {
+        'imovel': {'edgecolor': '#404040', 'facecolor': 'none', 'linewidth': 2.5, 'linestyle': '--', 'label': 'Perímetro do Imóvel'},
+        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Reserva Legal (RL)'},
+        'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
+        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.3, 'label': 'Veg. Nativa Remanescente'},
+        'agua': {'edgecolor': '#0d47l1', 'color': '#03a9f4', 'linewidth': 1.2, 'label': 'Recursos Hídricos'},
+        'consolidada': {'edgecolor': '#ef6c00', 'facecolor': '#ffb74d', 'alpha': 0.3, 'label': 'Área Consolidada'}
+    }
+    
+    main_gdf = gdfs.get('imovel')
+    if main_gdf is None or main_gdf.empty:
+        return None
+        
+    # 2. Plotagem das camadas na ordem correta
+    order = ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
+    for layer in order:
+        if layer in gdfs:
+            gdf = gdfs[layer]
+            if gdf.empty: continue
+            
+            style = COLORS.get(layer, {})
+            try:
+                if layer in ['imovel', 'agua']:
+                    gdf.plot(ax=ax, **style, zorder=10)
+                else:
+                    gdf.plot(ax=ax, **style, zorder=5)
+            except Exception as e:
+                print(f"Erro ao plotar camada {layer}: {e}")
+
+    # 3. Estética Cartográfica
+    ax.set_title("🗺️ RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=18, fontweight='bold', color='#1a1a1a', pad=25)
+    
+    # Grade de Coordenadas
+    ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
+    ax.set_xlabel('Longitude (decimal)', fontsize=10, color='gray')
+    ax.set_ylabel('Latitude (decimal)', fontsize=10, color='gray')
+    
+    # Rosa dos Ventos (Norte)
+    x, y, arrow_length = 0.94, 0.94, 0.07
+    ax.annotate('N', xy=(x, y), xytext=(x, y-arrow_length),
+                arrowprops=dict(facecolor='black', width=3, headwidth=12),
+                ha='center', va='center', fontsize=22, fontweight='bold', xycoords='axes fraction')
+    
+    # Logo Agro Analytics
+    try:
+        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.jpg")
+        if os.path.exists(logo_path):
+            from matplotlib.image import imread
+            logo = imread(logo_path)
+            ib = OffsetImage(logo, zoom=0.07)
+            ab = AnnotationBbox(ib, (0.08, 0.93), xycoords='axes fraction', frameon=False)
+            ax.add_artist(ab)
+    except Exception as e:
+        print(f"Erro ao carregar logo: {e}")
+
+    # 4. Cálculos e Quadro de Informações
+    try:
+        # Estimar área em Hectares usando projeção UTM local
+        utm_gdf = main_gdf.to_crs(main_gdf.estimate_utm_crs())
+        total_area_ha = utm_gdf.area.sum() / 10000
+    except:
+        total_area_ha = 0
+        
+    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Fazenda Selecionada")
+    cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Não identificado")
+    
+    info_text = (
+        f"📍 Propriedade: {prop_name}\n"
+        f"🆔 Código CAR: {cod_car}\n"
+        f"📏 Área Total: {total_area_ha:.2f} ha\n"
+        f"📅 Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"🌐 Datum: WGS 84 (SIRGAS 2000)"
+    )
+    
+    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, 
+             fontsize=10, ha='right', va='bottom', fontfamily='monospace',
+             bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', alpha=0.9, edgecolor='#ced4da'))
+
+    # 5. Legenda Customizada
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    legend_elements = []
+    for layer in order:
+        if layer in gdfs:
+            cfg = COLORS[layer]
+            if 'facecolor' in cfg:
+                legend_elements.append(Patch(facecolor=cfg['facecolor'], edgecolor=cfg['edgecolor'], alpha=cfg.get('alpha', 1.0), label=cfg['label']))
+            else:
+                legend_elements.append(Line2D([0], [0], color=cfg.get('edgecolor', 'black'), lw=cfg.get('linewidth', 1), linestyle=cfg.get('linestyle', '-'), label=cfg['label']))
+    
+    ax.legend(handles=legend_elements, loc='lower left', fontsize=9, frameon=True, facecolor='white', shadow=True)
+
+    # Finalização
+    plt.tight_layout()
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+    plt.close()
+    buf.seek(0)
+    return buf.read()

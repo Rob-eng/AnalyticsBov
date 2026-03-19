@@ -53,8 +53,15 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                                 texto = interactive.get("button_reply", {}).get("id", "")
                             elif interactive.get("type") == "list_reply":
                                 texto = interactive.get("list_reply", {}).get("id", "")
+                        elif msg_type == "document":
+                            doc = msg.get("document", {})
+                            if doc.get("filename", "").lower().endswith(".zip"):
+                                media_id = doc.get("id")
+                                print(f"📥 [WA] Recebido ZIP: {doc.get('filename')} (ID: {media_id})")
+                                from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
+                                background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
                         
-                        print(f"[Webhook] {sender_phone} disse: {texto}")
+                        print(f"[Webhook] {sender_phone} disse: {texto if texto else msg_type}")
                         
                         # ⚠️ Delega a resposta e o pensamento da IA para uma BackgroundTask do FastAPI
                         # Isso garante que a Meta receba o '200 OK' em 1s, enquanto o ChatGPT tem o tempo dele
