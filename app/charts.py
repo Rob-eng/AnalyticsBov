@@ -375,20 +375,26 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # 1. Configuração da Figura
     fig, ax = plt.subplots(figsize=(12, 12), facecolor='white')
     
-    # Cores Oficiais SICAR (Ajustadas para visibilidade e distinção)
+    # Cores Oficiais SICAR (Ajustadas para máximo contraste e distinção)
     COLORS = {
-        'imovel': {'edgecolor': '#FFFF00', 'facecolor': 'none', 'linewidth': 3, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
-        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.45, 'label': 'Reserva Legal (RL)'},
-        'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.4, 'label': 'Remanescente (Veg. Nat)'},
-        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Agua'},
-        'consolidada': {'edgecolor': '#8d6e63', 'facecolor': '#d7ccc8', 'alpha': 0.5, 'label': 'Area Antropizada (Consol)'}
+        'imovel': {'edgecolor': '#FFFF00', 'facecolor': 'none', 'linewidth': 3.5, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
+        'reserva': {'edgecolor': '#003300', 'facecolor': '#1b5e20', 'alpha': 0.6, 'hatch': '///', 'label': 'Reserva Legal (RL)'},
+        'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
+        'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.4, 'label': 'Remanescente Nativa'},
+        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpo d\'Agua'},
+        'consolidada': {'edgecolor': '#795548', 'facecolor': '#ff9800', 'alpha': 0.4, 'label': 'Area Consol./Antrop.'}
     }
     
     main_gdf = gdfs.get('imovel')
     if main_gdf is None or main_gdf.empty:
         return None
 
+    # Tenta obter nome e código de forma robusta
+    row = main_gdf.iloc[0]
+    # Campos comuns no SHP do SICAR: NOM_IMOVEL, NOME_IMOVE, NUM_CAR, COD_IMOVEL
+    prop_name = str(row.get('NOM_IMOVEL') or row.get('NOME_IMOVE') or row.get('NOME') or "Propriedade Privada")[:35]
+    cod_car = str(row.get('COD_IMOVEL') or row.get('NUM_CAR') or row.get('COD_IMOV') or "Nao identificado")
+    
     # 1.1 Plotar Imagem de Satélite se disponível
     if background_img and bg_extent:
         try:
@@ -517,10 +523,6 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     except: pass
 
     # 7. Quadro de Informações
-    # Priorizar o nome do cadastro oficial
-    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade")[:35]
-    cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Nao identificado")
-    
     info_text = (
         f"Propriedade: {prop_name}\n"
         f"Codigo CAR:   {cod_car}\n"

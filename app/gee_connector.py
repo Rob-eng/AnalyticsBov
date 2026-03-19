@@ -620,51 +620,61 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
     """
     Gera uma URL de miniatura RGB (Sentinel-2) para a geometria fornecida.
     dimensoes: 1024 (alta qualidade)
-    padding_m: buffer em metros ao redor da area (padrão 1km para ver vizinhos)
+    padding_m: buffer em metros ao redor da area
     """
     try:
         if not initialize_gee():
+            print("[GEE] Falha ao inicializar para miniatura.", flush=True)
             return None
 
+        # 1. Preparar Geometria
         geom = ee.Geometry(geometry_geojson)
-        
-        # 1. Buscar imagem recente e limpa (Sentinel-2 SR)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=150)
-        
-        collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                      .filterBounds(geom.buffer(padding_m))
-                      .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))
-                      .sort('system:time_start', False))
-        
-        if collection.size().getInfo() == 0:
-            # Fallback para Landsat 8 se Sentinel-2 falhar (zooms maiores)
-            collection = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
-                          .filterBounds(geom.buffer(padding_m))
-                          .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                          .filter(ee.Filter.lt('CLOUD_COVER', 30))
-                          .sort('system:time_start', False))
-        
-        if collection.size().getInfo() == 0:
-            return None
-            
-        image = collection.first()
-        
-        # 2. Visualização
-        if 'B4' in image.bandNames().getInfo(): # Sentinel-2
-            v_params = {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000, 'gamma': 1.2}
-        else: # Landsat
-            v_params = {'bands': ['SR_B4', 'SR_B3', 'SR_B2'], 'min': 7000, 'max': 15000, 'gamma': 1.2}
-        
-        # 3. Região com Buffer solicitado
         region = geom.buffer(padding_m).bounds()
         
-        return image.visualize(**v_params).getThumbURL({
+        # 2. Buscar imagem recente (janela de 1 ano para garantir que ache algo sem nuvem)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)
+        
+        print(f"[GEE] Buscando Satelite para regiao com padding={padding_m}m...", flush=True)
+        
+        # Tentar Sentinel-2 primeiro (melhor cor e resolucao 10m)
+        collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                      .filterBounds(region)
+                      .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                      .sort('CLOUDY_PIXEL_PERCENTAGE')) # Pega a com menos nuvem do ano
+        
+        if collection.size().getInfo() > 0:
+            image = collection.first()
+            v_params = {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3500, 'gamma': 1.3}
+            print(f"[GEE] Usando Sentinel-2 (Nuvens: {image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()}%)", flush=True)
+        else:
+            # Fallback para Landsat 8 (30m)
+            collection = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+                          .filterBounds(region)
+                          .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                          .sort('CLOUD_COVER'))
+            if collection.size().getInfo() > 0:
+                image = collection.first()
+                v_params = {'bands': ['SR_B4', 'SR_B3', 'SR_B2'], 'min': 7000, 'max': 16000, 'gamma': 1.1}
+                print(f"[GEE] Usando Landsat-8 (Nuvens: {image.get('CLOUD_COVER').getInfo()}%)", flush=True)
+            else:
+                print("[GEE] Nenhuma imagem encontrada em 365 dias.", flush=True)
+                return None
+            
+        # 4. Gerar URL
+        thumb_url = image.visualize(**v_params).getThumbURL({
             'dimensions': dimensions,
             'region': region.getInfo(),
             'format': 'png'
         })
+        
+        print(f"[GEE] URL Gerada: {thumb_url[:100]}...", flush=True)
+        return thumb_url
+
+    except Exception as e:
+        print(f"[GEE SATELLITE ERROR] {e}", flush=True)
+        import traceback; traceback.print_exc()
+        return None
 
     except Exception as e:
         print(f"[GEE SATELLITE ERROR] {e}", flush=True)

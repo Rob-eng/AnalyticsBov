@@ -406,11 +406,21 @@ async def process_whatsapp_zip_upload(phone, media_id):
             
             import requests
             if turl:
-                resp = await loop.run_in_executor(None, requests.get, turl, {'timeout': 20})
-                if resp.status_code == 200: bg_bytes = resp.content
+                print(f"[WA] Baixando Main Thumb: {turl[:60]}...", flush=True)
+                resp = await loop.run_in_executor(None, requests.get, turl, {'timeout': 25})
+                if resp.status_code == 200: 
+                    bg_bytes = resp.content
+                    print(f"[WA] Main Background OK ({len(bg_bytes)} bytes)", flush=True)
+                else:
+                    print(f"[WA] Falha Main Background: Status {resp.status_code}", flush=True)
             if rturl:
-                rresp = await loop.run_in_executor(None, requests.get, rturl, {'timeout': 20})
-                if rresp.status_code == 200: reg_bg_bytes = rresp.content
+                print(f"[WA] Baixando Regional Thumb: {rturl[:60]}...", flush=True)
+                rresp = await loop.run_in_executor(None, requests.get, rturl, {'timeout': 25})
+                if rresp.status_code == 200: 
+                    reg_bg_bytes = rresp.content
+                    print(f"[WA] Regional Background OK ({len(reg_bg_bytes)} bytes)", flush=True)
+                else:
+                    print(f"[WA] Falha Regional Background: Status {rresp.status_code}", flush=True)
                 
     except Exception as ge:
         print(f"[WA] Erro GEE: {ge}", flush=True)
