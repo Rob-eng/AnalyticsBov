@@ -755,39 +755,46 @@ def process_car_zip(zip_bytes):
                             if c_up in ['NUM_CAR', 'COD_IMOVEL', 'COD_IMOV', 'NUM_CERTIF', 'RECIBO']:
                                 gdf['COD_IMOVEL_MAP'] = gdf[col]
 
-                        # --- CLASSIFICAÇÃO INTELIGENTE POR FEICÃO ---
-                        # Procurar coluna de descrição para split interno
-                        desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'NOME']), None)
+                        # --- 1. CAPTURA DO PERIMETRO (Prioridade Zero) ---
+                        # Se o arquivo for claramente o perímetro do imóvel, capturamos o GDF inteiro
+                        if any(kw in filename_up for kw in CATEGORY_MAP['imovel']):
+                            gdfs['imovel'] = gdf
+                            print(f"[ZIP] Perímetro capturado via arquivo: '{file}'")
+                            found_any = True
+                            assigned_via_file = True
+
+                        # --- 2. CLASSIFICAÇÃO INTELIGENTE POR ATRIBUTO ---
+                        # Procurar coluna de descrição para split interno (Cobertura do Solo, etc)
+                        desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'COBERTURA']), None)
                         
                         if desc_col:
-                            # Tenta dividir cada feição em sua gaveta correspondente
                             for cat, keywords in CATEGORY_MAP.items():
+                                if cat == 'imovel' and assigned_via_file: continue # Já pegamos o imóvel
+                                
                                 mask = gdf[desc_col].astype(str).str.upper().apply(lambda x: any(kw in x for kw in keywords))
                                 sub_gdf = gdf[mask]
                                 if not sub_gdf.empty:
                                     if cat in gdfs:
-                                        gdfs[cat] = pd.concat([gdfs[cat], sub_gdf])
+                                        gdfs[cat] = pd.concat([gdfs[cat], sub_gdf], ignore_index=True)
                                     else:
                                         gdfs[cat] = sub_gdf
-                                    captured_labels.add(cat)
                                     found_any = True
-                                    print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}' via atributo '{desc_col}'")
+                                    print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}'")
                         
-                        # Se não dividiu via atributo ou ainda sobram feições, tenta via nome do arquivo
-                        assigned_via_file = False
-                        for cat, keywords in CATEGORY_MAP.items():
-                            if any(kw in filename_up for kw in keywords):
-                                # Se já adicionamos via atributo, evitamos duplicar o arquivo inteiro
-                                if cat not in gdfs or len(gdfs[cat]) < len(gdf):
-                                    gdfs[cat] = gdf
-                                    captured_labels.add(cat)
-                                    found_any = True
-                                    assigned_via_file = True
-                                    print(f"[ZIP] Camada '{cat}' capturada via nome de arquivo: '{file}'")
-                                break
+                        # --- 3. FALLBACK POR NOME DE ARQUIVO ---
+                        if not assigned_via_file:
+                            for cat, keywords in CATEGORY_MAP.items():
+                                if cat == 'imovel': continue # Já testamos acima
+                                if any(kw in filename_up for kw in keywords):
+                                    if cat not in gdfs:
+                                        gdfs[cat] = gdf
+                                        found_any = True
+                                        assigned_via_file = True
+                                        print(f"[ZIP] Camada '{cat}' capturada via nome de arquivo: '{file}'")
+                                    break
                         
-                        # Se for um arquivo desconhecido (ex: 'PONTO_DE_INTERESSE.shp'), guardamos como 'extra'
-                        if not assigned_via_file and not desc_col:
+                        # --- 4. CAMADA EXTRA ---
+                        if not assigned_via_file and not desc_col and 'imovel' not in filename_up:
                             label = f"extra_{filename_up[:10].lower()}"
                             gdfs[label] = gdf
                             print(f"[ZIP] Camada extra capturada: '{file}' como '{label}'")
@@ -797,7 +804,7 @@ def process_car_zip(zip_bytes):
                         print(f"[ZIP] Erro ao ler {file}: {e}")
         
         if not found_any or 'imovel' not in gdfs:
-            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP."
+            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP. Verifique se o arquivo enviado é o ZIP completo do SICAR."
             
         return gdfs, None
         
