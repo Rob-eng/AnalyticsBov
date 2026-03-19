@@ -77,25 +77,25 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
         send_whatsapp_text(phone, f"🌿 NDVI médio de {nome}: {ndvi_val:.2f}\n(Imagem indisponível)")
         return
     
-    # 4. Classificação
-    if ndvi_val >= 0.7:
-        classe = "🟢 Excelente"
-    elif ndvi_val >= 0.5:
-        classe = "🟡 Bom"
-    elif ndvi_val >= 0.3:
-        classe = "🟠 Regular"
-    else:
-        classe = "🔴 Crítico"
+    dt_obj = datetime.fromtimestamp(ndvi_result['dt'])
+    date_str = dt_obj.strftime('%d/%m/%Y')
     
-    caption = (
-        f"🌿 Mapa NDVI — {nome}\n"
-        f"📊 NDVI Médio: {ndvi_val:.2f} ({classe})\n"
-        f"📡 Fonte: Sentinel-2 / Google Earth Engine"
-    )
-    if car_status == 'OFFICIAL':
-        caption += "\n✅ Perímetro: CAR Oficial"
+    caption = f"🌿 *Análise Ambiental*\n\n"
+    caption += f"📅 *Data da Imagem:* {date_str}\n"
+    caption += f"🛰️ *Índice NDVI Médio:* {ndvi_val:.2f}\n"
+
+    if car_status == 'OFFICIAL' or car_status is True:
+        caption += f"✅ *Perímetro:* CAR Oficial\n"
     elif car_status == 'NEARBY':
-        caption += "\n⚠️ Perímetro: Propriedade Próxima"
+        caption += f"⚠️ *Perímetro:* Propriedade Próxima (<11km)\n"
+    else:
+        caption += f"⚠️ *Perímetro:* Área Estimada (1km²)\n"
+
+    caption += f"🚜 *Uso do Solo (Estimado):* Vegetação/Campo\n\n"
+    caption += "O NDVI varia de -1 a 1:\n"
+    caption += "- > 0.6: Vegetação densa/saudável\n"
+    caption += "- 0.2 a 0.5: Solo exposto/pastagem rala\n"
+    caption += "- < 0.1: Água ou rocha"
     
     send_whatsapp_image(phone, img, caption)
     print("[WA TRIGGER] NDVI enviado com sucesso!", flush=True)
