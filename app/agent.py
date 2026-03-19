@@ -369,6 +369,12 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
     Funcao principal chamada pelo webhook do Meta/WhatsApp.
     """
     try:
+        from app.weather import extract_coords_from_url
+        coords = extract_coords_from_url(user_text)
+        if coords:
+            lat, lon = coords
+            user_text += f"\n[Sistema: O usuário enviou um mapa com coordenadas: {lat}, {lon}]"
+
         resposta_txt, media_list = await get_agent_response(
             sender_phone, user_text,
             context_info="O usuário está conversando via WhatsApp."

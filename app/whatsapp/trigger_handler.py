@@ -60,7 +60,7 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
     geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
     
     # 2. NDVI
-    ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometry, lat, lon)
+    ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometry)
     if not ndvi_result:
         send_whatsapp_text(phone, "⚠️ Não foi possível obter dados NDVI para esta área.")
         return
