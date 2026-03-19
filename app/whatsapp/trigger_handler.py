@@ -30,6 +30,11 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             loop = asyncio.get_running_loop()
             await _handle_cotacao(sender_phone, loop)
             return
+            
+        if fluxo == 'MERCADO_FUTURO':
+            loop = asyncio.get_running_loop()
+            await _handle_mercado_futuro(sender_phone, loop)
+            return
 
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
@@ -285,3 +290,36 @@ async def _handle_cotacao(phone, loop):
     send_whatsapp_image(phone, img_bytes, caption)
     print("[WA TRIGGER] Cotação enviada com sucesso!", flush=True)
 
+async def _handle_mercado_futuro(phone, loop):
+    """Pipeline Mercado Futuro → envia tabela via WhatsApp."""
+    send_whatsapp_text(phone, "🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
+    
+    from app.scraper import scrape_mercado_futuro
+    from app.bot import generate_future_table
+    
+    # 1. Scrape data
+    data_dict = await loop.run_in_executor(None, scrape_mercado_futuro)
+    if not data_dict:
+        send_whatsapp_text(phone, "⚠️ Não foi possível coletar os dados do Mercado Futuro no momento.")
+        return
+
+    # 2. Generate table image
+    chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict))
+    
+    if not chart_path:
+        send_whatsapp_text(phone, "⚠️ Erro ao gerar a tabela do Mercado Futuro.")
+        return
+
+    # 3. Format caption
+    caption = (
+        "🔮 *Mercado Futuro - Boi Gordo*\n\n"
+        "Valores para os próximos vencimentos obtidos agora.\n\n"
+        "*Fonte:* Scot Consultoria"
+    )
+
+    # 4. Send
+    with open(chart_path, "rb") as f:
+        img_bytes = f.read()
+
+    send_whatsapp_image(phone, img_bytes, caption)
+    print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)

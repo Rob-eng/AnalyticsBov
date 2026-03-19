@@ -177,12 +177,7 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
     print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
         if name == "consultar_mercado_futuro":
-            from app.scraper import scrape_mercado_futuro
-            loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, scrape_mercado_futuro)
-            if not data:
-                return "Ocorreu um erro ao baixar os dados do site da B3."
-            return json.dumps(data, ensure_ascii=False)
+            return "TRIGGER_FLOW: MERCADO_FUTURO"
             
         elif name == "obter_cotacao_fisica_atual":
             return "TRIGGER_FLOW: COTACAO"
