@@ -416,8 +416,16 @@ def generate_pro_car_map(gdfs):
             except Exception as e:
                 print(f"Erro ao plotar {layer}: {e}")
 
-    # 4. Estética Cartográfica
-    ax.set_title("🗺️ RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=18, fontweight='bold', color='#1a1a1a', pad=25)
+    # 3.1 AJUSTE CRÍTICO: Zoom focado no imóvel para evitar distorções por pontos errôneos
+    bounds = main_gdf.total_bounds # [minx, miny, maxx, maxy]
+    padx = max((bounds[2] - bounds[0]) * 0.15, 0.001)
+    pady = max((bounds[3] - bounds[1]) * 0.15, 0.001)
+    ax.set_xlim(bounds[0] - padx, bounds[2] + padx)
+    ax.set_ylim(bounds[1] - pady, bounds[3] + pady)
+    ax.set_aspect('equal', adjustable='box')
+
+    # 4. Estética Cartográfica (Removendo emojis para evitar 'quadradinhos' em algumas fontes)
+    ax.set_title("RELATORIO AMBIENTAL GEOESTATISTICO", fontsize=18, fontweight='bold', color='#1a1a1a', pad=25)
     ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
     ax.set_xlabel('Longitude (decimal)', fontsize=10, color='gray')
     ax.set_ylabel('Latitude (decimal)', fontsize=10, color='gray')
@@ -431,62 +439,65 @@ def generate_pro_car_map(gdfs):
     # 5. Escala Gráfica (Manual)
     try:
         center = main_gdf.geometry.centroid.iloc[0]
+        # Distância aproximada de 1 grau na latitude central
         m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
-        # Seleciona tamanho ideal da barra
         total_ha = areas_ha.get('imovel', 0)
+        
         if total_ha > 2000: s_m, s_lab = 2000, "2 km"
         elif total_ha > 500: s_m, s_lab = 1000, "1 km"
         elif total_ha > 100: s_m, s_lab = 500, "500 m"
         else: s_m, s_lab = 200, "200 m"
         
         s_deg = s_m / m_per_deg_lon
-        # Posição: inferior esquerda
-        xmin, ymin, xmax, ymax = ax.axis()
-        bar_x = xmin + (xmax - xmin) * 0.05
-        bar_y = ymin + (ymax - ymin) * 0.05
-        ax.plot([bar_x, bar_x + s_deg], [bar_y, bar_y], color='black', lw=3, zorder=20)
-        ax.text(bar_x + s_deg/2, bar_y + (ymax-ymin)*0.01, s_lab, ha='center', fontsize=9, fontweight='bold')
+        ax_xmin, ax_xmax = ax.get_xlim()
+        ax_ymin, ax_ymax = ax.get_ylim()
+        
+        # Posição: inferior esquerda focado no mapa
+        bar_x = ax_xmin + (ax_xmax - ax_xmin) * 0.05
+        bar_y = ax_ymin + (ax_ymax - ax_ymin) * 0.05
+        ax.plot([bar_x, bar_x + s_deg], [bar_y, bar_y], color='black', lw=4, zorder=20)
+        ax.text(bar_x + s_deg/2, bar_y + (ax_ymax-ax_ymin)*0.015, s_lab, ha='center', fontsize=10, fontweight='bold')
     except: pass
 
     # 6. Mapa de Localização (Inset)
     try:
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
         ax_inset = inset_axes(ax, width="25%", height="20%", loc='upper right', borderpad=2)
-        ax_inset.set_facecolor('#f0f0f0')
+        ax_inset.set_facecolor('#fefefe')
         # Zoom out do imóvel
         main_gdf.plot(ax=ax_inset, color='red', zorder=5)
-        # Tenta pegar um buffer pros arredores
-        bounds = main_gdf.total_bounds # [minx, miny, maxx, maxy]
-        buffer_val = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 10
+        # Buffer de 15x o tamanho para dar contexto regional
+        buffer_val = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 15
         ax_inset.set_xlim(bounds[0]-buffer_val, bounds[2]+buffer_val)
         ax_inset.set_ylim(bounds[1]-buffer_val, bounds[3]+buffer_val)
         ax_inset.set_xticks([]); ax_inset.set_yticks([])
-        ax_inset.set_title(f"Região ({str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]})", fontsize=8)
+        st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
+        ax_inset.set_title(f"Regiao ({st_code})", fontsize=9, fontweight='bold')
     except: pass
 
     # 7. Logo e Quadro de Informações
-    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade Privada")
-    cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Não identificado")
+    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade Privada")[:35]
+    cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Nao identificado")
     
     info_text = (
-        f"📍 Propriedade: {prop_name}\n"
-        f"🆔 Código CAR: {cod_car}\n"
-        f"📅 Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"🌐 Sistema: WGS 84 / SIRGAS 2000"
+        f"Propriedade: {prop_name}\n"
+        f"Codigo CAR:   {cod_car}\n"
+        f"Emissao:      {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"Sistema:      WGS 84 / SIRGAS 2000"
     )
-    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=9.5, ha='right', va='bottom', fontfamily='monospace',
-             bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', alpha=0.95, edgecolor='#ced4da'))
+    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=10, ha='right', va='bottom', fontfamily='monospace',
+             zorder=25, bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', alpha=0.9, edgecolor='#ced4da'))
 
     # 8. Quadro de Áreas (Tabela Lateral)
-    areas_text = "📊 QUADRO DE ÁREAS (ha)\n" + "─" * 25 + "\n"
-    areas_text += f"🏠 Total Imóvel:  {areas_ha.get('imovel', 0):>8.2f}\n"
-    if 'reserva' in areas_ha:    areas_text += f"🌳 Reserva Legal:  {areas_ha.get('reserva', 0):>8.2f}\n"
-    if 'app' in areas_ha:        areas_text += f"💧 A.P.P.:         {areas_ha.get('app', 0):>8.2f}\n"
-    if 'vegetacao' in areas_ha:  areas_text += f"🌿 Remanescente:   {areas_ha.get('vegetacao', 0):>8.2f}\n"
-    if 'consolidada' in areas_ha: areas_text += f"🚜 Consolidada:    {areas_ha.get('consolidada', 0):>8.2f}\n"
+    areas_text = "QUADRO DE AREAS (ha)\n" + "=" * 22 + "\n"
+    areas_text += f"Total Imovel:  {areas_ha.get('imovel', 0):>8.2f}\n"
+    if 'reserva' in areas_ha:    areas_text += f"Reserva Legal:  {areas_ha.get('reserva', 0):>8.2f}\n"
+    if 'app' in areas_ha:        areas_text += f"A.P.P.:         {areas_ha.get('app', 0):>8.2f}\n"
+    if 'vegetacao' in areas_ha:  areas_text += f"Remanescente:   {areas_ha.get('vegetacao', 0):>8.2f}\n"
+    if 'consolidada' in areas_ha: areas_text += f"Consolidada:    {areas_ha.get('consolidada', 0):>8.2f}\n"
 
-    plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=10, ha='left', va='top', fontfamily='monospace',
-             bbox=dict(boxstyle='round,pad=0.8', facecolor='#e9ecef', alpha=0.9, edgecolor='#adb5bd'))
+    plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=11, ha='left', va='top', fontfamily='monospace',
+             zorder=25, bbox=dict(boxstyle='round,pad=0.8', facecolor='#f1f3f5', alpha=0.9, edgecolor='#adb5bd'))
 
     # 9. Legenda
     from matplotlib.lines import Line2D
@@ -494,12 +505,13 @@ def generate_pro_car_map(gdfs):
     legend_elements = [Patch(facecolor=COLORS[l]['facecolor'], edgecolor=COLORS[l]['edgecolor'], alpha=COLORS[l].get('alpha', 1.0), label=COLORS[l]['label']) 
                        if 'facecolor' in COLORS[l] else Line2D([0], [0], color=COLORS[l]['edgecolor'], lw=2, label=COLORS[l]['label'])
                        for l in order if l in gdfs]
-    ax.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.12), fontsize=9, frameon=True, facecolor='white')
+    ax.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.12), fontsize=10, 
+              frameon=True, facecolor='white', framealpha=1, shadow=True)
 
     # Finalização
     plt.tight_layout()
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=180, bbox_inches='tight')
+    plt.savefig(buf, format='png', dpi=200, bbox_inches='tight')
     plt.close()
     buf.seek(0)
     return buf.read()
