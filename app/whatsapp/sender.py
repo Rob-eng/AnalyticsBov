@@ -256,11 +256,11 @@ def send_whatsapp_menu(to_phone: str):
                         "title": "Cotações e Mercado",
                         "rows": [
                             {
-                                "id": "Qual a cotação atual do boi gordo?",
+                                "id": "TRIGGER_COTACAO",
                                 "title": "📊 Cotação Atual"
                             },
                             {
-                                "id": "Mercado futuro do boi B3",
+                                "id": "TRIGGER_MERCADO_FUTURO",
                                 "title": "🔮 Mercado Futuro"
                             }
                         ]
@@ -269,15 +269,15 @@ def send_whatsapp_menu(to_phone: str):
                         "title": "Análise Ambiental",
                         "rows": [
                             {
-                                "id": "Previsão de chuva",
+                                "id": "TRIGGER_PREVISAO_CHUVA",
                                 "title": "🌧️ Previsão de Chuva"
                             },
                             {
-                                "id": "Mapa NDVI verde do pasto",
+                                "id": "TRIGGER_NDVI",
                                 "title": "🌿 Análise NDVI"
                             },
                             {
-                                "id": "Terreno MDT topografia",
+                                "id": "TRIGGER_MDT",
                                 "title": "🏔️ Terreno (MDT)"
                             }
                         ]
@@ -286,7 +286,7 @@ def send_whatsapp_menu(to_phone: str):
                         "title": "Minhas Propriedades",
                         "rows": [
                             {
-                                "id": "Listar minhas propriedades",
+                                "id": "TRIGGER_LISTAR",
                                 "title": "📌 Listar Propriedades"
                             }
                         ]

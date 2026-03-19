@@ -185,13 +185,7 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             return json.dumps(data, ensure_ascii=False)
             
         elif name == "obter_cotacao_fisica_atual":
-            from app.models import get_recent_prices
-            loop = asyncio.get_event_loop()
-            prices = await loop.run_in_executor(None, get_recent_prices, 7)
-            if prices:
-                latest = prices[-1]  # O mais recente (lista vem ordenada por data ASC)
-                return f"Última cotação física no banco: Boi Gordo R${latest['price']}/@ em {latest['date']}. (Fonte: Scot/Cepea)"
-            return "Ainda não há cotação registrada hoje para o mercado físico."
+            return "TRIGGER_FLOW: COTACAO"
 
         elif name == "verificar_previsao_chuva":
             lat = arguments.get("lat")
@@ -384,6 +378,24 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
     Funcao principal chamada pelo webhook do Meta/WhatsApp.
     """
     try:
+        user_text = user_text.strip()
+        
+        # 1. Interceptar Cliques do Menu Interativo
+        if user_text == "TRIGGER_COTACAO":
+            from app.whatsapp.trigger_handler import handle_wa_trigger_flow
+            await handle_wa_trigger_flow(sender_phone, "TRIGGER_FLOW: COTACAO")
+            return
+        elif user_text == "TRIGGER_MERCADO_FUTURO":
+            user_text = "Verifique o mercado futuro do Boi Gordo na B3."
+        elif user_text == "TRIGGER_PREVISAO_CHUVA":
+            user_text = "Quero a previsão de chuva. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
+        elif user_text == "TRIGGER_NDVI":
+            user_text = "Quero o mapa de saúde do pasto NDVI. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
+        elif user_text == "TRIGGER_MDT":
+            user_text = "Quero o mapa de topografia MDT. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
+        elif user_text == "TRIGGER_LISTAR":
+            user_text = "Liste minhas propriedades cadastradas."
+
         from app.weather import extract_coords_from_url
         coords = extract_coords_from_url(user_text)
         if coords:
