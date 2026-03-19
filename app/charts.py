@@ -359,10 +359,11 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
     plt.close()
     
     return output_path
-def generate_pro_car_map(gdfs):
+def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
     """
     Gera um mapa cartográfico profissional a partir dos GeoDataFrames extraídos do ZIP.
-    Inclui grade, norte, escala, quadro de áreas detalhado, legenda e mapa de localização.
+    background_img: bytes da imagem de satélite (opcional)
+    bg_extent: [minx, maxx, miny, maxy] da imagem de fundo
     """
     import os
     import matplotlib.pyplot as plt
@@ -371,24 +372,37 @@ def generate_pro_car_map(gdfs):
     import numpy as np
     from datetime import datetime
     
-    # 1. Configuração da Figura (A4 vertical proportions)
+    # 1. Configuração da Figura
     fig, ax = plt.subplots(figsize=(10, 13), facecolor='white')
-    ax.set_facecolor('#fdfdfd')
     
-    # Cores Oficiais SICAR
+    # Cores SICAR
     COLORS = {
-        'imovel': {'edgecolor': '#404040', 'facecolor': 'none', 'linewidth': 3, 'linestyle': '--', 'label': 'Perímetro do Imóvel'},
-        'reserva': {'edgecolor': '#1b5e20', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Reserva Legal (RL)'},
-        'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#33691e', 'facecolor': '#689f38', 'alpha': 0.4, 'label': 'Veg. Nativa Remanescente'},
-        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f4', 'linewidth': 1.5, 'label': 'Recursos Hídricos'},
-        'consolidada': {'edgecolor': '#e65100', 'facecolor': '#ffb74d', 'alpha': 0.4, 'label': 'Área Consolidada'}
+        'imovel': {'edgecolor': '#FFFF00', 'facecolor': 'none', 'linewidth': 3, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
+        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.4, 'label': 'Reserva Legal (RL)'},
+        'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
+        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.3, 'label': 'Veg. Nativa'},
+        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpos d\'Agua'},
+        'consolidada': {'edgecolor': '#e65100', 'facecolor': '#ffb74d', 'alpha': 0.3, 'label': 'Area Consolidada'}
     }
     
     main_gdf = gdfs.get('imovel')
     if main_gdf is None or main_gdf.empty:
         return None
-        
+
+    # 1.1 Plotar Imagem de Satélite se disponível
+    if background_img and bg_extent:
+        try:
+            from matplotlib.image import imread
+            import io
+            img_data = imread(io.BytesIO(background_img), format='png')
+            ax.imshow(img_data, extent=bg_extent, zorder=0, alpha=0.9)
+            # Ao usar satélite, mudamos a cor do perímetro para Amarelo para destacar
+            COLORS['imovel']['edgecolor'] = '#FFFF00' 
+        except Exception as e:
+            print(f"Erro ao carregar imagem de fundo: {e}")
+    else:
+        ax.set_facecolor('#fdfdfd')
+
     # 2. Cálculos de Áreas (Hectares)
     areas_ha = {}
     try:
@@ -462,18 +476,34 @@ def generate_pro_car_map(gdfs):
     # 6. Mapa de Localização (Inset)
     try:
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        ax_inset = inset_axes(ax, width="25%", height="20%", loc='upper right', borderpad=2)
-        ax_inset.set_facecolor('#fefefe')
-        # Zoom out do imóvel
-        main_gdf.plot(ax=ax_inset, color='red', zorder=5)
-        # Buffer de 15x o tamanho para dar contexto regional
-        buffer_val = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 15
-        ax_inset.set_xlim(bounds[0]-buffer_val, bounds[2]+buffer_val)
-        ax_inset.set_ylim(bounds[1]-buffer_val, bounds[3]+buffer_val)
+        ax_inset = inset_axes(ax, width="25%", height="18%", loc='upper right', borderpad=2)
+        
+        # Se tiver imagem de fundo, coloca no Inset também (zoom out)
+        if background_img and bg_extent:
+            try:
+                ax_inset.imshow(img_data, extent=bg_extent, zorder=0)
+            except: pass
+        else:
+            ax_inset.set_facecolor('#fdfdfd')
+            
+        # Ponto vermelho no imóvel
+        main_gdf.plot(ax=ax_inset, color='red', edgecolor='white', zorder=10)
+        
+        # Buffer de 25x para contexto regional
+        ibuffer = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 25
+        ax_inset.set_xlim(bounds[0]-ibuffer, bounds[2]+ibuffer)
+        ax_inset.set_ylim(bounds[1]-ibuffer, bounds[3]+ibuffer)
         ax_inset.set_xticks([]); ax_inset.set_yticks([])
+        
         st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
-        ax_inset.set_title(f"Regiao ({st_code})", fontsize=9, fontweight='bold')
-    except: pass
+        ax_inset.set_title(f"Contexto Regional ({st_code})", fontsize=10, fontweight='bold', pad=10)
+        
+        # Quadrado preto indicando a área de zoom principal
+        from matplotlib.patches import Rectangle
+        rect = Rectangle((bounds[0]-padx, bounds[1]-pady), (bounds[2]-bounds[0]+2*padx), (bounds[3]-bounds[1]+2*pady), linewidth=1, edgecolor='black', facecolor='none', zorder=15)
+        ax_inset.add_patch(rect)
+    except Exception as ie:
+        print(f"Erro no Inset: {ie}")
 
     # 7. Logo e Quadro de Informações
     prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade Privada")[:35]

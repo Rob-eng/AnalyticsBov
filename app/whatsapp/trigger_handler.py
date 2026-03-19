@@ -382,13 +382,39 @@ async def process_whatsapp_zip_upload(phone, media_id):
         send_whatsapp_text(phone, f"⚠️ Erro ao processar o ZIP: {error}")
         return
 
-    # 3. Generate Pro Map
-    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs)
+    # 3. Buscar Imagem de Satélite (Background) via GEE
+    bg_bytes, bg_extent = None, None
+    try:
+        main_gdf = gdfs.get('imovel')
+        if main_gdf is not None:
+            # Buffer de ~500m (0.005 graus aprox) para o fundo
+            bounds = main_gdf.buffer(0.005).total_bounds # [minx, miny, maxx, maxy]
+            bg_extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
+            
+            from app.gee_connector import get_satellite_thumbnail
+            import json
+            # Converter para GeoJSON para o GEE
+            geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
+            
+            print(f"[WA] Buscando imagem de satélite para o relatório...", flush=True)
+            thumb_url = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json)
+            
+            if thumb_url:
+                import requests
+                resp = await loop.run_in_executor(None, requests.get, thumb_url, {'timeout': 20})
+                if resp.status_code == 200:
+                    bg_bytes = resp.content
+                    print(f"[WA] Imagem de satélite capturada com sucesso.", flush=True)
+    except Exception as ge:
+        print(f"[WA] Falha ao capturar imagem de fundo GEE: {ge}", flush=True)
+
+    # 4. Generate Pro Map
+    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent)
     if not map_bytes:
         send_whatsapp_text(phone, "⚠️ Erro ao renderizar o mapa profissional.")
         return
 
-    # 4. Send back
+    # 5. Send back
     caption = (
         "🗺️ *RELATÓRIO AMBIENTAL PROFISSIONAL*\n\n"
         "Análise cartográfica completa gerada a partir do seu arquivo CAR.\n\n"

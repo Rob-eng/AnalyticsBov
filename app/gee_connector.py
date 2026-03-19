@@ -615,3 +615,62 @@ def get_terrain_data(geometry_geojson):
         import traceback
         print(traceback.format_exc(), flush=True)
         return None
+
+def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=500):
+    """
+    Gera uma URL de miniatura RGB (Sentinel-2) para a geometria fornecida.
+    Ideal para usar como plano de fundo (Background) de mapas cartográficos.
+    """
+    try:
+        if not initialize_gee():
+            return None
+
+        geom = ee.Geometry(geometry_geojson)
+        
+        # 1. Buscar imagem recente e limpa (filtro de 120 dias)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=120)
+        
+        # S2_SR_HARMONIZED é calibrada (Surface Reflectance)
+        collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                      .filterBounds(geom)
+                      .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+                      .sort('system:time_start', False))
+        
+        if collection.size().getInfo() == 0:
+            # Relaxar para 30% de nuvens se não achar nenhuma imagem muito limpa
+            collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+                          .filterBounds(geom)
+                          .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                          .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+                          .sort('system:time_start', False))
+        
+        if collection.size().getInfo() == 0:
+            return None
+            
+        image = collection.first()
+        
+        # 2. Preparar Visualização (RGB Natural - B4, B3, B2)
+        vis_params = {
+            'bands': ['B4', 'B3', 'B2'],
+            'min': 0,
+            'max': 3500, # Brilho padrão Sentinel-2 (em 10000 unidades)
+            'gamma': 1.3
+        }
+        
+        # 3. Calcular Região com Buffer de 500m (para ver arredores) e no formato quadrado
+        region = geom.buffer(padding_m).bounds()
+        
+        # 4. Construir URL da imagem PNG
+        thumb_url = image.visualize(**vis_params).getThumbURL({
+            'dimensions': dimensions,
+            'region': region.getInfo(),
+            'format': 'png'
+        })
+        
+        return thumb_url
+
+    except Exception as e:
+        print(f"[GEE SATELLITE ERROR] {e}", flush=True)
+        return None

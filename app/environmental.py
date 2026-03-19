@@ -716,45 +716,47 @@ def process_car_zip(zip_bytes):
 
         # 3. Localizar e ler shapefiles
         gdfs = {}
-        # Mapeamento robusto de nomes padrão do SICAR
-        layers = {
-            'IMOVEL': 'imovel',           # Pega AREA_IMOVEL ou AREA_DO_IMOVEL
-            'RESERVA': 'reserva',         # Pega RESERVA_LEGAL
-            'APP': 'app',                 # Pega APP ou AREA_DE_PRESERVACAO_PERMANENTE
-            'PRESERVACAO_PERMANENTE': 'app',
-            'VEGETACAO': 'vegetacao',     # Pega VEGETACAO_NATIVA
-            'COBERTURA_SOLO': 'vegetacao',# Pega COBERTURA_DO_SOLO
-            'CONSOLIDADA': 'consolidada', # Pega AREA_CONSOLIDADA
-            'HIDROGRAFIA': 'agua',
-            'AGUA': 'agua'
-        }
+        # Mapeamento PRECISO de nomes padrão do SICAR para evitar sobreposições (ex: APP vs RL)
+        layer_defs = [
+            (['AREA_IMOVEL', 'AREA_DO_IMOVEL', 'IMOVEL'], 'imovel'),
+            (['RESERVA_LEGAL', 'RESERVA'], 'reserva'),
+            (['AREA_DE_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'], 'app'),
+            (['VEGETACAO_NATIVA', 'COBERTURA_DO_SOLO', 'VEGETACAO'], 'vegetacao'),
+            (['AREA_CONSOLIDADA', 'CONSOLIDADA'], 'consolidada'),
+            (['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA'], 'agua')
+        ]
         
         found_any = False
+        captured_labels = set()
+        
         # Percorre todos os arquivos descompactados
         for root, dirs, files in os.walk(tmp_extract_dir):
             for file in files:
                 if file.lower().endswith('.shp'):
                     filename_up = file.upper().replace(' ', '_').replace('-', '_')
-                    # Tentar bater o nome do arquivo com as camadas conhecidas
-                    for key, label in layers.items():
-                        if key.upper() in filename_up:
+                    full_path = os.path.join(root, file)
+                    
+                    for keywords, label in layer_defs:
+                        if label in captured_labels: continue
+                        
+                        # Se qualquer palavra-chave bater com o nome do arquivo
+                        if any(kw in filename_up for kw in keywords):
                             try:
-                                full_path = os.path.join(root, file)
-                                # Priorização: se já temos o 'imovel' exato, não sobrescreve
-                                if label in gdfs: continue
-                                
                                 gdf = gpd.read_file(full_path)
                                 if (not gdf.empty) and (gdf.geometry.notnull().any()):
                                     # Normalizar para WGS84
                                     if gdf.crs and gdf.crs.to_epsg() != 4326:
                                         gdf = gdf.to_crs(epsg=4326)
                                     gdfs[label] = gdf
+                                    captured_labels.add(label)
                                     found_any = True
+                                    print(f"[ZIP] Camada '{label}' capturada de '{file}'")
+                                    break # Vai para o próximo arquivo SHP
                             except Exception as e:
                                 print(f"[ZIP] Erro ao ler {file} como {label}: {e}")
         
         if not found_any or 'imovel' not in gdfs:
-            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP. Verifique se o arquivo enviado é o ZIP gerado pelo Portal Público do SICAR."
+            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP."
             
         return gdfs, None
         
