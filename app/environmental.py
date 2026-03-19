@@ -722,7 +722,7 @@ def process_car_zip(zip_bytes):
             (['RESERVA_LEGAL', 'RESERVA'], 'reserva'),
             (['AREA_DE_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'], 'app'),
             (['VEGETACAO_NATIVA', 'COBERTURA_DO_SOLO', 'VEGETACAO'], 'vegetacao'),
-            (['AREA_CONSOLIDADA', 'CONSOLIDADA', 'ANTROPIZADA'], 'consolidada'),
+            (['AREA_CONSOLIDADA', 'CONSOLIDADA', 'ANTROPIZADA', 'USO_CONSOLIDADO', 'AREA_ANTRO'], 'consolidada'),
             (['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA'], 'agua')
         ]
         
@@ -747,11 +747,20 @@ def process_car_zip(zip_bytes):
                                     # Normalizar para WGS84
                                     if gdf.crs and gdf.crs.to_epsg() != 4326:
                                         gdf = gdf.to_crs(epsg=4326)
+                                    
+                                    # Mapeamento robusto de atributos internos
+                                    for col in gdf.columns:
+                                        c_up = col.upper()
+                                        if c_up in ['NOME', 'NOM_IMOVEL', 'NOME_IMOVE', 'DESC_IMOVE', 'NOME_PROPR']:
+                                            gdf['NOM_IMOVEL_MAP'] = gdf[col]
+                                        if c_up in ['NUM_CAR', 'COD_IMOVEL', 'COD_IMOV', 'NUM_CERTIF', 'RES_CAR']:
+                                            gdf['COD_IMOVEL_MAP'] = gdf[col]
+
                                     gdfs[label] = gdf
                                     captured_labels.add(label)
                                     found_any = True
                                     print(f"[ZIP] Camada '{label}' capturada de '{file}'")
-                                    break # Vai para o próximo arquivo SHP
+                                    break 
                             except Exception as e:
                                 print(f"[ZIP] Erro ao ler {file} como {label}: {e}")
         

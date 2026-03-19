@@ -1946,10 +1946,12 @@ async def receive_car_zip_tg(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 
                 import requests
                 if turl:
-                    resp = await loop.run_in_executor(None, requests.get, turl, {'timeout': 20})
+                    def download_main(): return requests.get(turl, timeout=30)
+                    resp = await loop.run_in_executor(None, download_main)
                     if resp.status_code == 200: bg_bytes = resp.content
                 if rturl:
-                    rresp = await loop.run_in_executor(None, requests.get, rturl, {'timeout': 20})
+                    def download_reg(): return requests.get(rturl, timeout=30)
+                    rresp = await loop.run_in_executor(None, download_reg)
                     if rresp.status_code == 200: reg_bg_bytes = rresp.content
         except: pass
 

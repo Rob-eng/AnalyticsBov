@@ -407,7 +407,9 @@ async def process_whatsapp_zip_upload(phone, media_id):
             import requests
             if turl:
                 print(f"[WA] Baixando Main Thumb: {turl[:60]}...", flush=True)
-                resp = await loop.run_in_executor(None, requests.get, turl, {'timeout': 25})
+                # Correção: timeout deve ser passado como keyword argument no requests.get
+                def download_main(): return requests.get(turl, timeout=30)
+                resp = await loop.run_in_executor(None, download_main)
                 if resp.status_code == 200: 
                     bg_bytes = resp.content
                     print(f"[WA] Main Background OK ({len(bg_bytes)} bytes)", flush=True)
@@ -415,7 +417,8 @@ async def process_whatsapp_zip_upload(phone, media_id):
                     print(f"[WA] Falha Main Background: Status {resp.status_code}", flush=True)
             if rturl:
                 print(f"[WA] Baixando Regional Thumb: {rturl[:60]}...", flush=True)
-                rresp = await loop.run_in_executor(None, requests.get, rturl, {'timeout': 25})
+                def download_reg(): return requests.get(rturl, timeout=30)
+                rresp = await loop.run_in_executor(None, download_reg)
                 if rresp.status_code == 200: 
                     reg_bg_bytes = rresp.content
                     print(f"[WA] Regional Background OK ({len(reg_bg_bytes)} bytes)", flush=True)
