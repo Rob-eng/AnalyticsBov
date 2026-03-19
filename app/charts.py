@@ -422,17 +422,21 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         for key in gdfs: areas_ha[key] = 0
 
     # 3. Plotagem das camadas
-    order = ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
-    for layer in order:
+    # Ordem base (extras primeiro para ficarem por baixo, imovel por ultimo)
+    plot_order = [l for l in gdfs.keys() if l not in ['imovel', 'agua', 'reserva', 'app', 'vegetacao', 'consolidada']]
+    plot_order += ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
+    
+    for layer in plot_order:
         if layer in gdfs:
             gdf = gdfs[layer]
             if gdf.empty: continue
-            style = COLORS.get(layer, {})
+            # Tentar pegar estilo pré-definido ou usar cinza genérico
+            style = COLORS.get(layer, {'edgecolor': '#9e9e9e', 'facecolor': '#eeeeee', 'alpha': 0.4})
             try:
                 if layer in ['imovel', 'agua']:
-                    gdf.plot(ax=ax, **style, zorder=10)
+                    gdf.plot(ax=ax, **{k: v for k, v in style.items() if k != 'label'}, zorder=10)
                 else:
-                    gdf.plot(ax=ax, **style, zorder=5)
+                    gdf.plot(ax=ax, **{k: v for k, v in style.items() if k != 'label'}, zorder=5)
             except Exception as e:
                 print(f"Erro ao plotar {layer}: {e}")
 
@@ -540,24 +544,48 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
 
     # 8. Quadro de Áreas (Recuado para não sobrepor)
     areas_text = "QUADRO DE AREAS (ha)\n" + "=" * 22 + "\n"
-    areas_text += f"Total Imovel:  {areas_ha.get('imovel', 0):>8.2f}\n"
-    if 'reserva' in areas_ha:    areas_text += f"Reserva Legal:  {areas_ha.get('reserva', 0):>8.2f}\n"
-    if 'app' in areas_ha:        areas_text += f"A.P.P.:         {areas_ha.get('app', 0):>8.2f}\n"
-    if 'vegetacao' in areas_ha:  areas_text += f"Remanescente:   {areas_ha.get('vegetacao', 0):>8.2f}\n"
-    if 'consolidada' in areas_ha: areas_text += f"Area Consol.:   {areas_ha.get('consolidada', 0):>8.2f}\n"
+    # Filtrar apenas o que tem área e nome amigável
+    labels_friendly = {
+        'imovel': 'Total Imovel', 'reserva': 'Reserva Legal', 'app': 'A.P.P.', 
+        'vegetacao': 'Remanescente', 'consolidada': 'Area Antrop.'
+    }
+    
+    # Exibir no quadro apenas as principais
+    for key, friendly in labels_friendly.items():
+        if key in areas_ha and areas_ha[key] > 0:
+            areas_text += f"{friendly:<15}: {areas_ha[key]:>8.2f}\n"
 
     plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=11, ha='left', va='top', fontfamily='monospace',
              zorder=25, bbox=dict(boxstyle='round,pad=0.8', facecolor='#f1f3f5', alpha=0.95, edgecolor='#adb5bd'))
 
-    # 9. Legenda (Movida para FORA ou rodapé para evitar sobreposição)
+    # 9. Legenda DINÂMICA (Lida com camadas extras)
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
-    legend_elements = [Patch(facecolor=COLORS[l]['facecolor'], edgecolor=COLORS[l]['edgecolor'], alpha=COLORS[l].get('alpha', 1.0), label=COLORS[l]['label']) 
-                       if 'facecolor' in COLORS[l] else Line2D([0], [0], color=COLORS[l]['edgecolor'], lw=2, label=COLORS[l]['label'])
-                       for l in order if l in gdfs]
+    legend_elements = []
     
-    # Se o mapa for muito largo, coloca em baixo. Aqui usaremos um loc melhor ou ncol=2
-    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.1), ncol=3, fontsize=10, 
+    # Prioridade de exibição na legenda
+    display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
+    # Adicionar camadas "extra" que foram detectadas no ZIP
+    for key in gdfs.keys():
+        if key not in display_order:
+            display_order.append(key)
+            
+    for l in display_order:
+        if l in gdfs and not gdfs[l].empty:
+            label_text = COLORS.get(l, {}).get('label', l.replace('extra_', '').replace('_', ' ').title())
+            if l in COLORS:
+                style = COLORS[l]
+                if 'facecolor' in style:
+                    legend_elements.append(Patch(facecolor=style['facecolor'], edgecolor=style['edgecolor'], 
+                                               alpha=style.get('alpha', 1.0), hatch=style.get('hatch'), label=label_text))
+                else:
+                    legend_elements.append(Line2D([0], [0], color=style['edgecolor'], lw=2, label=label_text))
+            else:
+                # Cor genérica para camadas extras
+                legend_elements.append(Patch(facecolor='#9e9e9e', edgecolor='#424242', alpha=0.5, label=label_text))
+    
+    # Legenda em colunas no rodapé
+    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.15), ncol=3, fontsize=10, 
               frameon=True, facecolor='white', framealpha=1, shadow=True)
 
     # Finalização

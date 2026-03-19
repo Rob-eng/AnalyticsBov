@@ -717,14 +717,17 @@ def process_car_zip(zip_bytes):
         # 3. Localizar e ler shapefiles
         gdfs = {}
         # Mapeamento PRECISO de nomes padrão do SICAR para evitar sobreposições (ex: APP vs RL)
-        layer_defs = [
-            (['AREA_IMOVEL', 'AREA_DO_IMOVEL', 'IMOVEL'], 'imovel'),
-            (['RESERVA_LEGAL', 'RESERVA'], 'reserva'),
-            (['AREA_DE_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'], 'app'),
-            (['VEGETACAO_NATIVA', 'COBERTURA_DO_SOLO', 'VEGETACAO'], 'vegetacao'),
-            (['AREA_CONSOLIDADA', 'CONSOLIDADA', 'ANTROPIZADA', 'USO_CONSOLIDADO', 'AREA_ANTRO'], 'consolidada'),
-            (['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA'], 'agua')
-        ]
+        # 3. Localizar e ler shapefiles
+        gdfs = {}
+        # Mapeamento expandido para busca de termos
+        CATEGORY_MAP = {
+            'imovel': ['IMOVEL', 'AREA_DO_IMOVEL', 'PERIMETRO'],
+            'reserva': ['RESERVA_LEGAL', 'RES_LEGAL'],
+            'app': ['AREA_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'],
+            'vegetacao': ['VEGETACAO_NATIVA', 'REMANESCENTE', 'NATIVA', 'MATA'],
+            'consolidada': ['CONSOLIDADA', 'ANTROPIZADA', 'USO_ANTROP', 'SOLO_CONSOLIDADO'],
+            'agua': ['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA', 'RIO', 'REPRESA']
+        }
         
         found_any = False
         captured_labels = set()
@@ -736,48 +739,67 @@ def process_car_zip(zip_bytes):
                     filename_up = file.upper().replace(' ', '_').replace('-', '_')
                     full_path = os.path.join(root, file)
                     
-                    for keywords, label in layer_defs:
-                        if label in captured_labels: continue
+                    try:
+                        gdf = gpd.read_file(full_path)
+                        if gdf.empty or not gdf.geometry.notnull().any(): continue
                         
-                        # Se qualquer palavra-chave bater com o nome do arquivo
-                        if any(kw in filename_up for kw in keywords):
-                            try:
-                                gdf = gpd.read_file(full_path)
-                                if (not gdf.empty) and (gdf.geometry.notnull().any()):
-                                    # Normalizar para WGS84
-                                    if gdf.crs and gdf.crs.to_epsg() != 4326:
-                                        gdf = gdf.to_crs(epsg=4326)
-                                    
-                                    # Mapeamento robusto de atributos internos
-                                    for col in gdf.columns:
-                                        c_up = col.upper()
-                                        if c_up in ['NOME', 'NOM_IMOVEL', 'NOME_IMOVE', 'DESC_IMOVE', 'NOME_PROPR']:
-                                            gdf['NOM_IMOVEL_MAP'] = gdf[col]
-                                        if c_up in ['NUM_CAR', 'COD_IMOVEL', 'COD_IMOV', 'NUM_CERTIF', 'RES_CAR', 'RECIBO']:
-                                            gdf['COD_IMOVEL_MAP'] = gdf[col]
+                        # Normalizar para WGS84
+                        if gdf.crs and gdf.crs.to_epsg() != 4326:
+                            gdf = gdf.to_crs(epsg=4326)
+                        
+                        # Extrair Atributos Globais (Nome/Recibo)
+                        for col in gdf.columns:
+                            c_up = col.upper()
+                            if c_up in ['NOME', 'NOM_IMOVEL', 'NOME_IMOVE', 'DESC_IMOVE', 'NOME_PROPR']:
+                                gdf['NOM_IMOVEL_MAP'] = gdf[col]
+                            if c_up in ['NUM_CAR', 'COD_IMOVEL', 'COD_IMOV', 'NUM_CERTIF', 'RECIBO']:
+                                gdf['COD_IMOVEL_MAP'] = gdf[col]
 
-                                    # CASO ESPECIAL: Camada mista que contém Nativa e Consolidada no mesmo shape
-                                    if 'COBERTURA' in filename_up or 'SOLO' in filename_up:
-                                        desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO']), None)
-                                        if desc_col:
-                                            gdf_con = gdf[gdf[desc_col].astype(str).str.upper().str.contains('CONSOLIDADA|ANTROPIZADA|USO_ANTROP')]
-                                            gdf_veg = gdf[gdf[desc_col].astype(str).str.upper().str.contains('NATIVA|REMANESCENTE|MATA')]
-                                            if not gdf_con.empty:
-                                                gdfs['consolidada'] = gdf_con
-                                                captured_labels.add('consolidada')
-                                            if not gdf_veg.empty:
-                                                gdfs['vegetacao'] = gdf_veg
-                                                captured_labels.add('vegetacao')
-                                            if not gdf_con.empty or not gdf_veg.empty:
-                                                found_any = True
-                                                continue 
-
-                                    gdfs[label] = gdf
-                                    captured_labels.add(label)
+                        # --- CLASSIFICAÇÃO INTELIGENTE POR FEICÃO ---
+                        # Procurar coluna de descrição para split interno
+                        desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'NOME']), None)
+                        
+                        if desc_col:
+                            # Tenta dividir cada feição em sua gaveta correspondente
+                            for cat, keywords in CATEGORY_MAP.items():
+                                mask = gdf[desc_col].astype(str).str.upper().apply(lambda x: any(kw in x for kw in keywords))
+                                sub_gdf = gdf[mask]
+                                if not sub_gdf.empty:
+                                    if cat in gdfs:
+                                        gdfs[cat] = pd.concat([gdfs[cat], sub_gdf])
+                                    else:
+                                        gdfs[cat] = sub_gdf
+                                    captured_labels.add(cat)
                                     found_any = True
-                                    print(f"[ZIP] Camada '{label}' capturada de '{file}'")
-                            except Exception as e:
-                                print(f"[ZIP] Erro ao ler {file} como {label}: {e}")
+                                    print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}' via atributo '{desc_col}'")
+                        
+                        # Se não dividiu via atributo ou ainda sobram feições, tenta via nome do arquivo
+                        assigned_via_file = False
+                        for cat, keywords in CATEGORY_MAP.items():
+                            if any(kw in filename_up for kw in keywords):
+                                # Se já adicionamos via atributo, evitamos duplicar o arquivo inteiro
+                                if cat not in gdfs or len(gdfs[cat]) < len(gdf):
+                                    gdfs[cat] = gdf
+                                    captured_labels.add(cat)
+                                    found_any = True
+                                    assigned_via_file = True
+                                    print(f"[ZIP] Camada '{cat}' capturada via nome de arquivo: '{file}'")
+                                break
+                        
+                        # Se for um arquivo desconhecido (ex: 'PONTO_DE_INTERESSE.shp'), guardamos como 'extra'
+                        if not assigned_via_file and not desc_col:
+                            label = f"extra_{filename_up[:10].lower()}"
+                            gdfs[label] = gdf
+                            print(f"[ZIP] Camada extra capturada: '{file}' como '{label}'")
+                            found_any = True
+
+                    except Exception as e:
+                        print(f"[ZIP] Erro ao ler {file}: {e}")
+        
+        if not found_any or 'imovel' not in gdfs:
+            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP."
+            
+        return gdfs, None
         
         if not found_any or 'imovel' not in gdfs:
             return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP."
