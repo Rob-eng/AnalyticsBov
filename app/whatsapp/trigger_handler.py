@@ -26,6 +26,11 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             send_whatsapp_menu(sender_phone)
             return
 
+        if fluxo == 'COTACAO':
+            loop = asyncio.get_running_loop()
+            await _handle_cotacao(sender_phone, loop)
+            return
+
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
             return
@@ -246,3 +251,37 @@ async def _handle_mdt(phone, lat, lon, nome, loop):
         send_whatsapp_text(phone, "❌ Não foi possível gerar as imagens MDT.")
     else:
         print("[WA TRIGGER] MDT enviado com sucesso!", flush=True)
+
+async def _handle_cotacao(phone, loop):
+    """Pipeline Cotação Atual → envia gráfico e tabela via WhatsApp."""
+    send_whatsapp_text(phone, "🔄 Buscando dados e gerando análise... Aguarde um momento.")
+    
+    from app.scraper import run_scraping_cycle
+    from app.models import get_recent_prices
+    from app.bot import generate_chart, format_chart_caption
+    
+    # 1. Scrape data
+    data = await loop.run_in_executor(None, lambda: run_scraping_cycle(save=False))
+    if not data:
+        send_whatsapp_text(phone, "⚠️ Não foi possível coletar dados no momento.")
+        return
+
+    # 2. Get historical data and generate chart
+    history_data = await loop.run_in_executor(None, get_recent_prices)
+    chart_path = await loop.run_in_executor(None, lambda: generate_chart(history_data))
+    
+    if not chart_path:
+        send_whatsapp_text(phone, "⚠️ Erro ao gerar o gráfico.")
+        return
+
+    # 3. Format caption
+    note = "Nota: O gráfico reflete os dados históricos coletados. O texto acima contém os preços atuais extraídos agora."
+    caption = format_chart_caption(data, title="Relatório Solicitado (Sob Demanda)", note=note)
+
+    # 4. Send
+    with open(chart_path, "rb") as f:
+        img_bytes = f.read()
+
+    send_whatsapp_image(phone, img_bytes, caption)
+    print("[WA TRIGGER] Cotação enviada com sucesso!", flush=True)
+
