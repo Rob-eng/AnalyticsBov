@@ -19,11 +19,17 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         parts = trigger_string.replace("TRIGGER_FLOW:", "").strip().split("|")
         parts = [p.strip() for p in parts]
         
+        fluxo = parts[0].upper()
+        
+        if fluxo == 'MENU':
+            from app.whatsapp.sender import send_whatsapp_menu
+            send_whatsapp_menu(sender_phone)
+            return
+
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
             return
-        
-        fluxo = parts[0].upper()
+            
         lat = float(parts[1])
         lon = float(parts[2])
         nome = parts[3] if len(parts) > 3 else "Local Selecionado"

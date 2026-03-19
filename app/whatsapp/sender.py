@@ -224,3 +224,79 @@ def send_whatsapp_buttons(to_phone: str, body_text: str, buttons: list):
     if success:
         print(f"✅ WA buttons enviados para {to_phone}", flush=True)
     return success
+
+def send_whatsapp_menu(to_phone: str):
+    """
+    Envia uma mensagem interativa do tipo "List" para funcionar como um Menu Principal.
+    """
+    if not _check_credentials():
+        return False
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {
+                "type": "text",
+                "text": "Agro Analytics 🐂"
+            },
+            "body": {
+                "text": "Escolha uma das opções abaixo para continuar:"
+            },
+            "footer": {
+                "text": "Menu Principal"
+            },
+            "action": {
+                "button": "Ver Opções",
+                "sections": [
+                    {
+                        "title": "Cotações e Mercado",
+                        "rows": [
+                            {
+                                "id": "Qual a cotação atual do boi gordo?",
+                                "title": "📊 Cotação Atual"
+                            },
+                            {
+                                "id": "Mercado futuro do boi B3",
+                                "title": "🔮 Mercado Futuro"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Análise Ambiental",
+                        "rows": [
+                            {
+                                "id": "Previsão de chuva",
+                                "title": "🌧️ Previsão de Chuva"
+                            },
+                            {
+                                "id": "Mapa NDVI verde do pasto",
+                                "title": "🌿 Análise NDVI"
+                            },
+                            {
+                                "id": "Terreno MDT topografia",
+                                "title": "🏔️ Terreno (MDT)"
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Minhas Propriedades",
+                        "rows": [
+                            {
+                                "id": "Listar minhas propriedades",
+                                "title": "📌 Listar Propriedades"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA Menu enviado para {to_phone}", flush=True)
+    return success

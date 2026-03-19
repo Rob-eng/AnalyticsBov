@@ -115,6 +115,18 @@ def get_tools_definition():
              }
         },
         {
+             "type": "function",
+             "function": {
+                 "name": "mostrar_menu_principal",
+                 "description": "Exibe o menu interativo principal para o usuário. Use quando o usuário pedir 'menu', 'opções', disser 'oi' num contexto de boas vindas, etc.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {},
+                     "required": []
+                 }
+             }
+        },
+        {
                 "type": "function",
                 "function": {
                     "name": "cadastrar_propriedade",
@@ -250,6 +262,9 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
                 return f"Erro ao cadastrar propriedade: {e}"
             finally:
                 session.close()
+
+        elif name == "mostrar_menu_principal":
+            return "TRIGGER_FLOW: MENU"
 
         elif name == "disparar_fluxo_automatico":
             fluxo = arguments.get("fluxo")
