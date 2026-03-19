@@ -391,8 +391,7 @@ async def process_whatsapp_zip_upload(phone, media_id):
     # 4. Send back
     caption = (
         "🗺️ *RELATÓRIO AMBIENTAL PROFISSIONAL*\n\n"
-        "Este mapa foi gerado automaticamente a partir do arquivo ZIP enviado.\n"
-        "📈 Inclui grade de coordenadas, escala e legenda oficial.\n\n"
+        "Análise cartográfica completa gerada a partir do seu arquivo CAR.\n\n"
         "Desenvolvido por *Agro Analytics*"
     )
     send_whatsapp_image(phone, map_bytes, caption)

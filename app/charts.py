@@ -362,7 +362,7 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
 def generate_pro_car_map(gdfs):
     """
     Gera um mapa cartográfico profissional a partir dos GeoDataFrames extraídos do ZIP.
-    Inclui grade, norte, escala (estimada), legenda e logo.
+    Inclui grade, norte, escala, quadro de áreas detalhado, legenda e mapa de localização.
     """
     import os
     import matplotlib.pyplot as plt
@@ -371,31 +371,42 @@ def generate_pro_car_map(gdfs):
     import numpy as np
     from datetime import datetime
     
-    # 1. Configuração da Figura
-    fig, ax = plt.subplots(figsize=(10, 12), facecolor='white')
+    # 1. Configuração da Figura (A4 vertical proportions)
+    fig, ax = plt.subplots(figsize=(10, 13), facecolor='white')
     ax.set_facecolor('#fdfdfd')
     
-    # Definição de Cores e Estilos SICAR
+    # Cores Oficiais SICAR
     COLORS = {
-        'imovel': {'edgecolor': '#404040', 'facecolor': 'none', 'linewidth': 2.5, 'linestyle': '--', 'label': 'Perímetro do Imóvel'},
-        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Reserva Legal (RL)'},
-        'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.3, 'label': 'Veg. Nativa Remanescente'},
-        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f4', 'linewidth': 1.2, 'label': 'Recursos Hídricos'},
-        'consolidada': {'edgecolor': '#ef6c00', 'facecolor': '#ffb74d', 'alpha': 0.3, 'label': 'Área Consolidada'}
+        'imovel': {'edgecolor': '#404040', 'facecolor': 'none', 'linewidth': 3, 'linestyle': '--', 'label': 'Perímetro do Imóvel'},
+        'reserva': {'edgecolor': '#1b5e20', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Reserva Legal (RL)'},
+        'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
+        'vegetacao': {'edgecolor': '#33691e', 'facecolor': '#689f38', 'alpha': 0.4, 'label': 'Veg. Nativa Remanescente'},
+        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f4', 'linewidth': 1.5, 'label': 'Recursos Hídricos'},
+        'consolidada': {'edgecolor': '#e65100', 'facecolor': '#ffb74d', 'alpha': 0.4, 'label': 'Área Consolidada'}
     }
     
     main_gdf = gdfs.get('imovel')
     if main_gdf is None or main_gdf.empty:
         return None
         
-    # 2. Plotagem das camadas na ordem correta
+    # 2. Cálculos de Áreas (Hectares)
+    areas_ha = {}
+    try:
+        # Usar projeção UTM estimada para cálculo de área preciso
+        utm_crs = main_gdf.estimate_utm_crs()
+        for key, gdf in gdfs.items():
+            if not gdf.empty:
+                areas_ha[key] = gdf.to_crs(utm_crs).area.sum() / 10000
+    except Exception as ae:
+        print(f"Erro no cálculo de áreas: {ae}")
+        for key in gdfs: areas_ha[key] = 0
+
+    # 3. Plotagem das camadas
     order = ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
     for layer in order:
         if layer in gdfs:
             gdf = gdfs[layer]
             if gdf.empty: continue
-            
             style = COLORS.get(layer, {})
             try:
                 if layer in ['imovel', 'agua']:
@@ -403,75 +414,92 @@ def generate_pro_car_map(gdfs):
                 else:
                     gdf.plot(ax=ax, **style, zorder=5)
             except Exception as e:
-                print(f"Erro ao plotar camada {layer}: {e}")
+                print(f"Erro ao plotar {layer}: {e}")
 
-    # 3. Estética Cartográfica
+    # 4. Estética Cartográfica
     ax.set_title("🗺️ RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=18, fontweight='bold', color='#1a1a1a', pad=25)
-    
-    # Grade de Coordenadas
     ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
     ax.set_xlabel('Longitude (decimal)', fontsize=10, color='gray')
     ax.set_ylabel('Latitude (decimal)', fontsize=10, color='gray')
     
-    # Rosa dos Ventos (Norte)
-    x, y, arrow_length = 0.94, 0.94, 0.07
+    # Norte
+    x, y, arrow_length = 0.94, 0.93, 0.06
     ax.annotate('N', xy=(x, y), xytext=(x, y-arrow_length),
-                arrowprops=dict(facecolor='black', width=3, headwidth=12),
-                ha='center', va='center', fontsize=22, fontweight='bold', xycoords='axes fraction')
+                arrowprops=dict(facecolor='black', width=3, headwidth=10),
+                ha='center', va='center', fontsize=20, fontweight='bold', xycoords='axes fraction')
     
-    # Logo Agro Analytics
+    # 5. Escala Gráfica (Manual)
     try:
-        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.jpg")
-        if os.path.exists(logo_path):
-            from matplotlib.image import imread
-            logo = imread(logo_path)
-            ib = OffsetImage(logo, zoom=0.07)
-            ab = AnnotationBbox(ib, (0.08, 0.93), xycoords='axes fraction', frameon=False)
-            ax.add_artist(ab)
-    except Exception as e:
-        print(f"Erro ao carregar logo: {e}")
-
-    # 4. Cálculos e Quadro de Informações
-    try:
-        # Estimar área em Hectares usando projeção UTM local
-        utm_gdf = main_gdf.to_crs(main_gdf.estimate_utm_crs())
-        total_area_ha = utm_gdf.area.sum() / 10000
-    except:
-        total_area_ha = 0
+        center = main_gdf.geometry.centroid.iloc[0]
+        m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
+        # Seleciona tamanho ideal da barra
+        total_ha = areas_ha.get('imovel', 0)
+        if total_ha > 2000: s_m, s_lab = 2000, "2 km"
+        elif total_ha > 500: s_m, s_lab = 1000, "1 km"
+        elif total_ha > 100: s_m, s_lab = 500, "500 m"
+        else: s_m, s_lab = 200, "200 m"
         
-    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Fazenda Selecionada")
+        s_deg = s_m / m_per_deg_lon
+        # Posição: inferior esquerda
+        xmin, ymin, xmax, ymax = ax.axis()
+        bar_x = xmin + (xmax - xmin) * 0.05
+        bar_y = ymin + (ymax - ymin) * 0.05
+        ax.plot([bar_x, bar_x + s_deg], [bar_y, bar_y], color='black', lw=3, zorder=20)
+        ax.text(bar_x + s_deg/2, bar_y + (ymax-ymin)*0.01, s_lab, ha='center', fontsize=9, fontweight='bold')
+    except: pass
+
+    # 6. Mapa de Localização (Inset)
+    try:
+        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+        ax_inset = inset_axes(ax, width="25%", height="20%", loc='upper right', borderpad=2)
+        ax_inset.set_facecolor('#f0f0f0')
+        # Zoom out do imóvel
+        main_gdf.plot(ax=ax_inset, color='red', zorder=5)
+        # Tenta pegar um buffer pros arredores
+        bounds = main_gdf.total_bounds # [minx, miny, maxx, maxy]
+        buffer_val = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 10
+        ax_inset.set_xlim(bounds[0]-buffer_val, bounds[2]+buffer_val)
+        ax_inset.set_ylim(bounds[1]-buffer_val, bounds[3]+buffer_val)
+        ax_inset.set_xticks([]); ax_inset.set_yticks([])
+        ax_inset.set_title(f"Região ({str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]})", fontsize=8)
+    except: pass
+
+    # 7. Logo e Quadro de Informações
+    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade Privada")
     cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Não identificado")
     
     info_text = (
         f"📍 Propriedade: {prop_name}\n"
         f"🆔 Código CAR: {cod_car}\n"
-        f"📏 Área Total: {total_area_ha:.2f} ha\n"
         f"📅 Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"🌐 Datum: WGS 84 (SIRGAS 2000)"
+        f"🌐 Sistema: WGS 84 / SIRGAS 2000"
     )
-    
-    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, 
-             fontsize=10, ha='right', va='bottom', fontfamily='monospace',
-             bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', alpha=0.9, edgecolor='#ced4da'))
+    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=9.5, ha='right', va='bottom', fontfamily='monospace',
+             bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', alpha=0.95, edgecolor='#ced4da'))
 
-    # 5. Legenda Customizada
+    # 8. Quadro de Áreas (Tabela Lateral)
+    areas_text = "📊 QUADRO DE ÁREAS (ha)\n" + "─" * 25 + "\n"
+    areas_text += f"🏠 Total Imóvel:  {areas_ha.get('imovel', 0):>8.2f}\n"
+    if 'reserva' in areas_ha:    areas_text += f"🌳 Reserva Legal:  {areas_ha.get('reserva', 0):>8.2f}\n"
+    if 'app' in areas_ha:        areas_text += f"💧 A.P.P.:         {areas_ha.get('app', 0):>8.2f}\n"
+    if 'vegetacao' in areas_ha:  areas_text += f"🌿 Remanescente:   {areas_ha.get('vegetacao', 0):>8.2f}\n"
+    if 'consolidada' in areas_ha: areas_text += f"🚜 Consolidada:    {areas_ha.get('consolidada', 0):>8.2f}\n"
+
+    plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=10, ha='left', va='top', fontfamily='monospace',
+             bbox=dict(boxstyle='round,pad=0.8', facecolor='#e9ecef', alpha=0.9, edgecolor='#adb5bd'))
+
+    # 9. Legenda
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
-    legend_elements = []
-    for layer in order:
-        if layer in gdfs:
-            cfg = COLORS[layer]
-            if 'facecolor' in cfg:
-                legend_elements.append(Patch(facecolor=cfg['facecolor'], edgecolor=cfg['edgecolor'], alpha=cfg.get('alpha', 1.0), label=cfg['label']))
-            else:
-                legend_elements.append(Line2D([0], [0], color=cfg.get('edgecolor', 'black'), lw=cfg.get('linewidth', 1), linestyle=cfg.get('linestyle', '-'), label=cfg['label']))
-    
-    ax.legend(handles=legend_elements, loc='lower left', fontsize=9, frameon=True, facecolor='white', shadow=True)
+    legend_elements = [Patch(facecolor=COLORS[l]['facecolor'], edgecolor=COLORS[l]['edgecolor'], alpha=COLORS[l].get('alpha', 1.0), label=COLORS[l]['label']) 
+                       if 'facecolor' in COLORS[l] else Line2D([0], [0], color=COLORS[l]['edgecolor'], lw=2, label=COLORS[l]['label'])
+                       for l in order if l in gdfs]
+    ax.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.12), fontsize=9, frameon=True, facecolor='white')
 
     # Finalização
     plt.tight_layout()
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+    plt.savefig(buf, format='png', dpi=180, bbox_inches='tight')
     plt.close()
     buf.seek(0)
     return buf.read()

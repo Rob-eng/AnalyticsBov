@@ -1933,8 +1933,7 @@ async def receive_car_zip_tg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # 4. Send
         caption = (
             "🗺️ *RELATÓRIO AMBIENTAL PROFISSIONAL*\n\n"
-            "Análise cartográfica completa gerada a partir do seu arquivo CAR.\n"
-            "📈 Legenda, escala e grade incluídas.\n\n"
+            "Análise cartográfica completa gerada a partir do seu arquivo CAR.\n\n"
             "Desenvolvido por *Agro Analytics*"
         )
         await context.bot.send_photo(
