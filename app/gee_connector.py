@@ -655,14 +655,29 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
                           .sort('CLOUD_COVER'))
             if collection.size().getInfo() > 0:
                 image = collection.first()
-                v_params = {'bands': ['SR_B4', 'SR_B3', 'SR_B2'], 'min': 7000, 'max': 16000, 'gamma': 1.1}
                 print(f"[GEE] Usando Landsat-8 (Nuvens: {image.get('CLOUD_COVER').getInfo()}%)", flush=True)
             else:
                 print("[GEE] Nenhuma imagem encontrada em 365 dias.", flush=True)
                 return None
             
+        # 2. Visualização
+        if 'B4' in image.bandNames().getInfo(): # Sentinel-2
+            v_params = {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3500, 'gamma': 1.3}
+        else: # Landsat
+            v_params = {'bands': ['SR_B4', 'SR_B3', 'SR_B2'], 'min': 7000, 'max': 16000, 'gamma': 1.1}
+        
+        # 3. Adicionar contornos administrativos (opcional, para contexto regional)
+        visualized = image.visualize(**v_params)
+        if padding_m > 5000: # Somente para zooms regionais
+            try:
+                # Usar GAUL level 1 (Estados) ou ADM1
+                states = ee.FeatureCollection("FAO/GAUL/2015/level1")
+                # Desenha o contorno dos estados em vermelho/branco para ver os limites
+                visualized = visualized.paint(states, 'white', 2)
+            except: pass
+            
         # 4. Gerar URL
-        thumb_url = image.visualize(**v_params).getThumbURL({
+        thumb_url = visualized.getThumbURL({
             'dimensions': dimensions,
             'region': region.getInfo(),
             'format': 'png'
