@@ -398,11 +398,11 @@ async def process_whatsapp_zip_upload(phone, media_id):
             bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
             turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
             
-            # 3.2 Background Regional (~25km buffer)
+            # 3.2 Background Regional (~10km buffer)
             print(f"[WA] Buscando imagem regional...", flush=True)
-            r_bounds = main_gdf.buffer(0.25).total_bounds
+            r_bounds = main_gdf.buffer(0.10).total_bounds
             reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
-            rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 25000)
+            rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
             
             import requests
             if turl:

@@ -382,7 +382,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
         'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.4, 'label': 'Remanescente Nativa'},
         'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpo d\'Agua'},
-        'consolidada': {'edgecolor': '#795548', 'facecolor': '#ff9800', 'alpha': 0.4, 'label': 'Area Consol./Antrop.'}
+        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.6, 'label': 'Area Antropizada (Consol)'}
     }
     
     main_gdf = gdfs.get('imovel')
@@ -497,29 +497,35 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # 6. Mapa de Localização (Inset)
     try:
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        ax_inset = inset_axes(ax, width="25%", height="18%", loc='upper right', borderpad=2)
+        # Quadrado maior para o contexto
+        ax_inset = inset_axes(ax, width="25%", height="25%", loc='upper right', borderpad=1)
+        ax_inset.set_facecolor('#ffffff')
         
-        # Se tiver imagem regional, coloca no Inset
+        # Se tiver imagem regional, trava os limites EXATAMENTE nela para preencher o box
         if reg_bg_img and reg_bg_extent:
             try:
                 img_reg = imread(io.BytesIO(reg_bg_img), format='png')
                 ax_inset.imshow(img_reg, extent=reg_bg_extent, zorder=0)
+                ax_inset.set_xlim(reg_bg_extent[0], reg_bg_extent[1])
+                ax_inset.set_ylim(reg_bg_extent[2], reg_bg_extent[3])
             except: pass
         elif background_img and bg_extent:
-            # Fallback para o fundo principal
              ax_inset.imshow(img_data, extent=bg_extent)
-        else:
-            ax_inset.set_facecolor('#fefefe')
+             ax_inset.set_xlim(bg_extent[0], bg_extent[1])
+             ax_inset.set_ylim(bg_extent[2], bg_extent[3])
             
-        main_gdf.plot(ax=ax_inset, color='red', edgecolor='white', zorder=10)
-        # Buffer de 40x para contexto regional (mais zoom out)
-        ibuffer = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 40
-        ax_inset.set_xlim(bounds[0]-ibuffer, bounds[2]+ibuffer)
-        ax_inset.set_ylim(bounds[1]-ibuffer, bounds[3]+ibuffer)
-        ax_inset.set_xticks([]); ax_inset.set_yticks([])
+        # Ponto marcador no centro do imóvel
+        main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=50, zorder=10)
         
+        ax_inset.set_xticks([]); ax_inset.set_yticks([])
+        # Borda preta forte
+        for spine in ax_inset.spines.values():
+            spine.set_visible(True)
+            spine.set_edgecolor('black')
+            spine.set_linewidth(1.5)
+
         st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
-        ax_inset.set_title(f"Contexto Regional ({st_code})", fontsize=10, fontweight='bold')
+        ax_inset.set_title(f"Regional ({st_code})", fontsize=11, fontweight='bold', pad=5)
     except: pass
 
     # 7. Quadro de Informações
