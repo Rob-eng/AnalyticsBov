@@ -359,11 +359,11 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
     plt.close()
     
     return output_path
-def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
+def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=None, reg_bg_extent=None):
     """
-    Gera um mapa cartográfico profissional a partir dos GeoDataFrames extraídos do ZIP.
-    background_img: bytes da imagem de satélite (opcional)
-    bg_extent: [minx, maxx, miny, maxy] da imagem de fundo
+    Gera um mapa cartográfico profissional.
+    background_img: bytes do zoom principal (ex: 1km padding)
+    reg_bg_img: bytes do zoom regional (ex: 20km padding)
     """
     import os
     import matplotlib.pyplot as plt
@@ -373,16 +373,16 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
     from datetime import datetime
     
     # 1. Configuração da Figura
-    fig, ax = plt.subplots(figsize=(10, 13), facecolor='white')
+    fig, ax = plt.subplots(figsize=(12, 12), facecolor='white')
     
-    # Cores SICAR
+    # Cores Oficiais SICAR (Ajustadas para visibilidade e distinção)
     COLORS = {
         'imovel': {'edgecolor': '#FFFF00', 'facecolor': 'none', 'linewidth': 3, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
-        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.4, 'label': 'Reserva Legal (RL)'},
+        'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.45, 'label': 'Reserva Legal (RL)'},
         'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.3, 'label': 'Veg. Nativa'},
-        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpos d\'Agua'},
-        'consolidada': {'edgecolor': '#e65100', 'facecolor': '#ffb74d', 'alpha': 0.3, 'label': 'Area Consolidada'}
+        'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.4, 'label': 'Remanescente (Veg. Nat)'},
+        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Agua'},
+        'consolidada': {'edgecolor': '#8d6e63', 'facecolor': '#d7ccc8', 'alpha': 0.5, 'label': 'Area Antropizada (Consol)'}
     }
     
     main_gdf = gdfs.get('imovel')
@@ -395,7 +395,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
             from matplotlib.image import imread
             import io
             img_data = imread(io.BytesIO(background_img), format='png')
-            ax.imshow(img_data, extent=bg_extent, zorder=0, alpha=0.9)
+            ax.imshow(img_data, extent=bg_extent, zorder=0, alpha=0.95)
             # Ao usar satélite, mudamos a cor do perímetro para Amarelo para destacar
             COLORS['imovel']['edgecolor'] = '#FFFF00' 
         except Exception as e:
@@ -430,7 +430,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
             except Exception as e:
                 print(f"Erro ao plotar {layer}: {e}")
 
-    # 3.1 AJUSTE CRÍTICO: Zoom focado no imóvel para evitar distorções por pontos errôneos
+    # 3.1 AJUSTE CRÍTICO: Zoom focado no imóvel
     bounds = main_gdf.total_bounds # [minx, miny, maxx, maxy]
     padx = max((bounds[2] - bounds[0]) * 0.15, 0.001)
     pady = max((bounds[3] - bounds[1]) * 0.15, 0.001)
@@ -438,39 +438,54 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
     ax.set_ylim(bounds[1] - pady, bounds[3] + pady)
     ax.set_aspect('equal', adjustable='box')
 
-    # 4. Estética Cartográfica (Removendo emojis para evitar 'quadradinhos' em algumas fontes)
-    ax.set_title("RELATORIO AMBIENTAL GEOESTATISTICO", fontsize=18, fontweight='bold', color='#1a1a1a', pad=25)
+    # 4. Estética Cartográfica
+    ax.set_title("RELATORIO AMBIENTAL GEOESTATISTICO", fontsize=20, fontweight='bold', color='#1a1a1a', pad=30)
     ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
     ax.set_xlabel('Longitude (decimal)', fontsize=10, color='gray')
     ax.set_ylabel('Latitude (decimal)', fontsize=10, color='gray')
     
+    # Rotação da grade Y (alinhada verticalmente)
+    ax.tick_params(axis='y', labelrotation=90, labelsize=9)
+    ax.tick_params(axis='x', labelsize=9)
+    
     # Norte
-    x, y, arrow_length = 0.94, 0.93, 0.06
+    x, y, arrow_length = 0.96, 0.94, 0.05
     ax.annotate('N', xy=(x, y), xytext=(x, y-arrow_length),
                 arrowprops=dict(facecolor='black', width=3, headwidth=10),
-                ha='center', va='center', fontsize=20, fontweight='bold', xycoords='axes fraction')
+                ha='center', va='center', fontsize=18, fontweight='bold', xycoords='axes fraction')
     
-    # 5. Escala Gráfica (Manual)
+    # 5. Escala Gráfica Cartográfica (com divisões)
     try:
         center = main_gdf.geometry.centroid.iloc[0]
-        # Distância aproximada de 1 grau na latitude central
         m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
         total_ha = areas_ha.get('imovel', 0)
         
-        if total_ha > 2000: s_m, s_lab = 2000, "2 km"
-        elif total_ha > 500: s_m, s_lab = 1000, "1 km"
-        elif total_ha > 100: s_m, s_lab = 500, "500 m"
+        if total_ha > 1500: s_m, s_lab = 2000, "2 km"
+        elif total_ha > 300: s_m, s_lab = 1000, "1 km"
+        elif total_ha > 80: s_m, s_lab = 500, "500 m"
         else: s_m, s_lab = 200, "200 m"
         
         s_deg = s_m / m_per_deg_lon
         ax_xmin, ax_xmax = ax.get_xlim()
         ax_ymin, ax_ymax = ax.get_ylim()
         
-        # Posição: inferior esquerda focado no mapa
-        bar_x = ax_xmin + (ax_xmax - ax_xmin) * 0.05
-        bar_y = ax_ymin + (ax_ymax - ax_ymin) * 0.05
-        ax.plot([bar_x, bar_x + s_deg], [bar_y, bar_y], color='black', lw=4, zorder=20)
-        ax.text(bar_x + s_deg/2, bar_y + (ax_ymax-ax_ymin)*0.015, s_lab, ha='center', fontsize=10, fontweight='bold')
+        # Posição: inferior esquerda
+        bx = ax_xmin + (ax_xmax - ax_xmin) * 0.05
+        by = ax_ymin + (ax_ymax - ax_ymin) * 0.05
+        
+        # Desenhar barra de escala segmentada
+        divs = 4
+        segment = s_deg / divs
+        for i in range(divs):
+            color = 'black' if i % 2 == 0 else 'white'
+            ax.plot([bx + i*segment, bx + (i+1)*segment], [by, by], color='black', lw=6, solid_capstyle='butt', zorder=20)
+            ax.plot([bx + i*segment, bx + (i+1)*segment], [by, by], color=color, lw=4, solid_capstyle='butt', zorder=21)
+        
+        # Característica: uma antes do zero e 3 depois
+        # ... Simplificando: Marca 0, meio e fim
+        ax.text(bx, by - (ax_ymax-ax_ymin)*0.015, "0", ha='center', fontsize=8, fontweight='bold')
+        ax.text(bx + s_deg, by - (ax_ymax-ax_ymin)*0.015, s_lab, ha='center', fontsize=8, fontweight='bold')
+        ax.text(bx + s_deg/2, by + (ax_ymax-ax_ymin)*0.015, "Escala", ha='center', fontsize=9, fontweight='bold')
     except: pass
 
     # 6. Mapa de Localização (Inset)
@@ -478,64 +493,63 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None):
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
         ax_inset = inset_axes(ax, width="25%", height="18%", loc='upper right', borderpad=2)
         
-        # Se tiver imagem de fundo, coloca no Inset também (zoom out)
-        if background_img and bg_extent:
+        # Se tiver imagem regional, coloca no Inset
+        if reg_bg_img and reg_bg_extent:
             try:
-                ax_inset.imshow(img_data, extent=bg_extent, zorder=0)
+                img_reg = imread(io.BytesIO(reg_bg_img), format='png')
+                ax_inset.imshow(img_reg, extent=reg_bg_extent, zorder=0)
             except: pass
+        elif background_img and bg_extent:
+            # Fallback para o fundo principal
+             ax_inset.imshow(img_data, extent=bg_extent)
         else:
-            ax_inset.set_facecolor('#fdfdfd')
+            ax_inset.set_facecolor('#fefefe')
             
-        # Ponto vermelho no imóvel
         main_gdf.plot(ax=ax_inset, color='red', edgecolor='white', zorder=10)
-        
-        # Buffer de 25x para contexto regional
-        ibuffer = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 25
+        # Buffer de 40x para contexto regional (mais zoom out)
+        ibuffer = max(bounds[2]-bounds[0], bounds[3]-bounds[1]) * 40
         ax_inset.set_xlim(bounds[0]-ibuffer, bounds[2]+ibuffer)
         ax_inset.set_ylim(bounds[1]-ibuffer, bounds[3]+ibuffer)
         ax_inset.set_xticks([]); ax_inset.set_yticks([])
         
         st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
-        ax_inset.set_title(f"Contexto Regional ({st_code})", fontsize=10, fontweight='bold', pad=10)
-        
-        # Quadrado preto indicando a área de zoom principal
-        from matplotlib.patches import Rectangle
-        rect = Rectangle((bounds[0]-padx, bounds[1]-pady), (bounds[2]-bounds[0]+2*padx), (bounds[3]-bounds[1]+2*pady), linewidth=1, edgecolor='black', facecolor='none', zorder=15)
-        ax_inset.add_patch(rect)
-    except Exception as ie:
-        print(f"Erro no Inset: {ie}")
+        ax_inset.set_title(f"Contexto Regional ({st_code})", fontsize=10, fontweight='bold')
+    except: pass
 
-    # 7. Logo e Quadro de Informações
-    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade Privada")[:35]
+    # 7. Quadro de Informações
+    # Priorizar o nome do cadastro oficial
+    prop_name = str(main_gdf.iloc[0].get('NOM_IMOVEL') or main_gdf.iloc[0].get('NOME_IMOVE') or "Propriedade")[:35]
     cod_car = str(main_gdf.iloc[0].get('COD_IMOVEL') or "Nao identificado")
     
     info_text = (
         f"Propriedade: {prop_name}\n"
         f"Codigo CAR:   {cod_car}\n"
         f"Emissao:      {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"Sistema:      WGS 84 / SIRGAS 2000"
+        f"Sistema:      SIRGAS 2000"
     )
     plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=10, ha='right', va='bottom', fontfamily='monospace',
              zorder=25, bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', alpha=0.9, edgecolor='#ced4da'))
 
-    # 8. Quadro de Áreas (Tabela Lateral)
+    # 8. Quadro de Áreas (Recuado para não sobrepor)
     areas_text = "QUADRO DE AREAS (ha)\n" + "=" * 22 + "\n"
     areas_text += f"Total Imovel:  {areas_ha.get('imovel', 0):>8.2f}\n"
     if 'reserva' in areas_ha:    areas_text += f"Reserva Legal:  {areas_ha.get('reserva', 0):>8.2f}\n"
     if 'app' in areas_ha:        areas_text += f"A.P.P.:         {areas_ha.get('app', 0):>8.2f}\n"
     if 'vegetacao' in areas_ha:  areas_text += f"Remanescente:   {areas_ha.get('vegetacao', 0):>8.2f}\n"
-    if 'consolidada' in areas_ha: areas_text += f"Consolidada:    {areas_ha.get('consolidada', 0):>8.2f}\n"
+    if 'consolidada' in areas_ha: areas_text += f"Area Consol.:   {areas_ha.get('consolidada', 0):>8.2f}\n"
 
     plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=11, ha='left', va='top', fontfamily='monospace',
-             zorder=25, bbox=dict(boxstyle='round,pad=0.8', facecolor='#f1f3f5', alpha=0.9, edgecolor='#adb5bd'))
+             zorder=25, bbox=dict(boxstyle='round,pad=0.8', facecolor='#f1f3f5', alpha=0.95, edgecolor='#adb5bd'))
 
-    # 9. Legenda
+    # 9. Legenda (Movida para FORA ou rodapé para evitar sobreposição)
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
     legend_elements = [Patch(facecolor=COLORS[l]['facecolor'], edgecolor=COLORS[l]['edgecolor'], alpha=COLORS[l].get('alpha', 1.0), label=COLORS[l]['label']) 
                        if 'facecolor' in COLORS[l] else Line2D([0], [0], color=COLORS[l]['edgecolor'], lw=2, label=COLORS[l]['label'])
                        for l in order if l in gdfs]
-    ax.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.12), fontsize=10, 
+    
+    # Se o mapa for muito largo, coloca em baixo. Aqui usaremos um loc melhor ou ncol=2
+    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.1), ncol=3, fontsize=10, 
               frameon=True, facecolor='white', framealpha=1, shadow=True)
 
     # Finalização

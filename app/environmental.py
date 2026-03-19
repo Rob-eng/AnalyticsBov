@@ -722,7 +722,7 @@ def process_car_zip(zip_bytes):
             (['RESERVA_LEGAL', 'RESERVA'], 'reserva'),
             (['AREA_DE_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'], 'app'),
             (['VEGETACAO_NATIVA', 'COBERTURA_DO_SOLO', 'VEGETACAO'], 'vegetacao'),
-            (['AREA_CONSOLIDADA', 'CONSOLIDADA'], 'consolidada'),
+            (['AREA_CONSOLIDADA', 'CONSOLIDADA', 'ANTROPIZADA'], 'consolidada'),
             (['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA'], 'agua')
         ]
         

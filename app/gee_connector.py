@@ -616,10 +616,11 @@ def get_terrain_data(geometry_geojson):
         print(traceback.format_exc(), flush=True)
         return None
 
-def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=500):
+def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
     """
     Gera uma URL de miniatura RGB (Sentinel-2) para a geometria fornecida.
-    Ideal para usar como plano de fundo (Background) de mapas cartográficos.
+    dimensoes: 1024 (alta qualidade)
+    padding_m: buffer em metros ao redor da area (padrão 1km para ver vizinhos)
     """
     try:
         if not initialize_gee():
@@ -627,23 +628,22 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=500):
 
         geom = ee.Geometry(geometry_geojson)
         
-        # 1. Buscar imagem recente e limpa (filtro de 120 dias)
+        # 1. Buscar imagem recente e limpa (Sentinel-2 SR)
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=120)
+        start_date = end_date - timedelta(days=150)
         
-        # S2_SR_HARMONIZED é calibrada (Surface Reflectance)
         collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                      .filterBounds(geom)
+                      .filterBounds(geom.buffer(padding_m))
                       .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+                      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))
                       .sort('system:time_start', False))
         
         if collection.size().getInfo() == 0:
-            # Relaxar para 30% de nuvens se não achar nenhuma imagem muito limpa
-            collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                          .filterBounds(geom)
+            # Fallback para Landsat 8 se Sentinel-2 falhar (zooms maiores)
+            collection = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+                          .filterBounds(geom.buffer(padding_m))
                           .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-                          .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+                          .filter(ee.Filter.lt('CLOUD_COVER', 30))
                           .sort('system:time_start', False))
         
         if collection.size().getInfo() == 0:
@@ -651,25 +651,20 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=500):
             
         image = collection.first()
         
-        # 2. Preparar Visualização (RGB Natural - B4, B3, B2)
-        vis_params = {
-            'bands': ['B4', 'B3', 'B2'],
-            'min': 0,
-            'max': 3500, # Brilho padrão Sentinel-2 (em 10000 unidades)
-            'gamma': 1.3
-        }
+        # 2. Visualização
+        if 'B4' in image.bandNames().getInfo(): # Sentinel-2
+            v_params = {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3000, 'gamma': 1.2}
+        else: # Landsat
+            v_params = {'bands': ['SR_B4', 'SR_B3', 'SR_B2'], 'min': 7000, 'max': 15000, 'gamma': 1.2}
         
-        # 3. Calcular Região com Buffer de 500m (para ver arredores) e no formato quadrado
+        # 3. Região com Buffer solicitado
         region = geom.buffer(padding_m).bounds()
         
-        # 4. Construir URL da imagem PNG
-        thumb_url = image.visualize(**vis_params).getThumbURL({
+        return image.visualize(**v_params).getThumbURL({
             'dimensions': dimensions,
             'region': region.getInfo(),
             'format': 'png'
         })
-        
-        return thumb_url
 
     except Exception as e:
         print(f"[GEE SATELLITE ERROR] {e}", flush=True)

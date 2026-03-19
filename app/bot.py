@@ -1924,27 +1924,37 @@ async def receive_car_zip_tg(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await status_msg.edit_text(f"⚠️ Erro no processamento: {error}")
             return
             
-        # 2.1 Buscar Imagem de Satélite (Background) via GEE
+        # 2.1 Buscar Imagens de Satélite (Main & Regional) via GEE
         bg_bytes, bg_extent = None, None
+        reg_bg_bytes, reg_bg_extent = None, None
         try:
             main_gdf = gdfs.get('imovel')
             if main_gdf is not None:
-                # Buffer de ~500m (0.005 graus aprox) para o fundo
-                bounds = main_gdf.buffer(0.005).total_bounds # [minx, miny, maxx, maxy]
-                bg_extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
                 from app.gee_connector import get_satellite_thumbnail
                 import json
                 geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
-                thumb_url = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json)
-                if thumb_url:
-                    import requests
-                    resp = await loop.run_in_executor(None, requests.get, thumb_url, {'timeout': 20})
-                    if resp.status_code == 200:
-                        bg_bytes = resp.content
+                
+                # Main background
+                b_bounds = main_gdf.buffer(0.015).total_bounds
+                bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
+                turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
+                
+                # Regional background
+                r_bounds = main_gdf.buffer(0.25).total_bounds
+                reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
+                rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 25000)
+                
+                import requests
+                if turl:
+                    resp = await loop.run_in_executor(None, requests.get, turl, {'timeout': 20})
+                    if resp.status_code == 200: bg_bytes = resp.content
+                if rturl:
+                    rresp = await loop.run_in_executor(None, requests.get, rturl, {'timeout': 20})
+                    if rresp.status_code == 200: reg_bg_bytes = rresp.content
         except: pass
 
         # 3. Generate Map
-        map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent)
+        map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
         if not map_bytes:
             await status_msg.edit_text("⚠️ Erro ao renderizar o mapa profissional. Verifique se o ZIP contém os arquivos .shp.")
             return
