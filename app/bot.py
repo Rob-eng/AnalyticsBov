@@ -613,8 +613,11 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 from app.environmental import fetch_car_perimeter
                 car_result = fetch_car_perimeter(lat, lon)
                 if car_result and car_result[0]:
-                    polygon = _json.dumps(car_result[0])
-                    print(f"  CAR polygon found ({car_result[1]})", flush=True)
+                    geometry, status, cod_imovel = car_result
+                    polygon = _json.dumps(geometry)
+                    if cod_imovel:
+                        await _send_tg_car_zip_guide(update, context, cod_imovel)
+                    print(f"  CAR polygon found ({status})", flush=True)
             except Exception as poly_err:
                 print(f"  CAR polygon unavailable: {poly_err}", flush=True)
 
@@ -871,7 +874,10 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
             return WAITING_ENV_LOCATION
 
         # 2. Fetch CAR Perimeter
-        geometry, is_real_car = fetch_car_perimeter(lat, lon)
+        geometry, is_real_car, cod_imovel = fetch_car_perimeter(lat, lon)
+        
+        if cod_imovel:
+            await _send_tg_car_zip_guide(update, context, cod_imovel)
 
         env_mode = context.user_data.pop('env_mode', 'ndvi')
         prop_name = context.user_data.pop('prop_name', None)
@@ -1871,3 +1877,23 @@ def create_bot_application(post_init=None):
     
     app.add_error_handler(error_handler)
     return app
+
+async def _send_tg_car_zip_guide(update, context, cod_imovel):
+    """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional no Telegram."""
+    msg = (
+        f"📊 *Dica do AnalyticsBov (Relatório Pro)*\n\n"
+        f"Patrão, identifiquei o código oficial desta área no SICAR:\n"
+        f"👉 `{cod_imovel}`\n\n"
+        f"Para gerar um *Mapa Profissional* (com escala, grades e legendas), siga este passo a passo:\n"
+        f"1️⃣ Clique no link: [Portal SICAR](https://consultapublica.car.gov.br/publico/imoveis/index)\n"
+        f"2️⃣ Cole o código acima no campo de busca.\n"
+        f"3️⃣ Resolva o Captcha e faça o download do arquivo *ZIP*.\n"
+        f"4️⃣ Me envie o arquivo .zip aqui no chat!\n\n"
+        f"Assim que receber, eu monto o seu mapa de alta qualidade. 🚜💨"
+    )
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=msg,
+        parse_mode='Markdown',
+        disable_web_page_preview=True
+    )

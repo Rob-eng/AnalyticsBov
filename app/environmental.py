@@ -63,7 +63,7 @@ def fetch_car_perimeter(lat, lon):
     """
     Attempts to fetch CAR perimeter using Local API (Priority 1) then WFS (Priority 2).
     Falls back to a 1km bounding box if both fail.
-    Returns: (geometry, status)
+    Returns: (geometry, status, cod_imovel)
     status can be: 'OFFICIAL', 'NEARBY', 'FALLBACK'
     """
     # 1. Try Local API (FastAPI sidecar)
@@ -79,8 +79,9 @@ def fetch_car_perimeter(lat, lon):
             data = response.json()
             if data.get("found"):
                 status = data.get("status", "OFFICIAL")
-                print(f"✓ Local API found property: {data.get('cod_imovel')} ({status})")
-                return (data["geometry"], status)
+                cod = data.get("cod_imovel")
+                print(f"✓ Local API found property: {cod} ({status})")
+                return (data["geometry"], status, cod)
         else:
             print(f"Local API returned status {response.status_code}: {response.text}")
     except Exception as e:
@@ -108,8 +109,10 @@ def fetch_car_perimeter(lat, lon):
             if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
                 data = response.json()
                 if "features" in data and len(data["features"]) > 0:
-                    print("✓ WFS found property")
-                    return (data["features"][0]["geometry"], 'OFFICIAL')
+                    feat = data["features"][0]
+                    cod = feat.get("properties", {}).get("cod_imovel")
+                    print(f"✓ WFS found property: {cod}")
+                    return (feat["geometry"], 'OFFICIAL', cod)
         except:
             continue
     
@@ -126,7 +129,7 @@ def fetch_car_perimeter(lat, lon):
             [lon - offset, lat - offset]
         ]]
     }
-    return (bbox_polygon, 'FALLBACK')
+    return (bbox_polygon, 'FALLBACK', None)
 
 from app.gee_connector import get_ndvi_image
 

@@ -73,7 +73,10 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
     from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
     
     # 1. Perímetro
-    geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
+    geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
+    
+    if cod_imovel:
+        await _send_car_zip_guide(phone, cod_imovel)
     
     # 2. NDVI
     ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometry)
@@ -127,9 +130,11 @@ async def _handle_clima(phone, lat, lon, nome, loop):
     # 1. Perímetro (para overlay no mapa)
     polygon = None
     try:
-        car_result = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
-        if car_result and car_result[0]:
-            polygon = _json.dumps(car_result[0])
+        geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
+        if geometry:
+            polygon = _json.dumps(geometry)
+        if cod_imovel:
+            await _send_car_zip_guide(phone, cod_imovel)
     except Exception:
         pass
     
@@ -220,7 +225,10 @@ async def _handle_mdt(phone, lat, lon, nome, loop):
     from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
     
     # 1. Perímetro
-    geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
+    geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
+    
+    if cod_imovel:
+        await _send_car_zip_guide(phone, cod_imovel)
     
     # 2. Dados de terreno
     terrain_data = await loop.run_in_executor(None, get_terrain_data, geometry)
@@ -335,3 +343,18 @@ async def _handle_mercado_futuro(phone, loop):
 
     send_whatsapp_image(phone, img_bytes, caption)
     print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)
+
+async def _send_car_zip_guide(phone, cod_imovel):
+    """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""
+    msg = (
+        f"📊 *Dica do AnalyticsBov (Relatório Pro)*\n\n"
+        f"Patrão, identifiquei o código oficial desta área no SICAR:\n"
+        f"👉 `{cod_imovel}`\n\n"
+        f"Para gerar um *Mapa Profissional* (com escala, grades e legendas), siga este passo a passo:\n"
+        f"1️⃣ Clique no link: https://consultapublica.car.gov.br/publico/imoveis/index\n"
+        f"2️⃣ Cole o código acima no campo de busca.\n"
+        f"3️⃣ Resolva o Captcha e faça o download do arquivo *ZIP* (Contendo Shapefiles).\n"
+        f"4️⃣ Me envie o arquivo .zip aqui no chat!\n\n"
+        f"Assim que receber, eu monto o seu mapa de alta qualidade. 🚜💨"
+    )
+    send_whatsapp_text(phone, msg)
