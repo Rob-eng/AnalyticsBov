@@ -678,7 +678,7 @@ def _extract_rings(geometry):
 def process_car_zip(zip_bytes):
     """
     Extrai shapefiles de um buffer ZIP e retorna um dicionário de GeoDataFrames.
-    Busca por camadas padrão do SICAR: AREA_IMOVEL, RESERVA_LEGAL, APP, etc.
+    Suporta ZIPs aninhados (padrão do portal oficial do SICAR).
     Retorna: (gdfs_dict, error_msg)
     """
     import zipfile
@@ -689,56 +689,77 @@ def process_car_zip(zip_bytes):
     
     tmp_extract_dir = tempfile.mkdtemp()
     try:
-        # 1. Salvar ZIP em temp e descompactar
-        zip_path = os.path.join(tmp_extract_dir, "car.zip")
+        # 1. Salvar ZIP inicial em temp e descompactar
+        zip_path = os.path.join(tmp_extract_dir, "car_upload.zip")
         with open(zip_path, "wb") as f:
             f.write(zip_bytes)
         
         with zipfile.ZipFile(zip_path, 'r') as z:
             z.extractall(tmp_extract_dir)
             
-        # 2. Localizar e ler shapefiles
+        # 2. Extração Recursiva de ZIPs aninhados (O SICAR baixa um ZIP com vários ZIPs dentro)
+        for _ in range(3): # Profundidade máxima de 3 níveis
+            found_nested = False
+            for root, dirs, files in os.walk(tmp_extract_dir):
+                for file in files:
+                    if file.lower().endswith('.zip'):
+                        nested_path = os.path.join(root, file)
+                        try:
+                            with zipfile.ZipFile(nested_path, 'r') as nz:
+                                nz.extractall(root)
+                            os.remove(nested_path) # Remove para não processar de novo
+                            found_nested = True
+                        except:
+                            pass
+            if not found_nested:
+                break
+
+        # 3. Localizar e ler shapefiles
         gdfs = {}
-        # Mapeamento de nomes padrão do SICAR
+        # Mapeamento robusto de nomes padrão do SICAR
         layers = {
-            'AREA_IMOVEL': 'imovel',
-            'RESERVA_LEGAL': 'reserva',
-            'APP': 'app',
-            'VEGETACAO_NATIVA': 'vegetacao',
-            'AREA_CONSOLIDADA': 'consolidada',
+            'IMOVEL': 'imovel',           # Pega AREA_IMOVEL ou AREA_DO_IMOVEL
+            'RESERVA': 'reserva',         # Pega RESERVA_LEGAL
+            'APP': 'app',                 # Pega APP ou AREA_DE_PRESERVACAO_PERMANENTE
+            'PRESERVACAO_PERMANENTE': 'app',
+            'VEGETACAO': 'vegetacao',     # Pega VEGETACAO_NATIVA
+            'COBERTURA_SOLO': 'vegetacao',# Pega COBERTURA_DO_SOLO
+            'CONSOLIDADA': 'consolidada', # Pega AREA_CONSOLIDADA
             'HIDROGRAFIA': 'agua',
-            'CURSO_DAGUA': 'agua'
+            'AGUA': 'agua'
         }
         
         found_any = False
+        # Percorre todos os arquivos descompactados
         for root, dirs, files in os.walk(tmp_extract_dir):
             for file in files:
                 if file.lower().endswith('.shp'):
+                    filename_up = file.upper().replace(' ', '_').replace('-', '_')
                     # Tentar bater o nome do arquivo com as camadas conhecidas
                     for key, label in layers.items():
-                        if key.upper() in file.upper():
+                        if key.upper() in filename_up:
                             try:
                                 full_path = os.path.join(root, file)
-                                # Ignora se já leu (prioriza arquivos menores/específicos)
+                                # Priorização: se já temos o 'imovel' exato, não sobrescreve
                                 if label in gdfs: continue
                                 
                                 gdf = gpd.read_file(full_path)
-                                if not gdf.empty:
-                                    # Normalizar para WGS84 para plotagem e integração GEE
+                                if (not gdf.empty) and (gdf.geometry.notnull().any()):
+                                    # Normalizar para WGS84
                                     if gdf.crs and gdf.crs.to_epsg() != 4326:
                                         gdf = gdf.to_crs(epsg=4326)
                                     gdfs[label] = gdf
                                     found_any = True
                             except Exception as e:
-                                print(f"Erro ao ler shapefile {file}: {e}")
+                                print(f"[ZIP] Erro ao ler {file} como {label}: {e}")
         
-        if not found_any:
-            return None, "Não localizei as camadas AREA_IMOVEL ou RESERVA_LEGAL dentro do ZIP. Verifique se o arquivo enviado é o ZIP completo do SICAR."
+        if not found_any or 'imovel' not in gdfs:
+            return None, "Não localizei a camada de 'Imóvel' (Perímetro) dentro do ZIP. Verifique se o arquivo enviado é o ZIP gerado pelo Portal Público do SICAR."
             
         return gdfs, None
         
     except Exception as e:
-        print(f"Erro no processamento do ZIP: {e}")
+        print(f"[ZIP PROCES] Erro: {e}")
         return None, f"Erro interno ao processar o arquivo ZIP: {str(e)}"
     finally:
         shutil.rmtree(tmp_extract_dir, ignore_errors=True)

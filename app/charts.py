@@ -381,7 +381,7 @@ def generate_pro_car_map(gdfs):
         'reserva': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Reserva Legal (RL)'},
         'app': {'edgecolor': '#0277bd', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
         'vegetacao': {'edgecolor': '#1b5e20', 'facecolor': '#2e7d32', 'alpha': 0.3, 'label': 'Veg. Nativa Remanescente'},
-        'agua': {'edgecolor': '#0d47l1', 'color': '#03a9f4', 'linewidth': 1.2, 'label': 'Recursos Hídricos'},
+        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f4', 'linewidth': 1.2, 'label': 'Recursos Hídricos'},
         'consolidada': {'edgecolor': '#ef6c00', 'facecolor': '#ffb74d', 'alpha': 0.3, 'label': 'Área Consolidada'}
     }
     
