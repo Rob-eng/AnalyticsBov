@@ -65,12 +65,12 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
         send_whatsapp_text(phone, "⚠️ Não foi possível obter dados NDVI para esta área.")
         return
     
-    ndvi_val = ndvi_result.get('ndvi_medio', 0)
+    ndvi_val = ndvi_result.get('stats', {}).get('mean', 0)
     
     # 3. Gerar imagem
     img = await loop.run_in_executor(
         None, generate_environmental_image,
-        ndvi_result, geometry, car_status, nome, (lat, lon)
+        ndvi_result['ndvi_img'], geometry, car_status, ndvi_result.get('region_bbox'), nome, (lat, lon)
     )
     
     if not img:
