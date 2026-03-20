@@ -162,6 +162,20 @@ def get_tools_definition():
                         "required": ["fluxo", "lat", "lon"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "enviar_feedback_admin",
+                    "description": "Envia uma sugestão, crítica ou feedback do usuário diretamente para o administrador do sistema.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "mensagem": {"type": "string", "description": "O conteúdo do feedback ou sugestão"}
+                        },
+                        "required": ["mensagem"]
+                    }
+                }
             }
     ]
 
@@ -266,6 +280,14 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             # No bot.py, vamos interceptar o retorno do agente.
             return f"TRIGGER_FLOW: {fluxo} | {lat} | {lon} | {nome}"
 
+        elif name == "enviar_feedback_admin":
+            from app.notifications import notify_feedback
+            msg_feedback = arguments.get("mensagem", "")
+            if msg_feedback:
+                notify_feedback(user_id, msg_feedback)
+                return "Sucesso! O feedback foi enviado ao administrador. O bot responderá ao usuário que a sugestão foi recebida."
+            return "Erro: mensagem de feedback está vazia."
+
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
@@ -296,7 +318,8 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "   - Diga algo como: 'Com certeza, Patrão! Vou gerar agora o relatório oficial para o senhor. Veja abaixo:'\n"
             "5. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
             "6. LISTE TODAS as ferramentas com detalhes quando perguntado (B3, Clima, MDT, NDVI, Cadastro).\n"
-            "7. NUNCA invente números."
+            "7. NUNCA invente números.\n"
+            "8. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo, reclamar ou pedir melhorias. Diga que as mensagens vão direto para o engenheiro responsável!"
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"

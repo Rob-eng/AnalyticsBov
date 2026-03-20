@@ -64,8 +64,14 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         
     except Exception as e:
         import traceback
-        print(f"[WA TRIGGER ERROR] {traceback.format_exc()}", flush=True)
-        send_whatsapp_text(sender_phone, f"⚠️ Erro ao processar: {str(e)[:200]}")
+        error_trace = traceback.format_exc()
+        print(f"[WA TRIGGER ERROR] {error_trace}", flush=True)
+        
+        # Notifica o Admin via Telegram
+        from app.notifications import notify_user_error
+        notify_user_error(sender_phone, str(e), context=f"Fluxo: {trigger_string}")
+        
+        send_whatsapp_text(sender_phone, f"⚠️ Desculpe, tive um problema técnico ao processar seu pedido. O administrador já foi notificado e estamos verificando! 🛠️")
 
 
 async def _handle_ndvi(phone, lat, lon, nome, loop):
