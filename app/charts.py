@@ -591,7 +591,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # Finalização
     plt.tight_layout()
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+    plt.savefig(buf, format='png', dpi=120, bbox_inches='tight')
     plt.close()
     buf.seek(0)
     return buf.read()

@@ -83,6 +83,7 @@ def _upload_media(file_buffer, mime_type, filename="file"):
         return None
 
     # Meta espera multipart/form-data
+    print(f"📡 [WA-UPLOAD] Enviando {len(file_data)//1024} KB ({mime_type})...", flush=True)
     files = {
         'file': (filename, file_data, mime_type),
     }
