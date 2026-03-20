@@ -773,6 +773,7 @@ def process_car_zip(zip_bytes):
 
                         # --- 2. CLASSIFICAÇÃO INTELIGENTE POR ATRIBUTO (Com Normalização) ---
                         desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'COBERTURA']), None)
+                        extracted_via_attr = False
                         
                         if desc_col:
                             for cat, keywords in CATEGORY_MAP.items():
@@ -787,10 +788,11 @@ def process_car_zip(zip_bytes):
                                     else:
                                         gdfs[cat] = sub_gdf
                                     found_any = True
+                                    extracted_via_attr = True
                                     print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}'")
                         
                         # --- 3. FALLBACK POR NOME DE ARQUIVO ---
-                        if not assigned_via_file:
+                        if not assigned_via_file and not extracted_via_attr:
                             for cat, keywords in CATEGORY_MAP.items():
                                 if cat == 'imovel': continue 
                                 if any(normalize_str(kw) in fname_norm for kw in keywords):
@@ -802,7 +804,7 @@ def process_car_zip(zip_bytes):
                                     break
                         
                         # --- 4. CAMADA EXTRA ---
-                        if not assigned_via_file and not desc_col and 'imovel' not in fname_norm:
+                        if not assigned_via_file and not extracted_via_attr and 'imovel' not in fname_norm:
                             label = f"extra_{filename_up[:10].lower()}"
                             gdfs[label] = gdf
                             print(f"[ZIP] Camada extra: '{file}'")
