@@ -763,6 +763,8 @@ def process_car_zip(zip_bytes):
 
                         # --- 1. CAPTURA DO PERIMETRO (Prioridade Zero) ---
                         fname_norm = normalize_str(file)
+                        assigned_via_file = False
+                        
                         if any(normalize_str(kw) in fname_norm for kw in CATEGORY_MAP['imovel']):
                             gdfs['imovel'] = gdf
                             print(f"[ZIP] Perímetro capturado: '{file}'")

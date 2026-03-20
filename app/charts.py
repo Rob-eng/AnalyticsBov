@@ -497,17 +497,21 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         ax_inset.set_facecolor('#ffffff')
         
         # Se tiver imagem regional, trava os limites EXATAMENTE nela para preencher o box
-        if reg_bg_img and reg_bg_extent:
-            try:
+        try:
+            from matplotlib.image import imread
+            import io
+            if reg_bg_img and reg_bg_extent:
                 img_reg = imread(io.BytesIO(reg_bg_img), format='png')
                 ax_inset.imshow(img_reg, extent=reg_bg_extent, zorder=0)
                 ax_inset.set_xlim(reg_bg_extent[0], reg_bg_extent[1])
                 ax_inset.set_ylim(reg_bg_extent[2], reg_bg_extent[3])
-            except: pass
-        elif background_img and bg_extent:
-             ax_inset.imshow(img_data, extent=bg_extent)
-             ax_inset.set_xlim(bg_extent[0], bg_extent[1])
-             ax_inset.set_ylim(bg_extent[2], bg_extent[3])
+            elif background_img and bg_extent:
+                img_data = imread(io.BytesIO(background_img), format='png')
+                ax_inset.imshow(img_data, extent=bg_extent)
+                ax_inset.set_xlim(bg_extent[0], bg_extent[1])
+                ax_inset.set_ylim(bg_extent[2], bg_extent[3])
+        except Exception as e:
+            print(f"Erro no mapa de contexto: {e}")
             
         # Ponto marcador no centro do imóvel
         main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=50, zorder=10)
