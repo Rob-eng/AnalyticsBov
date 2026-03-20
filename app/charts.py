@@ -375,14 +375,14 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # 1. Configuração da Figura
     fig, ax = plt.subplots(figsize=(12, 12), facecolor='white')
     
-    # Cores Oficiais SICAR (Ajustadas para máximo contraste e distinção)
+    # Cores Oficiais SICAR (Ajustadas para máximo contraste sobre fundo Branco)
     COLORS = {
-        'imovel': {'edgecolor': '#FFFF00', 'facecolor': 'none', 'linewidth': 3.5, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
-        'reserva': {'edgecolor': '#003300', 'facecolor': '#1b5e20', 'alpha': 0.6, 'hatch': '///', 'label': 'Reserva Legal (RL)'},
-        'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.5, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.4, 'label': 'Remanescente Nativa'},
+        'imovel': {'edgecolor': '#000000', 'facecolor': 'none', 'linewidth': 3.0, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
+        'reserva': {'edgecolor': '#003300', 'facecolor': '#1b5e20', 'alpha': 0.7, 'hatch': '///', 'label': 'Reserva Legal (RL)'},
+        'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
+        'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Remanescente Nativa'},
         'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpo d\'Agua'},
-        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.6, 'label': 'Area Antropizada (Consol)'}
+        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Area Antropizada (Consol)'}
     }
     
     main_gdf = gdfs.get('imovel')
@@ -395,19 +395,10 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     prop_name = str(row.get('NOM_IMOVEL') or row.get('NOME_IMOVE') or row.get('NOME') or "Propriedade Privada")[:35]
     cod_car = str(row.get('COD_IMOVEL') or row.get('NUM_CAR') or row.get('COD_IMOV') or "Nao identificado")
     
-    # 1.1 Plotar Imagem de Satélite se disponível
-    if background_img and bg_extent:
-        try:
-            from matplotlib.image import imread
-            import io
-            img_data = imread(io.BytesIO(background_img), format='png')
-            ax.imshow(img_data, extent=bg_extent, zorder=0, alpha=0.95)
-            # Ao usar satélite, mudamos a cor do perímetro para Amarelo para destacar
-            COLORS['imovel']['edgecolor'] = '#FFFF00' 
-        except Exception as e:
-            print(f"Erro ao carregar imagem de fundo: {e}")
-    else:
-        ax.set_facecolor('#fdfdfd')
+    # 1.1 Fundo do Mapa Principal (Sempre Branco como solicitado)
+    ax.set_facecolor('white')
+    # A imagem de satélite (background_img) será ignorada no mapa principal
+    # e usada apenas no Mapa de Contexto (reg_bg_img).
 
     # 2. Cálculos de Áreas (Hectares)
     areas_ha = {}

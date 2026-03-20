@@ -720,13 +720,14 @@ def process_car_zip(zip_bytes):
         # 3. Localizar e ler shapefiles
         gdfs = {}
         # Mapeamento expandido para busca de termos
+        # Mapeamento expandido para busca de termos em nível nacional (SICAR)
         CATEGORY_MAP = {
-            'imovel': ['IMOVEL', 'AREA_DO_IMOVEL', 'PERIMETRO'],
-            'reserva': ['RESERVA_LEGAL', 'RES_LEGAL'],
+            'imovel': ['IMOVEL', 'AREA_DO_IMOVEL', 'PERIMETRO', 'LIMITE', 'GLEBA', 'CADASTRO'],
+            'reserva': ['RESERVA_LEGAL', 'RES_LEGAL', 'RL'],
             'app': ['AREA_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'],
-            'vegetacao': ['VEGETACAO_NATIVA', 'REMANESCENTE', 'NATIVA', 'MATA'],
-            'consolidada': ['CONSOLIDADA', 'ANTROPIZADA', 'USO_ANTROP', 'SOLO_CONSOLIDADO'],
-            'agua': ['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA', 'RIO', 'REPRESA']
+            'vegetacao': ['VEGETACAO_NATIVA', 'REMANESCENTE', 'NATIVA', 'MATA', 'FLORESTA', 'VEGETACAO'],
+            'consolidada': ['CONSOLIDADA', 'ANTROPIZADA', 'USO_ANTROP', 'SOLO_CONSOLIDADO', 'ANTROPIZADO', 'USO_ALTERNATIVO', 'USO_SOLO'],
+            'agua': ['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA', 'RIO', 'REPRESA', 'NASCENTE']
         }
         
         found_any = False
