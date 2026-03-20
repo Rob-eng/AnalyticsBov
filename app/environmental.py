@@ -741,6 +741,11 @@ def process_car_zip(zip_bytes):
                     full_path = os.path.join(root, file)
                     
                     try:
+                        import unicodedata
+                        def normalize_str(s):
+                            if not s: return ""
+                            return "".join(c for c in unicodedata.normalize('NFD', str(s)) if unicodedata.category(c) != 'Mn').upper()
+
                         gdf = gpd.read_file(full_path)
                         if gdf.empty or not gdf.geometry.notnull().any(): continue
                         
@@ -757,22 +762,22 @@ def process_car_zip(zip_bytes):
                                 gdf['COD_IMOVEL_MAP'] = gdf[col]
 
                         # --- 1. CAPTURA DO PERIMETRO (Prioridade Zero) ---
-                        # Se o arquivo for claramente o perímetro do imóvel, capturamos o GDF inteiro
-                        if any(kw in filename_up for kw in CATEGORY_MAP['imovel']):
+                        fname_norm = normalize_str(file)
+                        if any(normalize_str(kw) in fname_norm for kw in CATEGORY_MAP['imovel']):
                             gdfs['imovel'] = gdf
-                            print(f"[ZIP] Perímetro capturado via arquivo: '{file}'")
+                            print(f"[ZIP] Perímetro capturado: '{file}'")
                             found_any = True
                             assigned_via_file = True
 
-                        # --- 2. CLASSIFICAÇÃO INTELIGENTE POR ATRIBUTO ---
-                        # Procurar coluna de descrição para split interno (Cobertura do Solo, etc)
+                        # --- 2. CLASSIFICAÇÃO INTELIGENTE POR ATRIBUTO (Com Normalização) ---
                         desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'COBERTURA']), None)
                         
                         if desc_col:
                             for cat, keywords in CATEGORY_MAP.items():
-                                if cat == 'imovel' and assigned_via_file: continue # Já pegamos o imóvel
+                                if cat == 'imovel' and assigned_via_file: continue
                                 
-                                mask = gdf[desc_col].astype(str).str.upper().apply(lambda x: any(kw in x for kw in keywords))
+                                # Normaliza cada valor da coluna antes de comparar
+                                mask = gdf[desc_col].apply(lambda x: any(normalize_str(kw) in normalize_str(x) for kw in keywords))
                                 sub_gdf = gdf[mask]
                                 if not sub_gdf.empty:
                                     if cat in gdfs:
@@ -785,20 +790,20 @@ def process_car_zip(zip_bytes):
                         # --- 3. FALLBACK POR NOME DE ARQUIVO ---
                         if not assigned_via_file:
                             for cat, keywords in CATEGORY_MAP.items():
-                                if cat == 'imovel': continue # Já testamos acima
-                                if any(kw in filename_up for kw in keywords):
+                                if cat == 'imovel': continue 
+                                if any(normalize_str(kw) in fname_norm for kw in keywords):
                                     if cat not in gdfs:
                                         gdfs[cat] = gdf
                                         found_any = True
                                         assigned_via_file = True
-                                        print(f"[ZIP] Camada '{cat}' capturada via nome de arquivo: '{file}'")
+                                        print(f"[ZIP] Camada '{cat}' capturada por nome: '{file}'")
                                     break
                         
                         # --- 4. CAMADA EXTRA ---
-                        if not assigned_via_file and not desc_col and 'imovel' not in filename_up:
+                        if not assigned_via_file and not desc_col and 'imovel' not in fname_norm:
                             label = f"extra_{filename_up[:10].lower()}"
                             gdfs[label] = gdf
-                            print(f"[ZIP] Camada extra capturada: '{file}' como '{label}'")
+                            print(f"[ZIP] Camada extra: '{file}'")
                             found_any = True
 
                     except Exception as e:
