@@ -771,25 +771,33 @@ def process_car_zip(zip_bytes):
                             found_any = True
                             assigned_via_file = True
 
-                        # --- 2. CLASSIFICAÇÃO INTELIGENTE POR ATRIBUTO (Com Normalização) ---
-                        desc_col = next((c for c in gdf.columns if c.upper() in ['DESCRICAO', 'TIPO', 'DESCRIC_SO', 'CATEGORIA', 'DESCRIC_CO', 'COBERTURA']), None)
+                        # --- 2. CLASSIFICAÇÃO INTELIGENTE (Busca Universal em Atributos) ---
                         extracted_via_attr = False
                         
-                        if desc_col:
-                            for cat, keywords in CATEGORY_MAP.items():
-                                if cat == 'imovel' and assigned_via_file: continue
-                                
-                                # Normaliza cada valor da coluna antes de comparar
-                                mask = gdf[desc_col].apply(lambda x: any(normalize_str(kw) in normalize_str(x) for kw in keywords))
-                                sub_gdf = gdf[mask]
-                                if not sub_gdf.empty:
-                                    if cat in gdfs:
-                                        gdfs[cat] = pd.concat([gdfs[cat], sub_gdf], ignore_index=True)
-                                    else:
-                                        gdfs[cat] = sub_gdf
-                                    found_any = True
-                                    extracted_via_attr = True
-                                    print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}'")
+                        # Cria uma string única por linha com todos os atributos da feição
+                        def row_to_norm_str(row):
+                            return normalize_str(" ".join(str(v) for v in row.values if pd.notnull(v)))
+                        
+                        gdf['omni_search'] = gdf.apply(row_to_norm_str, axis=1)
+                        
+                        for cat, keywords in CATEGORY_MAP.items():
+                            if cat == 'imovel' and assigned_via_file: continue
+                            
+                            mask = gdf['omni_search'].apply(lambda x: any(normalize_str(kw) in x for kw in keywords))
+                            sub_gdf = gdf[mask].copy()
+                            
+                            if not sub_gdf.empty:
+                                sub_gdf = sub_gdf.drop(columns=['omni_search'])
+                                if cat in gdfs:
+                                    gdfs[cat] = pd.concat([gdfs[cat], sub_gdf], ignore_index=True)
+                                else:
+                                    gdfs[cat] = sub_gdf
+                                found_any = True
+                                extracted_via_attr = True
+                                print(f"[ZIP] {len(sub_gdf)} feições de '{cat}' extraídas de '{file}'")
+                        
+                        # Limpa coluna temporária
+                        gdf = gdf.drop(columns=['omni_search'])
                         
                         # --- 3. FALLBACK POR NOME DE ARQUIVO ---
                         if not assigned_via_file and not extracted_via_attr:
