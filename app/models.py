@@ -44,6 +44,19 @@ class PriceHistory(Base):
     price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
 
+class CARCaptchaSession(Base):
+    """
+    Armazena o estado de uma tentativa de download do SICAR que 
+    precisa de intervenção humana para o Captcha.
+    """
+    __tablename__ = 'car_captcha_sessions'
+    
+    chat_id = Column(String, primary_key=True)
+    car_code = Column(String)
+    imovel_id = Column(String)
+    cookies_json = Column(String) # JSON de cookies da requests.Session
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CARProperty(SpatialBase):
     __tablename__ = 'car_properties'
     

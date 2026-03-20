@@ -61,6 +61,13 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                                 from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
                                 background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
                         
+                        # ⚠️ Interceptador para Resposta do Captcha (Modo Assistido)
+                        if texto and len(texto.strip()) <= 6: # Captchas do Sicar tem 4-5 chars
+                            from app.whatsapp.trigger_handler import process_car_captcha_reply
+                            # Essa função retorna True se capturou a sessão
+                            if await process_car_captcha_reply(sender_phone, texto.strip()):
+                                continue
+
                         print(f"[Webhook] {sender_phone} disse: {texto if texto else msg_type}")
                         
                         # ⚠️ Detecção de Código CAR (Auto-Download / Scraper Fantasma)

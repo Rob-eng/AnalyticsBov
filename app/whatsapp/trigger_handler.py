@@ -470,14 +470,50 @@ async def process_whatsapp_car_request(phone, car_code):
     send_whatsapp_text(phone, msg_init)
     
     # 2. Scraper (Download do ZIP)
-    zip_bytes, error = await loop.run_in_executor(None, download_car_shapefile, car_code)
+    result, metadata = await loop.run_in_executor(None, download_car_shapefile, car_code)
     
-    if error or not zip_bytes:
-        msg_err = f"⚠️ *Não consegui baixar o arquivo automaticamente.*\n\nMotivo: {error or 'Erro desconhecido'}\n\n"
-        msg_err += "Por favor, tente novamente em alguns instantes ou envie o arquivo .zip manualmente se você já o tiver."
-        send_whatsapp_text(phone, msg_err)
-        return
+    if not result:
+        # Modo Assistido (Relay)
+        error_msg = metadata.get('error', 'Erro desconhecido')
+        last_captcha = metadata.get('last_captcha')
+        session_obj = metadata.get('session')
+        imovel_id = metadata.get('imovel_id')
+        
+        if last_captcha and session_obj and imovel_id:
+            # 1. Salvar Sessão no Banco
+            from app.models import SessionLocal, CARCaptchaSession
+            import json
+            db = SessionLocal()
+            try:
+                # Converter cookies para dict serializável
+                cookies = session_obj.cookies.get_dict()
+                session_entry = CARCaptchaSession(
+                    chat_id=phone,
+                    car_code=car_code,
+                    imovel_id=imovel_id,
+                    cookies_json=json.dumps(cookies)
+                )
+                db.merge(session_entry) # Merge substitui se já existir
+                db.commit()
+            finally:
+                db.close()
 
+            # 2. Enviar imagem ao usuário
+            caption = (
+                f"⚠️ *O sistema do governo está difícil de ler!*\n\n"
+                f"Minha IA não conseguiu decifrar a imagem acima após 6 tentativas. 😰\n\n"
+                f"Pode me ajudar? **Responda esta mensagem apenas com os caracteres que você vê na imagem.**\n"
+                f"(Diferencie maiúsculas e minúsculas!)\n\n"
+                f"Assim que você responder, eu finalizo o download pra você! 🐂💨"
+            )
+            send_whatsapp_image(phone, last_captcha, caption)
+            print(f"[WA CAR REQ] Iniciado Modo Assistido para {phone}", flush=True)
+            return
+        else:
+            send_whatsapp_text(phone, f"⚠️ Erro ao acessar o governo: {error_msg}")
+            return
+
+    zip_bytes = result
     # 3. Processa o ZIP (Reaproveita a lógica de upload manual)
     send_whatsapp_text(phone, "✅ *Arquivo ZIP obtido com sucesso!* Gerando cartografia... 🚜")
     
@@ -531,3 +567,94 @@ async def process_whatsapp_car_request(phone, car_code):
     )
     send_whatsapp_image(phone, map_bytes, caption)
     print(f"[WA CAR REQ] Processo finalizado para {phone}", flush=True)
+
+
+async def process_car_captcha_reply(phone, captcha_text):
+    """
+    Finaliza o download do CAR após o usuário enviar o texto do Captcha.
+    """
+    from app.models import SessionLocal, CARCaptchaSession
+    from app.sicar_scraper import final_download_with_session, BASE_URL
+    from app.whatsapp.sender import send_whatsapp_text
+    import requests
+    import json
+    
+    db = SessionLocal()
+    session_data = db.query(CARCaptchaSession).filter_by(chat_id=phone).first()
+    
+    if not session_data:
+        # Se não há sessão, o bot ignora ou avisa
+        return False
+
+    print(f"📥 [WA CAR] Processando resposta de Captcha de {phone}: {captcha_text}")
+    
+    # 1. Reconstroi a Sessão com os Cookies salvos
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+        "Referer": f"{BASE_URL}/imoveis/index",
+        "X-Requested-With": "XMLHttpRequest"
+    })
+    cookies_dict = json.loads(session_data.cookies_json)
+    for k, v in cookies_dict.items():
+        session.cookies.set(k, v)
+    
+    # 2. Tenta o download
+    import asyncio
+    loop = asyncio.get_running_loop()
+    zip_bytes, error = await loop.run_in_executor(None, final_download_with_session, session, session_data.imovel_id, captcha_text)
+    
+    if error or not zip_bytes:
+        send_whatsapp_text(phone, f"⚠️ *Opa, parece que o captcha estava incorreto ou a sessão expirou.*\n\nErro: {error}\n\nPor favor, tente enviar o código do CAR novamente para gerarmos uma nova imagem.")
+        db.delete(session_data)
+        db.commit()
+        db.close()
+        return True
+
+    # 3. Sucesso! Processa o Mapa (Reaproveita a lógica de renderização)
+    send_whatsapp_text(phone, "✅ *Captcha validado!* Baixando e gerando seu relatório agora... 🚀")
+    
+    # Limpa a sessão para não re-processar
+    db.delete(session_data)
+    db.commit()
+    db.close()
+    
+    # Agora chama a renderização final (Reaproveitando a lógica de process_whatsapp_car_request apartir do passo 3)
+    from app.environmental import process_car_zip
+    from app.charts import generate_pro_car_map
+    
+    gdfs, zip_err = await loop.run_in_executor(None, process_car_zip, zip_bytes)
+    if zip_err:
+        send_whatsapp_text(phone, f"⚠️ Erro ao processar dados do governo: {zip_err}")
+        return True
+
+    # Satélite e Mapa Pro
+    bg_bytes, bg_extent = None, None
+    reg_bg_bytes, reg_bg_extent = None, None
+    try:
+        main_gdf = gdfs.get('imovel')
+        if main_gdf is not None:
+            from app.gee_connector import get_satellite_thumbnail
+            import json
+            import requests
+            geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
+            b_bounds = main_gdf.buffer(0.015).total_bounds
+            bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
+            turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
+            r_bounds = main_gdf.buffer(0.10).total_bounds
+            reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
+            rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
+            if turl:
+                resp = await loop.run_in_executor(None, lambda: requests.get(turl, timeout=30))
+                if resp.status_code == 200: bg_bytes = resp.content
+            if rturl:
+                rresp = await loop.run_in_executor(None, lambda: requests.get(rturl, timeout=30))
+                if rresp.status_code == 200: reg_bg_bytes = rresp.content
+    except Exception as ge: pass
+
+    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
+    if map_bytes:
+        from app.whatsapp.sender import send_whatsapp_image
+        send_whatsapp_image(phone, map_bytes, f"🗺️ *RELATÓRIO AMBIENTAL FINALIZADO*\n\nObrigado pela ajuda com o Captcha! Imóvel localizado com sucesso. 🐂💨")
+    
+    return True

@@ -18,17 +18,36 @@ SEARCH_URL = f"{BASE_URL}/imoveis/search"
 CAPTCHA_URL = f"{BASE_URL}/municipios/ReCaptcha"
 DOWNLOAD_URL = f"{BASE_URL}/imoveis/exportShapeFile"
 
+from PIL import Image
+
 def solve_image_captcha(image_bytes):
     """
     Usa o CapSolver para resolver captchas de texto (ImageToTextTask)
+    Com pré-processamento para remover a linha vermelha que atrapalha a IA.
     """
     if not CAPSOLVER_API_KEY:
         print("❌ [CapSolver] Chave API não configurada.")
         return None
 
     try:
-        # Converter imagem para base64 conforme exigido pela API
-        img_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        # 1. PRÉ-PROCESSAMENTO (Limpeza da Linha Vermelha do SICAR)
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        pixels = img.load()
+        width, height = img.size
+        for x in range(width):
+            for y in range(height):
+                r, g, b = pixels[x, y]
+                # Se for "muito vermelho" (linha do SICAR), transforma em branco
+                if r > 150 and g < 100 and b < 100:
+                    pixels[x, y] = (255, 255, 255)
+        
+        # Salva imagem limpa para buffer
+        clean_buf = io.BytesIO()
+        img.save(clean_buf, format='PNG')
+        clean_bytes = clean_buf.getvalue()
+        
+        # 2. RESOLUÇÃO VIA IA
+        img_b64 = base64.b64encode(clean_bytes).decode('utf-8')
         
         payload = {
             "clientKey": CAPSOLVER_API_KEY,
@@ -130,9 +149,36 @@ def download_car_shapefile(car_code: str):
                 print(f"⚠️ [SICAR] Falha na tentativa {attempt}. Status: {dl_resp.status_code}, Tipo: {content_type}, Bytes: {len(dl_resp.content)}")
                 time.sleep(1.5)
 
-        return None, "Não foi possível baixar o arquivo após 6 tentativas (Captcha persistente ou erro na sessão do Governo)."
+        # Retorna a imagem do ÚLTIMO captcha e a sessão para modo assistido
+        return None, {
+            "error": "Captcha persistente ou erro no servidor do Governo.",
+            "last_captcha": captcha_resp.content if 'captcha_resp' in locals() else None,
+            "session": session,
+            "imovel_id": imovel_id
+        }
 
     except Exception as e:
         print(f"❌ [SICAR] Erro crítico: {e}")
-        return None, f"Falha na integração: {str(e)}"
+        return None, {"error": f"Falha na integração: {str(e)}"}
+
+
+def final_download_with_session(session, imovel_id, captcha_text):
+    """
+    Tenta o download final usando uma sessão já estabelecida e o texto do usuário.
+    """
+    params = {
+        "idImovel": imovel_id,
+        "ReCaptcha": captcha_text
+    }
+    
+    try:
+        dl_resp = session.get(DOWNLOAD_URL, params=params, verify=False, timeout=30)
+        content_type = dl_resp.headers.get('Content-Type', '').lower()
+        
+        if dl_resp.status_code == 200 and 'zip' in content_type and len(dl_resp.content) > 1000:
+            return dl_resp.content, None
+        else:
+            return None, "Captcha incorreto ou sessão expirada no governo."
+    except Exception as e:
+        return None, str(e)
 
