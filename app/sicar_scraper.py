@@ -95,20 +95,22 @@ def download_car_shapefile(car_code: str):
         imovel_id = features[0].get("id")
         print(f"✅ [SICAR] ID Interno localizado: {imovel_id}")
 
-        for attempt in range(1, 4):
-            print(f"⏳ [SICAR] Tentativa {attempt} de download...")
+        for attempt in range(1, 7):
+            print(f"⏳ [SICAR] Tentativa {attempt} de download (Captcha)...")
             
             # 2. Baixa o Captcha
             captcha_resp = session.get(f"{CAPTCHA_URL}?id={int(time.time()*1000)}", verify=False)
             if captcha_resp.status_code != 200:
+                print(f"⚠️ [SICAR] Erro ao baixar captcha: {captcha_resp.status_code}")
                 continue
             
             # 3. Resolve o Captcha
             captcha_text = solve_image_captcha(captcha_resp.content)
             if not captcha_text:
+                print("⚠️ [SICAR] CapSolver não retornou texto.")
                 continue
             
-            print(f"✅ [SICAR] Captcha resolvido ({captcha_text}). Requisitando ZIP...")
+            print(f"✅ [SICAR] Captcha resolvido: [{captcha_text}]. Requisitando ZIP...")
 
             # 4. Faz o Download do Shapefile
             params = {
@@ -124,10 +126,11 @@ def download_car_shapefile(car_code: str):
                 print(f"🎉 [SICAR] Download concluído com sucesso na tentativa {attempt}!")
                 return dl_resp.content, None
             else:
-                print(f"⚠️ [SICAR] Tentativa {attempt} falhou (Captcha errado ou erro do servidor).")
-                time.sleep(1)
+                # Se não é ZIP, o governo provavelmente mandou a página de erro (Captcha Incorreto)
+                print(f"⚠️ [SICAR] Falha na tentativa {attempt}. Status: {dl_resp.status_code}, Tipo: {content_type}, Bytes: {len(dl_resp.content)}")
+                time.sleep(1.5)
 
-        return None, "Não foi possível baixar o arquivo após várias tentativas (Captcha persistente)."
+        return None, "Não foi possível baixar o arquivo após 6 tentativas (Captcha persistente ou erro na sessão do Governo)."
 
     except Exception as e:
         print(f"❌ [SICAR] Erro crítico: {e}")
