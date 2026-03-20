@@ -63,9 +63,18 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                         
                         print(f"[Webhook] {sender_phone} disse: {texto if texto else msg_type}")
                         
+                        # ⚠️ Detecção de Código CAR (Auto-Download / Scraper Fantasma)
+                        import re
+                        car_pattern = r"^[A-Z]{2}-\d{7}-[A-F0-9]{32}$"
+                        
+                        if texto and re.match(car_pattern, texto.strip().upper()):
+                            print(f"🚀 [WA] Detectado Código CAR: {texto.strip().upper()}")
+                            from app.whatsapp.trigger_handler import process_whatsapp_car_request
+                            background_tasks.add_task(process_whatsapp_car_request, sender_phone, texto.strip().upper())
+                        
                         # ⚠️ Delega a resposta e o pensamento da IA para uma BackgroundTask do FastAPI
                         # Isso garante que a Meta receba o '200 OK' em 1s, enquanto o ChatGPT tem o tempo dele
-                        if texto:
+                        elif texto:
                             background_tasks.add_task(process_whatsapp_message, sender_phone, texto)
 
     # A Meta sempre espera um 200 OK

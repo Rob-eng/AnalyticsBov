@@ -442,3 +442,92 @@ async def process_whatsapp_zip_upload(phone, media_id):
     )
     send_whatsapp_image(phone, map_bytes, caption)
     print(f"[WA] Relatório Profissional enviado para {phone}", flush=True)
+
+
+async def process_whatsapp_car_request(phone, car_code):
+    """
+    Fluxo do DESAFIO: 
+    1. Recebe o código CAR puro via texto.
+    2. Aciona o Scraper Fantasma (SICAR).
+    3. Baixa o ZIP.
+    4. Gera o Mapa Pro.
+    """
+    from app.whatsapp.sender import send_whatsapp_text, send_whatsapp_image
+    from app.sicar_scraper import download_car_shapefile
+    from app.environmental import process_car_zip
+    from app.charts import generate_pro_car_map
+    import asyncio
+    
+    loop = asyncio.get_running_loop()
+    
+    # 1. Avisa o início
+    msg_init = (
+        f"🔍 *Localizando imóvel na base do governo...*\n"
+        f"Código: `{car_code}`\n\n"
+        f"Estou resolvendo os sistemas de segurança (Captcha) e preparando seu mapa profissional. "
+        f"Isso leva cerca de 20 a 40 segundos. ⏳"
+    )
+    send_whatsapp_text(phone, msg_init)
+    
+    # 2. Scraper (Download do ZIP)
+    zip_bytes, error = await loop.run_in_executor(None, download_car_shapefile, car_code)
+    
+    if error or not zip_bytes:
+        msg_err = f"⚠️ *Não consegui baixar o arquivo automaticamente.*\n\nMotivo: {error or 'Erro desconhecido'}\n\n"
+        msg_err += "Por favor, tente novamente em alguns instantes ou envie o arquivo .zip manualmente se você já o tiver."
+        send_whatsapp_text(phone, msg_err)
+        return
+
+    # 3. Processa o ZIP (Reaproveita a lógica de upload manual)
+    send_whatsapp_text(phone, "✅ *Arquivo ZIP obtido com sucesso!* Gerando cartografia... 🚜")
+    
+    gdfs, zip_err = await loop.run_in_executor(None, process_car_zip, zip_bytes)
+    if zip_err:
+        send_whatsapp_text(phone, f"⚠️ Erro ao processar dados do governo: {zip_err}")
+        return
+
+    # 4. Satélite e Mapa Pro (Reaproveita lógica do Zip Upload)
+    bg_bytes, bg_extent = None, None
+    reg_bg_bytes, reg_bg_extent = None, None
+    try:
+        main_gdf = gdfs.get('imovel')
+        if main_gdf is not None:
+            from app.gee_connector import get_satellite_thumbnail
+            import json
+            import requests
+            geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
+            
+            # Backgrounds
+            b_bounds = main_gdf.buffer(0.015).total_bounds
+            bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
+            turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
+            
+            r_bounds = main_gdf.buffer(0.10).total_bounds
+            reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
+            rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
+            
+            if turl:
+                resp = await loop.run_in_executor(None, lambda: requests.get(turl, timeout=30))
+                if resp.status_code == 200: bg_bytes = resp.content
+            if rturl:
+                rresp = await loop.run_in_executor(None, lambda: requests.get(rturl, timeout=30))
+                if rresp.status_code == 200: reg_bg_bytes = rresp.content
+    except Exception as ge:
+        print(f"[WA CAR REQ] Erro GEE: {ge}", flush=True)
+
+    # 5. Renderiza Mapa Pro
+    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
+    if not map_bytes:
+        send_whatsapp_text(phone, "⚠️ Erro ao renderizar o mapa final.")
+        return
+
+    # 6. Envio Final
+    caption = (
+        f"🗺️ *RELATÓRIO AMBIENTAL AUTOMÁTICO*\n\n"
+        f"🚀 *Extração Fantasma Concluída!*\n"
+        f"📍 Imóvel: `{car_code}`\n\n"
+        f"Este mapa foi gerado buscando os dados direto na fonte do governo. "
+        f"Tudo pronto para sua análise! 🐂💨"
+    )
+    send_whatsapp_image(phone, map_bytes, caption)
+    print(f"[WA CAR REQ] Processo finalizado para {phone}", flush=True)
