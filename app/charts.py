@@ -381,13 +381,18 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         'reserva': {'edgecolor': '#003300', 'facecolor': '#1b5e20', 'alpha': 0.7, 'hatch': '///', 'label': 'Reserva Legal (RL)'},
         'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
         'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Remanescente Nativa'},
-        'agua': {'edgecolor': '#0d47a1', 'color': '#03a9f1', 'linewidth': 1.5, 'label': 'Corpo d\'Agua'},
+        'agua': {'edgecolor': '#01579b', 'facecolor': '#4fc3f7', 'linewidth': 1.5, 'alpha': 1.0, 'label': 'Corpo d\'Agua'},
+        'uso_restrito': {'edgecolor': '#f57f17', 'facecolor': '#fff59d', 'alpha': 0.8, 'hatch': '\\\\', 'label': 'Uso Restrito'},
         'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Area Antropizada (Consol)'}
     }
     
     main_gdf = gdfs.get('imovel')
     if main_gdf is None or main_gdf.empty:
         return None
+
+    # Merge de múltiplos polígonos do imóvel para não duplicar áreas/bordas
+    main_gdf = main_gdf.dissolve()
+    gdfs['imovel'] = main_gdf
 
     # Tenta obter nome e código de forma robusta
     row = main_gdf.iloc[0]
@@ -407,15 +412,16 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         utm_crs = main_gdf.estimate_utm_crs()
         for key, gdf in gdfs.items():
             if not gdf.empty:
-                areas_ha[key] = gdf.to_crs(utm_crs).area.sum() / 10000
+                # dissolve() previne que feições sobrepostas multipliquem a área
+                areas_ha[key] = gdf.dissolve().to_crs(utm_crs).area.sum() / 10000
     except Exception as ae:
         print(f"Erro no cálculo de áreas: {ae}")
         for key in gdfs: areas_ha[key] = 0
 
     # 3. Plotagem das camadas
     # Ordem base (extras primeiro para ficarem por baixo, imovel por ultimo)
-    plot_order = [l for l in gdfs.keys() if l not in ['imovel', 'agua', 'reserva', 'app', 'vegetacao', 'consolidada']]
-    plot_order += ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
+    plot_order = [l for l in gdfs.keys() if l not in ['imovel', 'agua', 'reserva', 'app', 'vegetacao', 'uso_restrito', 'consolidada']]
+    plot_order += ['consolidada', 'uso_restrito', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
     
     for layer in plot_order:
         if layer in gdfs:
@@ -440,10 +446,23 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     ax.set_aspect('equal', adjustable='box')
 
     # 4. Estética Cartográfica
-    ax.set_title("RELATORIO AMBIENTAL GEOESTATISTICO", fontsize=20, fontweight='bold', color='#1a1a1a', pad=30)
+    ax.set_title("RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=20, fontweight='bold', color='#1a1a1a', pad=30)
     ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
-    ax.set_xlabel('Longitude (decimal)', fontsize=10, color='gray')
-    ax.set_ylabel('Latitude (decimal)', fontsize=10, color='gray')
+    ax.set_xlabel('Longitude', fontsize=10, color='gray')
+    ax.set_ylabel('Latitude', fontsize=10, color='gray')
+    
+    # Formatar Eixos em Graus e Minutos
+    from matplotlib.ticker import FuncFormatter
+    def deg_min_fmt(x, pos):
+        deg = int(x)
+        min_dec = abs(x - deg) * 60
+        mins = int(min_dec)
+        # Handle sign
+        sign = "-" if x < 0 else ""
+        return f"{sign}{abs(deg)}°{mins:02d}'"
+
+    ax.xaxis.set_major_formatter(FuncFormatter(deg_min_fmt))
+    ax.yaxis.set_major_formatter(FuncFormatter(deg_min_fmt))
     
     # Rotação da grade Y (alinhada verticalmente)
     ax.tick_params(axis='y', labelrotation=90, labelsize=9)
@@ -524,25 +543,31 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
             spine.set_linewidth(1.5)
 
         st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
-        ax_inset.set_title(f"Regional ({st_code})", fontsize=11, fontweight='bold', pad=5)
+        # Title movido pra baixo para evitar sobreposição
+        ax_inset.text(0.5, -0.1, f"Regional ({st_code})", transform=ax_inset.transAxes, 
+                      fontsize=11, fontweight='bold', ha='center', va='top')
     except: pass
 
     # 7. Quadro de Informações
     info_text = (
         f"Propriedade: {prop_name}\n"
-        f"Codigo CAR:   {cod_car}\n"
-        f"Emissao:      {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"Código CAR:   {cod_car}\n"
+        f"Emissão:      {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
         f"Sistema:      SIRGAS 2000"
     )
     plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=10, ha='right', va='bottom', fontfamily='monospace',
              zorder=25, bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', alpha=0.9, edgecolor='#ced4da'))
 
+    # Adicionando texto de logo / marca no topo ou base
+    plt.text(0.5, -0.12, "🗺️ Processado com Agro Analytics Bot", transform=ax.transAxes, 
+             fontsize=9, color='gray', ha='center', va='top', zorder=25)
+
     # 8. Quadro de Áreas (Recuado para não sobrepor)
-    areas_text = "QUADRO DE AREAS (ha)\n" + "=" * 22 + "\n"
+    areas_text = "QUADRO DE ÁREAS (ha)\n" + "=" * 22 + "\n"
     # Filtrar apenas o que tem área e nome amigável
     labels_friendly = {
         'imovel': 'Total Imovel', 'reserva': 'Reserva Legal', 'app': 'A.P.P.', 
-        'vegetacao': 'Remanescente', 'consolidada': 'Area Antrop.'
+        'vegetacao': 'Remanescente', 'uso_restrito': 'Uso Restrito', 'consolidada': 'Area Antrop.'
     }
     
     # Exibir no quadro apenas as principais
@@ -559,7 +584,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     legend_elements = []
     
     # Prioridade de exibição na legenda
-    display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
+    display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'uso_restrito', 'agua', 'imovel']
     # Adicionar camadas "extra" que foram detectadas no ZIP
     for key in gdfs.keys():
         if key not in display_order:
@@ -580,7 +605,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
                 legend_elements.append(Patch(facecolor='#9e9e9e', edgecolor='#424242', alpha=0.5, label=label_text))
     
     # Legenda em colunas no rodapé
-    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.15), ncol=3, fontsize=10, 
+    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=10, 
               frameon=True, facecolor='white', framealpha=1, shadow=True)
 
     # Finalização

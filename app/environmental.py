@@ -725,6 +725,7 @@ def process_car_zip(zip_bytes):
             'imovel': ['IMOVEL', 'AREA_DO_IMOVEL', 'PERIMETRO', 'LIMITE', 'GLEBA', 'CADASTRO'],
             'reserva': ['RESERVA_LEGAL', 'RES_LEGAL', 'RL'],
             'app': ['AREA_PRESERVACAO_PERMANENTE', 'PRESERVACAO_PERMANENTE', 'APP'],
+            'uso_restrito': ['USO_RESTRITO', 'RESTRITO', 'USO_LIMITADO'],
             'vegetacao': ['VEGETACAO_NATIVA', 'REMANESCENTE', 'NATIVA', 'MATA', 'FLORESTA', 'VEGETACAO'],
             'consolidada': ['CONSOLIDADA', 'ANTROPIZADA', 'USO_ANTROP', 'SOLO_CONSOLIDADO', 'ANTROPIZADO', 'USO_ALTERNATIVO', 'USO_SOLO'],
             'agua': ['HIDROGRAFIA', 'AGUA', 'CURSO_DAGUA', 'RIO', 'REPRESA', 'NASCENTE']
