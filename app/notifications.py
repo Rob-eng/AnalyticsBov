@@ -24,20 +24,21 @@ def notify_admin(message: str):
     except Exception as e:
         print(f"❌ [NOTIFY] Falha na rede Telegram: {e}")
 
-def notify_user_error(phone: str, error: str, context: str = "Ação desconhecida"):
+def notify_user_error(phone: str, error: str, context: str = "Ação desconhecida", user_name: str = "Usuário Desconhecido"):
     """Notifica o admin sobre um erro ocorrido com um usuário específico."""
     msg = (
-        f"👤 *Usuário:* `{phone}`\n"
+        f"👤 *Usuário:* {user_name} (`{phone}`)\n"
         f"🎯 *Contexto:* {context}\n"
         f"❌ *Erro:* {error}"
     )
     notify_admin(msg)
 
-def notify_feedback(phone: str, feedback: str):
+def notify_feedback(phone: str, feedback: str, user_name: str = "Usuário Desconhecido"):
     """Notifica o admin sobre um feedback/sugestão recebida."""
     msg = (
-        f"💬 *Feedback Recebido!*\n\n"
-        f"👤 *Usuário:* `{phone}`\n"
-        f"📝 *Mensagem:* {feedback}"
+        f"💬 *FEEDBACK RECEBIDO* (Agro Analytics)\n\n"
+        f"👤 *Patrão:* {user_name}\n"
+        f"📞 *Contato:* `{phone}`\n\n"
+        f"📝 *Mensagem:* \"{feedback}\""
     )
     notify_admin(msg)

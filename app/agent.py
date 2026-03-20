@@ -282,9 +282,15 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
 
         elif name == "enviar_feedback_admin":
             from app.notifications import notify_feedback
+            from app.models import SessionLocal, User
+            db = SessionLocal()
+            u = db.query(User).filter_by(chat_id=user_id).first()
+            u_name = u.username if u and u.username else "Usuário Desconhecido"
+            db.close()
+
             msg_feedback = arguments.get("mensagem", "")
             if msg_feedback:
-                notify_feedback(user_id, msg_feedback)
+                notify_feedback(user_id, msg_feedback, user_name=u_name)
                 return "Sucesso! O feedback foi enviado ao administrador. O bot responderá ao usuário que a sugestão foi recebida."
             return "Erro: mensagem de feedback está vazia."
 

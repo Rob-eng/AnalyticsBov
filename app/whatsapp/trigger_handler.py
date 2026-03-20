@@ -67,9 +67,16 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         error_trace = traceback.format_exc()
         print(f"[WA TRIGGER ERROR] {error_trace}", flush=True)
         
+        # Busca nome do usuário no DB para notificação
+        from app.models import SessionLocal, User
+        db = SessionLocal()
+        u = db.query(User).filter_by(chat_id=sender_phone).first()
+        u_name = u.username if u and u.username else "Usuário Desconhecido"
+        db.close()
+        
         # Notifica o Admin via Telegram
         from app.notifications import notify_user_error
-        notify_user_error(sender_phone, str(e), context=f"Fluxo: {trigger_string}")
+        notify_user_error(sender_phone, str(e), context=f"Fluxo: {trigger_string}", user_name=u_name)
         
         send_whatsapp_text(sender_phone, f"⚠️ Desculpe, tive um problema técnico ao processar seu pedido. O administrador já foi notificado e estamos verificando! 🛠️")
 
