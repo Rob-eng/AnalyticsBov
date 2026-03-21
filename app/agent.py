@@ -258,6 +258,12 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             if not nome or lat is None or lon is None:
                 return "Dados incompletos para cadastro. Preciso de nome, latitude e longitude."
             
+            # 1. Verificar Limite do Plano
+            from app.saas.limit_engine import can_perform_action
+            can_do, msg_limit = can_perform_action(user_id, 'ADD_PROPERTY')
+            if not can_do:
+                return msg_limit
+
             from app.models import SessionLocal, FavoriteLocation, User
             session = SessionLocal()
             try:

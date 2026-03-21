@@ -10,17 +10,39 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
-# Plan Configuration (Stripe Official IDs)
+# Plan Configuration (Stripe Official IDs & Business Rules)
 PLANS = {
-    "FREE": {"name": "Plano Bronze", "price": 0, "limit": 3},
+    "FREE": {
+        "name": "Plano Bronze", 
+        "max_properties": 1, 
+        "monthly_lookups": 3, 
+        "monthly_alerts": 1
+    },
     
     # Starter
-    "STARTER_MONTHLY": {"name": "Plano Starter Mensal", "price_id": "price_1T55Oq2M9WyBElyRth0qLD5M"},
-    "STARTER_YEARLY":  {"name": "Plano Starter Anual",  "price_id": "price_1T55Oq2M9WyBElyRU52SNG7e"},
+    "STARTER": {
+        "name": "Plano Starter",
+        "max_properties": 3,
+        "monthly_lookups": 10,
+        "monthly_alerts": 9999, # Unlimited
+        "prices": {
+            "MONTHLY": "price_1T55Oq2M9WyBElyRth0qLD5M",
+            "YEARLY":  "price_1T55Oq2M9WyBElyRU52SNG7e"
+        }
+    },
     
     # PRO (Ouro)
-    "PRO_MONTHLY": {"name": "Plano Ouro Mensal", "price_id": "price_1T55Q72M9WyBElyRlawYjcRD"},
-    "PRO_YEARLY":  {"name": "Plano Ouro Anual",  "price_id": "price_1T55Q72M9WyBElyReOxOLUEP"}
+    "PRO": {
+        "name": "Plano Ouro (Equipes)",
+        "max_properties": 10, # Extrapolating to 10 for teams
+        "monthly_lookups": 9999, # Unlimited lookups for PRO teams
+        "monthly_alerts": 9999,
+        "max_team_members": 3,
+        "prices": {
+            "MONTHLY": "price_1T55Q72M9WyBElyRlawYjcRD",
+            "YEARLY":  "price_1T55Q72M9WyBElyReOxOLUEP"
+        }
+    }
 }
 
 @router.get("/checkout/{plan}/{chat_id}")

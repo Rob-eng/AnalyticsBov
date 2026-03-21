@@ -53,6 +53,14 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         
         from app.models import log_activity
         
+        if fluxo in ['NDVI', 'CLIMA', 'HISTORICO', 'MDT']:
+            from app.saas.limit_engine import can_perform_action
+            can_do, msg_limit = can_perform_action(sender_phone, 'LOOKUP')
+            if not can_do:
+                send_whatsapp_text(sender_phone, msg_limit)
+                await _handle_premium(sender_phone)
+                return
+
         if fluxo == 'NDVI':
             log_activity(sender_phone, "NDVI", details=f"{nome} ({lat},{lon})")
             await _handle_ndvi(sender_phone, lat, lon, nome, loop)
@@ -566,15 +574,22 @@ async def _handle_premium(phone):
         "💎 *Planos e Assinaturas — AnalyticsBov*\n\n"
         "Patrão, turbine sua experiência com inteligência de ponta:\n\n"
         "🥉 *Plano Bronze (Grátis)*\n"
-        "- 3 consultas de NDVI/Clima por dia.\n\n"
+        "- 1 Fazenda cadastrada.\n"
+        "- 3 Consultas por mês.\n"
+        "- 1 Alerta de satélite por mês.\n\n"
         "🥈 *Plano Starter* (Monitoramento Base)\n"
+        "- 3 Fazendas cadastradas.\n"
+        "- 10 Consultas por mês.\n"
+        "- *Alertas Ilimitados* toda vez que o satélite passar!\n"
         "👉 [Assinar Mensal](https://analyticsbov-production.up.railway.app/billing/checkout/STARTER_MONTHLY/" + phone + ")\n"
         "👉 [Assinar Anual (Desconto)](https://analyticsbov-production.up.railway.app/billing/checkout/STARTER_YEARLY/" + phone + ")\n\n"
-        "🥇 *Plano Ouro (PRO)* (Ilimitado + Alertas)\n"
-        "- Alertas de Satélite Automáticos.\n"
-        "- Suporte prioritário.\n"
+        "🥇 *Plano Ouro (PRO)* (Equipes — Até 3 Usuários)\n"
+        "- *Consultas e Alertas ILIMITADOS*.\n"
+        "- Até 10 Fazendas cadastradas.\n"
+        "- Suporte prioritário via WhatsApp.\n"
         "👉 [Assinar Mensal](https://analyticsbov-production.up.railway.app/billing/checkout/PRO_MONTHLY/" + phone + ")\n"
         "👉 [Assinar Anual (Desconto)](https://analyticsbov-production.up.railway.app/billing/checkout/PRO_YEARLY/" + phone + ")\n\n"
+        "📈 *Planos Maiores:* Entre em contato com @robson_c para pacotes personalizados.\n\n"
         "_Segurança garantida via Stripe. Cancele quando quiser._"
     )
     send_whatsapp_text(phone, msg)
