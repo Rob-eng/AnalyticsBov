@@ -691,6 +691,58 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
         import traceback; traceback.print_exc()
         return None
 
+def find_car_at_coordinate_gee(lat, lon):
+    """
+    Busca o código do CAR (cod_imovel) em uma coordenada (lat/lon)
+    percorrendo os Assets do GEE (Mato Grosso e MS).
+    Isso substitui a busca no PostGIS para economizar memória e escala.
+    """
+    try:
+        if not initialize_gee():
+            return None
+
+        point = ee.Geometry.Point([lon, lat])
+        
+        # 📂 Lista de Pastas onde as UFs estão divididas em chunks (Bancos Espaciais na Nuvem)
+        CAR_FOLDERS = [
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks'
+        ]
+
+        print(f"🛰️ [GEE LOOKUP] Iniciando busca inteligente na nuvem para: {lat}, {lon}")
+        
+        # Filtro Silencioso e Rápido
+        for folder in CAR_FOLDERS:
+            try:
+                # 🔍 Lista os 100+ chunks dessa UF
+                assets = ee.data.listAssets({'parent': folder})['assets']
+                asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
+                
+                # Para cada pedaço, verificamos se o ponto está dentro
+                for aid in asset_ids:
+                    fc = ee.FeatureCollection(aid)
+                    # Filtra e pega o primeiro (limite 1 para velocidade)
+                    res = fc.filterBounds(point).limit(1).getInfo()
+                    
+                    if res.get('features'):
+                        feat = res['features'][0]
+                        props = feat.get('properties', {})
+                        print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}")
+                        return {
+                            "cod_imovel": props.get('cod_imovel'),
+                            "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
+                            "municipio": props.get('municipio'),
+                            "area": props.get('area'),
+                            "geometry": feat.get('geometry')
+                        }
+            except Exception as fe:
+                print(f"⚠️ [GEE] Erro ao ler pasta {folder}: {fe}")
+                continue
+
+        print(f"📍 [GEE] Nada encontrado em nenhuma UF mapeada.")
+        return None
+
     except Exception as e:
-        print(f"[GEE SATELLITE ERROR] {e}", flush=True)
+        print(f"❌ [GEE SEARCH ERROR] {e}")
+        import traceback; traceback.print_exc()
         return None

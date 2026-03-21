@@ -37,24 +37,30 @@ def read_root():
 @app.get("/property/at")
 def get_property_at(lat: float = Query(..., description="Latitude"), 
                     lon: float = Query(..., description="Longitude"),
-                    api_key: APIKey = Depends(get_api_key)):
+                    api_key: str = Depends(get_api_key)):
     """
-    Finds the CAR property containing the given coordinates.
+    Encontra a propriedade CAR na coordenada fornecida via GEE (Nuvem)
+    com Fallback para PostGIS (Local).
     """
+    # 1. 🛰️ Tenta na Nuvem (GEE - Ilimitado e Global)
+    from app.gee_connector import find_car_at_coordinate_gee
+    prop_gee = find_car_at_coordinate_gee(lat, lon)
+    
+    if prop_gee:
+        return {
+            "found": True,
+            "source": "GEE_CLOUD",
+            "cod_imovel": prop_gee["cod_imovel"],
+            "uf": prop_gee["uf"],
+            "municipio": prop_gee["municipio"],
+            "geometry": prop_gee["geometry"]
+        }
+
+    # 2. 🐘 Fallback para PostGISLocal (Para carregamentos manuais/ZIPs)
     from app.models import CarSessionLocal
     session = CarSessionLocal()
-    
-    # DEBUG: Inspect DB Connection
     try:
-        from sqlalchemy import inspect
-        bind = session.get_bind()
-        print(f"DEBUG API: DB URL: {bind.url}", flush=True)
-        inspector = inspect(bind)
-        print(f"DEBUG API: Tables in DB: {inspector.get_table_names()}", flush=True)
-    except Exception as e:
-        print(f"DEBUG API: Inspection Failed: {e}", flush=True)
-
-    try:
+        from geoalchemy2.functions import ST_GeomFromText, ST_Intersects, ST_Distance
         point_wkt = f'POINT({lon} {lat})'
         
         prop = session.query(CARProperty).filter(
@@ -62,43 +68,24 @@ def get_property_at(lat: float = Query(..., description="Latitude"),
         ).first()
 
         if prop:
+            from geoalchemy2.shape import to_shape
+            from shapely.geometry import mapping
             geom_shape = to_shape(prop.geometry)
             return {
                 "found": True,
-                "status": "OFFICIAL",
+                "source": "POSTGIS_LOCAL",
                 "cod_imovel": prop.cod_imovel,
                 "uf": prop.uf,
                 "municipio": prop.municipio,
                 "geometry": mapping(geom_shape)
             }
-        
-        # Fallback: Nearest within 11km
-        nearest = session.query(CARProperty).order_by(
-            CARProperty.geometry.ST_Distance(ST_GeomFromText(point_wkt, 4674))
-        ).limit(1).first()
-
-        if nearest:
-            dist_query = session.execute(
-                text(f"SELECT ST_Distance(geometry, ST_GeomFromText('{point_wkt}', 4674)) FROM car_properties WHERE id = :pid"),
-                {"pid": nearest.id}
-            ).scalar()
-            
-            if dist_query < 0.1: 
-                geom_shape = to_shape(nearest.geometry)
-                return {
-                    "found": True,
-                    "status": "NEARBY",
-                    "cod_imovel": nearest.cod_imovel,
-                    "uf": nearest.uf,
-                    "municipio": nearest.municipio,
-                    "geometry": mapping(geom_shape),
-                    "distance_degrees": dist_query
-                }
-
-        return {"found": False, "message": "No property found at this location."}
+    except Exception as e:
+        print(f"⚠️ Erro no Fallback PostGIS: {e}")
     finally:
         session.close()
 
+    return {"found": False, "message": "Nenhuma propriedade localizada nesta coordenada."}
+            
 @app.get("/property/details/{cod_imovel}")
 def get_property_details(cod_imovel: str, api_key: APIKey = Depends(get_api_key)):
     """
