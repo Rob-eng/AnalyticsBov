@@ -10,11 +10,17 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
-# Plan Configuration
+# Plan Configuration (Stripe Official IDs)
 PLANS = {
     "FREE": {"name": "Plano Bronze", "price": 0, "limit": 3},
-    "PRO": {"name": "Plano Ouro", "price": 99.00, "price_id": os.getenv("STRIPE_PRO_PRICE_ID")},
-    "ENTERPRISE": {"name": "Plano Diamond", "price": 499.00, "price_id": os.getenv("STRIPE_ENTERPRISE_PRICE_ID")}
+    
+    # Starter
+    "STARTER_MONTHLY": {"name": "Plano Starter Mensal", "price_id": "price_1T55Oq2M9WyBElyRth0qLD5M"},
+    "STARTER_YEARLY":  {"name": "Plano Starter Anual",  "price_id": "price_1T55Oq2M9WyBElyRU52SNG7e"},
+    
+    # PRO (Ouro)
+    "PRO_MONTHLY": {"name": "Plano Ouro Mensal", "price_id": "price_1T55Q72M9WyBElyRlawYjcRD"},
+    "PRO_YEARLY":  {"name": "Plano Ouro Anual",  "price_id": "price_1T55Q72M9WyBElyReOxOLUEP"}
 }
 
 @router.get("/checkout/{plan}/{chat_id}")
