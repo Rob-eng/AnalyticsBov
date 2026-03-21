@@ -176,6 +176,18 @@ def get_tools_definition():
                         "required": ["mensagem"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "verificar_planos_assinatura",
+                    "description": "Explica os planos de assinatura (Bronze, Ouro, Diamond) e fornece informações sobre preços e benefícios. Use quando o usuário perguntar por 'preço', 'planos', 'assinar', 'pagar' ou 'quais as vantagens'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
             }
     ]
 
@@ -305,6 +317,9 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             db.close()
             return "Erro: mensagem de feedback está vazia."
 
+        elif name == "verificar_planos_assinatura":
+            return "TRIGGER_FLOW: PREMIUM"
+
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
         return f"Erro interno ao rodar ferramenta: {e}"
@@ -331,12 +346,12 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "3. Use `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro` para cotações.\n"
             "4. Se o produtor pedir Previsão de Chuva, NDVI ou MDT (Terreno):\n"
             "   - Use as ferramentas correspondentes (`verificar_previsao_chuva` ou `analisar_saude_pasto_ndvi`).\n"
-            "   - Essas ferramentas acionam os relatórios oficiais e automáticos da plataforma (padrão 'botão').\n"
-            "   - Diga algo como: 'Com certeza, Patrão! Vou gerar agora o relatório oficial para o senhor. Veja abaixo:'\n"
-            "5. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
-            "6. LISTE TODAS as ferramentas com detalhes quando perguntado (B3, Clima, MDT, NDVI, Cadastro).\n"
-            "7. NUNCA invente números.\n"
-            "8. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo, reclamar ou pedir melhorias. Diga que as mensagens vão direto para o engenheiro responsável!"
+            "5. Se o produtor perguntar sobre Preços, Planos ou Assinatura:\n"
+            "   - Use `verificar_planos_assinatura` IMEDIATAMENTE.\n"
+            "   - Explique que o Plano Bronze é grátis, o Plano Ouro (PRO) custa R$ 99/mês (Unlimited + Alertas de Satélite) e o Plano Diamond R$ 499 (Enterprise).\n"
+            "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
+            "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
+            "8. NUNCA invente números."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"

@@ -11,6 +11,7 @@ from starlette.status import HTTP_403_FORBIDDEN
 
 from app.whatsapp.webhook import router as whatsapp_router
 from app.admin_router import router as admin_router
+from app.saas.billing import router as billing_router
 from app.auth import get_api_key
 from app.models import init_db
 
@@ -20,6 +21,7 @@ init_db()
 app = FastAPI(title="CAR Spatial API")
 app.include_router(whatsapp_router)
 app.include_router(admin_router)
+app.include_router(billing_router)
 
 from fastapi.responses import HTMLResponse
 

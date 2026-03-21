@@ -65,6 +65,9 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         elif fluxo == 'MDT':
             log_activity(sender_phone, "MDT", details=f"{nome} ({lat},{lon})")
             await _handle_mdt(sender_phone, lat, lon, nome, loop)
+        elif fluxo == 'PREMIUM':
+            log_activity(sender_phone, "PREMIUM_CHECK", details="User viewing plans")
+            await _handle_premium(sender_phone)
         else:
             send_whatsapp_text(sender_phone, f"⚠️ Fluxo '{fluxo}' não reconhecido.")
         
@@ -556,3 +559,27 @@ async def process_whatsapp_car_request(phone, car_code):
     )
     send_whatsapp_image(phone, map_bytes, caption)
     print(f"[WA CAR REQ] Processo finalizado para {phone}", flush=True)
+
+async def _handle_premium(phone):
+    """Apresenta os planos de assinatura no WhatsApp com links de pagamento."""
+    msg = (
+        "💎 *Planos e Assinaturas — AnalyticsBov*\n\n"
+        "Patrão, turbine sua experiência com inteligência de ponta:\n\n"
+        "🥉 *Plano Bronze (Grátis)*\n"
+        "- 3 consultas de NDVI/Clima por dia.\n"
+        "- Perímetros automáticos (SP, MS, MT, GO, TO, PR, SC, RS).\n"
+        "- Gráfico de cotações B3.\n\n"
+        "🥇 *Plano Ouro (PRO)* — *R$ 99/mês*\n"
+        "- Consultas ILIMITADAS.\n"
+        "- Alertas Automáticos de Satélite (receba o mapa assim que o satélite passar).\n"
+        "- Histórico de até 3 anos.\n"
+        "- Suporte prioritário via WhatsApp.\n"
+        "👉 [Assinar Plano Ouro](https://analyticsbov-production.up.railway.app/billing/checkout/PRO/" + phone + ")\n\n"
+        "💎 *Plano Diamond (Enterprise)* — *R$ 499/mês*\n"
+        "- Integração API para sua empresa.\n"
+        "- Dashboards customizados.\n"
+        "- MDT e Topografia avançada sem restrições.\n"
+        "👉 [Assinar Plano Diamond](https://analyticsbov-production.up.railway.app/billing/checkout/ENTERPRISE/" + phone + ")\n\n"
+        "_Segurança garantida via Stripe. Cancele quando quiser._"
+    )
+    send_whatsapp_text(phone, msg)
