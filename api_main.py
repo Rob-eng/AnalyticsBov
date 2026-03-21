@@ -10,32 +10,16 @@ import os
 from starlette.status import HTTP_403_FORBIDDEN
 
 from app.whatsapp.webhook import router as whatsapp_router
+from app.admin_router import router as admin_router
+from app.auth import get_api_key
 from app.models import init_db
 
 # Inicializa o Banco de Dados (cria tabelas e migrações pendentes)
 init_db()
 
-app = FastAPI(title="CAR Spatial API", description="API to query CAR properties from PostGIS")
+app = FastAPI(title="CAR Spatial API")
 app.include_router(whatsapp_router)
-
-# Security: Basic API Key
-API_KEY = os.getenv("CAR_API_KEY", "your-default-secure-key")
-API_KEY_NAME = "X-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-api_key_query = APIKeyQuery(name="api_key", auto_error=False)
-
-async def get_api_key(
-    api_key_header: str = Security(api_key_header),
-    api_key_query: str = Security(api_key_query),
-):
-    if api_key_header == API_KEY:
-        return api_key_header
-    if api_key_query == API_KEY:
-        return api_key_query
-    
-    raise HTTPException(
-        status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
-    )
+app.include_router(admin_router)
 
 from fastapi.responses import HTMLResponse
 
