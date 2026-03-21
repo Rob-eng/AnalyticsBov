@@ -704,9 +704,17 @@ def find_car_at_coordinate_gee(lat, lon):
         point = ee.Geometry.Point([lon, lat])
         
         # 📂 Lista de Pastas onde as UFs estão divididas em chunks (Bancos Espaciais na Nuvem)
+        # Estamos expandindo para SP, GO, TO, PR, SC e RS conforme solicitado.
         CAR_FOLDERS = [
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks',
             'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks'
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/sp_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/go_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/to_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/pr_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/sc_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/rs_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mg_chunks'
         ]
 
         print(f"🛰️ [GEE LOOKUP] Iniciando busca inteligente na nuvem para: {lat}, {lon}")
