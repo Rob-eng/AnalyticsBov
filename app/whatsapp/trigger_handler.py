@@ -97,8 +97,7 @@ async def _handle_ndvi(phone, lat, lon, nome, loop):
     # 1. Perímetro
     geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
     
-    if cod_imovel:
-        await _send_car_zip_guide(phone, cod_imovel)
+    # Removed _send_car_zip_guide here (keep it only for registration)
     
     # 2. NDVI
     ndvi_result = await loop.run_in_executor(None, get_ndvi_analysis, geometry)
@@ -155,8 +154,7 @@ async def _handle_clima(phone, lat, lon, nome, loop):
         geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
         if geometry:
             polygon = _json.dumps(geometry)
-        if cod_imovel:
-            await _send_car_zip_guide(phone, cod_imovel)
+        # Removed _send_car_zip_guide here (keep it only for registration)
     except Exception:
         pass
     
@@ -199,6 +197,8 @@ async def _handle_historico(phone, lat, lon, nome, loop):
     for date_val, val in data.get('daily_history', []):
         d_fmt = datetime.strptime(date_val, '%Y-%m-%d').strftime('%d/%m')
         msg += f"• {d_fmt}: {val:.1f} mm\n"
+    
+    msg += "\n📡 *Fonte:* Open-Meteo Weather API"
     
     # 3. Heatmap regional (GEE)
     heatmap = None
@@ -249,8 +249,7 @@ async def _handle_mdt(phone, lat, lon, nome, loop):
     # 1. Perímetro
     geometry, car_status, cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat, lon)
     
-    if cod_imovel:
-        await _send_car_zip_guide(phone, cod_imovel)
+    # Removed _send_car_zip_guide here (keep it only for registration)
     
     # 2. Dados de terreno
     terrain_data = await loop.run_in_executor(None, get_terrain_data, geometry)

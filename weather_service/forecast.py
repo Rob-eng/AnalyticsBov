@@ -178,8 +178,9 @@ def _draw_borders(ax, extent):
     if geo.get('brazil_states') is not None:
         try:
             br_clip = geo['brazil_states'].cx[lon_min:lon_max, lat_min:lat_max]
-            br_clip.boundary.plot(ax=ax, color='#555555', linewidth=0.35,
-                                  linestyle='--', zorder=4)
+            # Limite dos estados em Amarelo conforme pedido pelo usuário
+            br_clip.boundary.plot(ax=ax, color='#fbbf24', linewidth=0.6,
+                                  linestyle='-', alpha=0.9, zorder=4)
         except Exception as e:
             logger.debug(f"State border draw failed: {e}")
 
