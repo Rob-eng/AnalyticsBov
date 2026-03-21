@@ -61,60 +61,42 @@ def get_state_from_coords(lat, lon):
 
 def fetch_car_perimeter(lat, lon):
     """
-    Attempts to fetch CAR perimeter using Local API (Priority 1) then WFS (Priority 2).
-    Falls back to a 1km bounding box if both fail.
-    Returns: (geometry, status, cod_imovel)
-    status can be: 'OFFICIAL', 'NEARBY', 'FALLBACK'
+    Attempts to fetch CAR perimeter using GEE (Nuvem - Priority 1)
+    then Local PostGIS (BoiNoMundo DB - Priority 2).
     """
-    # 1. Try Local API (FastAPI sidecar)
-    port = os.getenv("PORT", 8000)
-    api_url = f"http://127.0.0.1:{port}/property/at"
-    headers = {"X-API-Key": os.getenv("CAR_API_KEY", "your-default-secure-key")}
-    params = {"lat": lat, "lon": lon}
-    
+    # 1. 🛰️ TRY GEE (Global / Cloud Coverage)
     try:
-        print(f"Querying Local API: {api_url} params={params}")
-        response = requests.get(api_url, params=params, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("found"):
-                status = data.get("status", "OFFICIAL")
-                cod = data.get("cod_imovel")
-                print(f"✓ Local API found property: {cod} ({status})")
-                return (data["geometry"], status, cod)
-        else:
-            print(f"Local API returned status {response.status_code}: {response.text}")
+        from app.gee_connector import find_car_at_coordinate_gee
+        print(f"🛰️ [Environmental] Querying GEE directly for {lat}, {lon}")
+        prop_gee = find_car_at_coordinate_gee(lat, lon)
+        if prop_gee:
+            print(f"✓ GEE found property: {prop_gee['cod_imovel']}")
+            return (prop_gee["geometry"], 'OFFICIAL', prop_gee["cod_imovel"])
     except Exception as e:
-        print(f"⚠️ Local API connection failed: {e}")
+        print(f"⚠️ GEE lookup failed: {e}")
 
-    # 2. Try WFS (External Government Server)
-    print("Trying WFS fallback...")
-    endpoints = [
-        "https://geoserver.car.gov.br/geoserver/sicar/wfs",
-        "https://geoserver.car.gov.br/geoserver/wfs"
-    ]
-    
-    wfs_params = {
-        "service": "WFS",
-        "version": "1.1.0",
-        "request": "GetFeature",
-        "typeName": "sicar:area_imovel",
-        "outputFormat": "application/json",
-        "cql_filter": f"CONTAINS(geometria, POINT({lon} {lat}))"
-    }
+    # 2. 🐘 TRY LOCAL POSTGIS
+    try:
+        from app.models import CarSessionLocal, CARProperty
+        from geoalchemy2.functions import ST_GeomFromText, ST_Intersects
+        from geoalchemy2.shape import to_shape
+        from shapely.geometry import mapping
+        
+        print(f"🐘 [Environmental] Querying PostGIS fallback for {lat}, {lon}")
+        session = CarSessionLocal()
+        point_wkt = f'POINT({lon} {lat})'
+        
+        prop = session.query(CARProperty).filter(
+            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
+        ).first()
 
-    for url in endpoints:
-        try:
-            response = requests.get(url, params=wfs_params, timeout=10)
-            if response.status_code == 200 and 'json' in response.headers.get('Content-Type', ''):
-                data = response.json()
-                if "features" in data and len(data["features"]) > 0:
-                    feat = data["features"][0]
-                    cod = feat.get("properties", {}).get("cod_imovel")
-                    print(f"✓ WFS found property: {cod}")
-                    return (feat["geometry"], 'OFFICIAL', cod)
-        except:
-            continue
+        if prop:
+            geom_shape = to_shape(prop.geometry)
+            print(f"✓ PostGIS found property: {prop.cod_imovel}")
+            return (mapping(geom_shape), 'OFFICIAL', prop.cod_imovel)
+        session.close()
+    except Exception as e:
+        print(f"⚠️ Local PostGIS fallback failed: {e}")
     
     # 3. Last resort: estimated area
     print("⚠ All sources failed. Using estimated 1km² area")
