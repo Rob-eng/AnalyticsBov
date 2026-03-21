@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perfil do Usuário | AnalyticsBov</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #0ea5e9;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text);
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 1.5rem 2rem;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .back-btn {
+            color: #94a3b8;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .user-header {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .user-info h1 {
+            margin: 0;
+            font-size: 2rem;
+        }
+
+        .user-info p {
+            color: #94a3b8;
+            margin: 5px 0 0 0;
+        }
+
+        .badge {
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .badge-pro {
+            background: #a855f7;
+            color: white;
+        }
+
+        .badge-free {
+            background: #64748b;
+            color: white;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .log-item {
+            padding: 0.8rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .log-item:last-child {
+            border: none;
+        }
+
+        .trigger-tag {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-right: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th {
+            text-align: left;
+            color: #94a3b8;
+            padding: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        td {
+            padding: 0.8rem 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <a href="/admin/dashboard?api_key={{ api_key }}"
+            style="color:white; text-decoration:none; font-size: 1.5rem">🏠</a>
+        <h1 style="margin:0; font-size: 1.2rem">Perfil do Patrão</h1>
+    </header>
+
+    <div class="container">
+        <a href="/admin/dashboard?api_key={{ api_key }}" class="back-btn">← Voltar para o Dashboard</a>
+
+        <div class="user-header">
+            <div class="user-info">
+                <h1>{{ user.username or 'Sem Nome' }}</h1>
+                <p>📍 WhatsApp: {{ user.chat_id }}</p>
+                <p>📅 Desde: {{ user.created_at.strftime('%d/%m/%Y') }}</p>
+            </div>
+            <div class="badge badge-{{ 'pro' if user.plan_type != 'FREE' else 'free' }}">
+                {{ user.plan_type }}
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- HISTORICO -->
+            <div class="card">
+                <h2>Histórico de Ações</h2>
+                <div style="max-height: 500px; overflow-y: auto; padding-right: 10px">
+                    {% for log in logs %}
+                    <div class="log-item">
+                        <div
+                            style="display:flex; justify-content:space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 3px">
+                            <span>{{ log.created_at.strftime('%d/%m/%Y %H:%M') }}</span>
+                            <span class="trigger-tag"
+                                style="background: {{ 'rgba(34, 197, 94, 0.2)' if log.trigger_type == 'AUTO_ALERT' else 'rgba(99, 102, 241, 0.2)' }}; color: {{ '#22c55e' if log.trigger_type == 'AUTO_ALERT' else '#6366f1' }}">
+                                {{ 'Auto' if log.trigger_type == 'AUTO_ALERT' else 'Man' }}
+                            </span>
+                        </div>
+                        <div style="font-weight: 600; color: {{ '#ef4444' if log.status == 'ERROR' else '#f8fafc' }}">
+                            {{ log.action }}
+                        </div>
+                        <div style="font-size: 0.85rem; color: #64748b">{{ log.details or '-' }}</div>
+                        {% if log.status == 'ERROR' %}
+                        <div style="font-size: 0.75rem; color: #ef4444; margin-top: 3px">⚠️ {{ log.error_message }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if not logs %}
+                    <p style="color:#64748b">Nenhuma ação registrada ainda.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- PROPRIEDADES -->
+            <div class="card">
+                <h2>Fazendas Cadastradas</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>NOME</th>
+                            <th>COORDENADAS</th>
+                            <th>ALERTAS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for loc in locations %}
+                        <tr>
+                            <td style="font-weight: 600">{{ loc.name }}</td>
+                            <td style="font-size: 0.8rem; color: #94a3b8">
+                                {{ loc.latitude|round(4) }}, {{ loc.longitude|round(4) }}
+                            </td>
+                            <td>
+                                <span style="color: {{ '#22c55e' if loc.ndvi_alerts_enabled else '#ef4444' }}">
+                                    {{ 'ON' if loc.ndvi_alerts_enabled else 'OFF' }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% if not locations %}
+                <p style="color:#64748b; margin-top: 1rem">O usuário ainda não salvou nenhuma propriedade.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -83,35 +83,71 @@ async def admin_dashboard(request: Request, api_key: str = Query(None)):
         free_users = total_users - pro_users
         
         total_actions = db.query(ActivityLog).count()
-        recent_feedbacks = db.query(Feedback).order_by(Feedback.created_at.desc()).limit(5).all()
-        recent_logs = db.query(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(20).all()
+        recent_feedbacks = db.query(Feedback).order_by(Feedback.created_at.desc()).limit(10).all()
+        
+        # Logs com Nomes de Usuários
+        logs_query = db.query(ActivityLog, User.username).outerjoin(User, ActivityLog.user_id == User.chat_id).order_by(ActivityLog.created_at.desc()).limit(30).all()
         
         # Atividade por Tipo (Pie Chart)
         action_stats = db.query(ActivityLog.action, func.count(ActivityLog.id)).group_by(ActivityLog.action).all()
         action_data = {a: c for a, c in action_stats}
         
+        # Atividade por Gatilho (Auto vs User)
+        trigger_stats = db.query(ActivityLog.trigger_type, func.count(ActivityLog.id)).group_by(ActivityLog.trigger_type).all()
+        trigger_data = {t: c for t, c in trigger_stats}
+
         # Crescimento de usuários 7 dias
         last_week = datetime.utcnow() - timedelta(days=7)
         daily_users = db.query(func.date(User.created_at), func.count(User.chat_id)).filter(User.created_at >= last_week).group_by(func.date(User.created_at)).all()
         
         # Lista de usuários (Preview)
-        users = db.query(User).order_by(User.created_at.desc()).limit(50).all()
+        users = db.query(User).order_by(User.created_at.desc()).limit(100).all()
 
         templates = Jinja2Templates(directory="app/templates")
         
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
+            "api_key": api_key,
             "total_users": total_users,
             "wa_users": wa_users,
             "tg_users": tg_users,
             "pro_users": pro_users,
-            "free_users": free_users,
             "total_actions": total_actions,
             "action_data": action_data,
+            "trigger_data": trigger_data,
             "recent_feedbacks": recent_feedbacks,
-            "recent_logs": recent_logs,
+            "recent_logs": logs_query, # Lista de tuples (Log, Username)
             "users": users,
             "daily_growth": {str(d): c for d, c in daily_users}
+        })
+    finally:
+        db.close()
+
+@router.get("/user/{chat_id}", response_class=HTMLResponse)
+async def user_details(request: Request, chat_id: str, api_key: str = Query(None)):
+    """
+    Exibe o histórico detalhado de um usuário específico.
+    """
+    if api_key != os.getenv("CAR_API_KEY", "your-default-secure-key"):
+        return HTMLResponse("<h1>Acesso Negado 🚫</h1>", status_code=403)
+
+    from app.models import SessionLocal, User, ActivityLog, FavoriteLocation
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.chat_id == chat_id).first()
+        if not user:
+            return HTMLResponse(f"<h1>Usuário {chat_id} não encontrado.</h1>")
+        
+        logs = db.query(ActivityLog).filter(ActivityLog.user_id == chat_id).order_by(ActivityLog.created_at.desc()).all()
+        locations = db.query(FavoriteLocation).filter(FavoriteLocation.user_id == chat_id).all()
+        
+        templates = Jinja2Templates(directory="app/templates")
+        return templates.TemplateResponse("user_detail.html", {
+            "request": request,
+            "api_key": api_key,
+            "user": user,
+            "logs": logs,
+            "locations": locations
         })
     finally:
         db.close()

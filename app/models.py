@@ -64,6 +64,7 @@ class ActivityLog(Base):
     user_id = Column(String, ForeignKey('users.chat_id'))
     action = Column(String) # 'NDVI', 'CLIMA', 'MDT', 'CAR_SEARCH', 'ZIP_UPLOAD', etc.
     platform = Column(String) # 'whatsapp', 'telegram'
+    trigger_type = Column(String, default='USER_REQUEST') # 'USER_REQUEST' ou 'AUTO_ALERT'
     details = Column(String, nullable=True) # Ex: 'CAR: MT-xxx'
     status = Column(String, default='SUCCESS') # 'SUCCESS', 'ERROR'
     error_message = Column(String, nullable=True)
@@ -242,16 +243,16 @@ def init_db():
     try:
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ALTER COLUMN chat_id TYPE TEXT USING chat_id::text;"))
-            
-            # SaaS and Platform Migrations
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS platform VARCHAR DEFAULT 'telegram';"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_type VARCHAR DEFAULT 'FREE';"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR;"))
             
+            conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
+            
             if hasattr(conn, 'commit'):
                 conn.commit()
     except Exception as e:
-        print(f"⚠️ User column migration note: {e}")
+        print(f"⚠️ Migration note: {e}")
 
     # 4. NDVI alert columns (safe ADD IF NOT EXISTS)
     try:
@@ -270,18 +271,18 @@ def init_db():
     except Exception as e:
         print(f"⚠️ NDVI column migration note: {e}")
 
-    except Exception as e:
-        print(f"⚠️ NDVI column migration note: {e}")
-
-def log_activity(chat_id, action, platform='whatsapp', details=None, status='SUCCESS', error_message=None):
+def log_activity(chat_id, action, platform='whatsapp', details=None, status='SUCCESS', error_message=None, trigger_type='USER_REQUEST', username=None):
     """Auxiliar para registrar ações dos usuários (Analytics)."""
     session = SessionLocal()
     try:
-        # 1. Garante que o User existe
+        # 1. Garante que o User existe e atualiza o Nome se enviado
         user = session.query(User).filter_by(chat_id=chat_id).first()
         if not user:
-            user = User(chat_id=chat_id, platform=platform)
+            user = User(chat_id=chat_id, platform=platform, username=username)
             session.add(user)
+            session.flush()
+        elif username and not user.username:
+            user.username = username # Sincroniza o nome se estiver vazio
             session.flush()
         
         # 2. Registra o Log
@@ -289,6 +290,7 @@ def log_activity(chat_id, action, platform='whatsapp', details=None, status='SUC
             user_id=chat_id,
             action=action,
             platform=platform,
+            trigger_type=trigger_type,
             details=details,
             status=status,
             error_message=error_message

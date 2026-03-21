@@ -230,20 +230,36 @@
                 </div>
                 {% endfor %}
                 {% if not recent_feedbacks %}
-                <div style="color:#94a3b8">Nenhum feedback nas últimas 24h.</div>
+                <div style="color:#94a3b8">Nenhum feedback recebido até agora.</div>
                 {% endif %}
             </div>
 
             <div class="chart-container">
                 <h2>Logs de Atividade</h2>
-                <div style="overflow-y: auto; max-height: 400px;">
-                    {% for log in recent_logs %}
-                    <div style="padding:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.9rem">
-                        <span style="color:#94a3b8">{{ log.created_at.strftime('%H:%M:%S') }}</span> |
-                        <b style="color:{{ '#ef4444' if log.status == 'ERROR' else '#6366f1' }}">{{ log.action }}</b> |
-                        {{ log.details[:40] if log.details else '-' }}
+                <div style="overflow-y: auto; max-height: 480px;">
+                    {% for item in recent_logs %}
+                    {% set log = item[0] %}
+                    {% set username = item[1] %}
+                    <div style="padding:0.7rem; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.85rem">
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 2px">
+                            <span style="color:#94a3b8">{{ log.created_at.strftime('%d/%m %H:%M') }}</span>
+                            <span class="badge"
+                                style="background: {{ 'rgba(34, 197, 94, 0.2)' if log.trigger_type == 'AUTO_ALERT' else 'rgba(99, 102, 241, 0.2)' }}; color: {{ '#22c55e' if log.trigger_type == 'AUTO_ALERT' else '#6366f1' }}; font-size: 0.7rem">
+                                {{ 'AUTOMÁTICO' if log.trigger_type == 'AUTO_ALERT' else 'PEDIDO USER' }}
+                            </span>
+                        </div>
+                        <a href="/admin/user/{{ log.user_id }}?api_key={{ api_key }}"
+                            style="color:var(--secondary); text-decoration:none; font-weight:600">
+                            {{ username or log.user_id }}
+                        </a>:
+                        <b style="color:{{ '#ef4444' if log.status == 'ERROR' else '#f8fafc' }}">{{ log.action }}</b>
+                        <span style="color:#64748b">({{ log.details[:30] if log.details else '-' }})</span>
+
                         {% if log.status == 'ERROR' %}
-                        <div style="color:#ef4444; font-size:0.75rem">{{ log.error_message[:100] }}</div>
+                        <div
+                            style="color:#ef4444; font-size:0.7rem; margin-top:3px; background:rgba(239, 68, 68, 0.1); padding:4px; border-radius:4px">
+                            ⚠️ {{ log.error_message[:80] }}
+                        </div>
                         {% endif %}
                     </div>
                     {% endfor %}
@@ -253,12 +269,15 @@
 
         <!-- USER LIST -->
         <div class="table-section">
-            <h2>Gestão de Usuários</h2>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+                <h2 style="margin:0">Gestão de Usuários</h2>
+                <div style="color:#94a3b8">Mostrando últimos 100 ativos</div>
+            </div>
             <table>
                 <thead>
                     <tr>
                         <th>CADASTRADO EM</th>
-                        <th>IDENTIFICADOR</th>
+                        <th>NOME / WHATSAPP</th>
                         <th>PLATAFORMA</th>
                         <th>PLANO</th>
                         <th>AÇÕES</th>
@@ -267,15 +286,19 @@
                 <tbody>
                     {% for u in users %}
                     <tr>
-                        <td>{{ u.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
-                        <td>{{ u.chat_id }}</td>
+                        <td>{{ u.created_at.strftime('%d/%m/%Y') }}</td>
+                        <td>
+                            <div style="font-weight:600">{{ u.username or 'Sem Nome' }}</div>
+                            <div style="font-size:0.8rem; color:#64748b">{{ u.chat_id }}</div>
+                        </td>
                         <td><span class="badge badge-{{ 'wa' if u.platform == 'whatsapp' else 'tg' }}">{{
                                 u.platform.upper() }}</span></td>
                         <td><span class="badge badge-{{ 'pro' if u.plan_type != 'FREE' else 'free' }}">{{ u.plan_type
                                 }}</span></td>
                         <td>
-                            <button
-                                style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px 10px; border-radius:5px; cursor:pointer">Detalhes</button>
+                            <a href="/admin/user/{{ u.chat_id }}?api_key={{ api_key }}"
+                                style="background:rgba(99, 102, 241, 0.2); border:1px solid var(--primary); color:white; padding:6px 12px; border-radius:8px; cursor:pointer; text-decoration:none; font-size:0.8rem">Ver
+                                Histórico</a>
                         </td>
                     </tr>
                     {% endfor %}

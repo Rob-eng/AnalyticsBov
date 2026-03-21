@@ -17,9 +17,6 @@ async def verify_webhook(
     token: str = Query(None, alias="hub.verify_token"),
     challenge: str = Query(None, alias="hub.challenge")
 ):
-    """
-    Endpoint para verificação inicial do Webhook solicitada pela Meta (Facebook).
-    """
     if mode == "subscribe" and token == VERIFY_TOKEN:
         print("✅ Webhook do WhatsApp verificado com sucesso pela Meta!")
         return PlainTextResponse(content=challenge, status_code=200)
@@ -28,11 +25,7 @@ async def verify_webhook(
 @router.post("/")
 @router.post("")
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
-    """
-    Endpoint que recebe TODAS as mensagens ativas, botões clicados e recibos de leitura do WhatsApp.
-    """
     body = await request.json()
-    print(f"📦 [RAW Webhook Payload]: {json.dumps(body)}", flush=True)
     
     if body.get("object") == "whatsapp_business_account":
         for entry in body.get("entry", []):
@@ -40,8 +33,14 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                 value = change.get("value", {})
                 
                 if "messages" in value:
+                    # Mapeamento de Nomes de Perfil vindo da Meta
+                    contacts_map = {}
+                    for contact in value.get("contacts", []):
+                        contacts_map[contact.get("wa_id")] = contact.get("profile", {}).get("name")
+
                     for msg in value["messages"]:
                         sender_phone = msg.get("from")
+                        user_name = contacts_map.get(sender_phone)
                         msg_type = msg.get("type")
                         
                         texto = ""
@@ -53,37 +52,32 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                                 texto = interactive.get("button_reply", {}).get("id", "")
                             elif interactive.get("type") == "list_reply":
                                 texto = interactive.get("list_reply", {}).get("id", "")
+                        
                         elif msg_type == "document":
                             doc = msg.get("document", {})
                             if doc.get("filename", "").lower().endswith(".zip"):
-                                 media_id = doc.get("id")
-                                 print(f"📥 [WA] Recebido ZIP: {doc.get('filename')} (ID: {media_id})")
-                                 from app.models import log_activity
-                                 log_activity(sender_phone, "ZIP_UPLOAD", platform='whatsapp', details=doc.get("filename"))
-                                 from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
-                                 background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
+                                media_id = doc.get("id")
+                                from app.models import log_activity
+                                log_activity(sender_phone, "ZIP_UPLOAD", platform='whatsapp', details=doc.get("filename"), username=user_name)
+                                from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
+                                background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
                         
-                        print(f"[Webhook] {sender_phone} disse: {texto if texto else msg_type}")
+                        print(f"[Webhook] {sender_phone} ({user_name}) disse: {texto if texto else msg_type}")
                         
-                        # ⚠️ Detecção de Código CAR (Auto-Download / Scraper Fantasma)
+                        # Detecção de Código CAR
                         import re
                         car_pattern = r"^[A-Z]{2}-\d{7}-[A-F0-9]{32}$"
-                        
                         if texto and re.match(car_pattern, texto.strip().upper()):
                             car_code = texto.strip().upper()
-                            print(f"🚀 [WA] Detectado Código CAR: {car_code}")
                             from app.models import log_activity
-                            log_activity(sender_phone, "CAR_SEARCH", platform='whatsapp', details=car_code)
+                            log_activity(sender_phone, "CAR_SEARCH", platform='whatsapp', details=car_code, username=user_name)
                             from app.whatsapp.trigger_handler import process_whatsapp_car_request
                             background_tasks.add_task(process_whatsapp_car_request, sender_phone, car_code)
                         
-                        # ⚠️ Delega a resposta e o pensamento da IA para uma BackgroundTask do FastAPI
-                        # Isso garante que a Meta receba o '200 OK' em 1s, enquanto o ChatGPT tem o tempo dele
+                        # Lógica de Chat IA
                         elif texto:
                             from app.models import log_activity
-                            # Log simplificado para nao expor o texto todo
-                            log_activity(sender_phone, "CHAT", platform='whatsapp', details=texto[:50])
+                            log_activity(sender_phone, "CHAT", platform='whatsapp', details=texto[:50], username=user_name)
                             background_tasks.add_task(process_whatsapp_message, sender_phone, texto)
 
-    # A Meta sempre espera um 200 OK
     return {"status": "ok"}
