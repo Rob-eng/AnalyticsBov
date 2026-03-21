@@ -56,10 +56,12 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                         elif msg_type == "document":
                             doc = msg.get("document", {})
                             if doc.get("filename", "").lower().endswith(".zip"):
-                                media_id = doc.get("id")
-                                print(f"📥 [WA] Recebido ZIP: {doc.get('filename')} (ID: {media_id})")
-                                from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
-                                background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
+                                 media_id = doc.get("id")
+                                 print(f"📥 [WA] Recebido ZIP: {doc.get('filename')} (ID: {media_id})")
+                                 from app.models import log_activity
+                                 log_activity(sender_phone, "ZIP_UPLOAD", platform='whatsapp', details=doc.get("filename"))
+                                 from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
+                                 background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
                         
                         print(f"[Webhook] {sender_phone} disse: {texto if texto else msg_type}")
                         
@@ -68,13 +70,19 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                         car_pattern = r"^[A-Z]{2}-\d{7}-[A-F0-9]{32}$"
                         
                         if texto and re.match(car_pattern, texto.strip().upper()):
-                            print(f"🚀 [WA] Detectado Código CAR: {texto.strip().upper()}")
+                            car_code = texto.strip().upper()
+                            print(f"🚀 [WA] Detectado Código CAR: {car_code}")
+                            from app.models import log_activity
+                            log_activity(sender_phone, "CAR_SEARCH", platform='whatsapp', details=car_code)
                             from app.whatsapp.trigger_handler import process_whatsapp_car_request
-                            background_tasks.add_task(process_whatsapp_car_request, sender_phone, texto.strip().upper())
+                            background_tasks.add_task(process_whatsapp_car_request, sender_phone, car_code)
                         
                         # ⚠️ Delega a resposta e o pensamento da IA para uma BackgroundTask do FastAPI
                         # Isso garante que a Meta receba o '200 OK' em 1s, enquanto o ChatGPT tem o tempo dele
                         elif texto:
+                            from app.models import log_activity
+                            # Log simplificado para nao expor o texto todo
+                            log_activity(sender_phone, "CHAT", platform='whatsapp', details=texto[:50])
                             background_tasks.add_task(process_whatsapp_message, sender_phone, texto)
 
     # A Meta sempre espera um 200 OK

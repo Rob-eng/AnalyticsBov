@@ -57,6 +57,27 @@ class CARCaptchaSession(Base):
     cookies_json = Column(String) # JSON de cookies da requests.Session
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class ActivityLog(Base):
+    __tablename__ = 'activity_logs'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, ForeignKey('users.chat_id'))
+    action = Column(String) # 'NDVI', 'CLIMA', 'MDT', 'CAR_SEARCH', 'ZIP_UPLOAD', etc.
+    platform = Column(String) # 'whatsapp', 'telegram'
+    details = Column(String, nullable=True) # Ex: 'CAR: MT-xxx'
+    status = Column(String, default='SUCCESS') # 'SUCCESS', 'ERROR'
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Feedback(Base):
+    __tablename__ = 'feedbacks'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, ForeignKey('users.chat_id'))
+    message = Column(String)
+    status = Column(String, default='NEW') # 'NEW', 'READ', 'IMPLEMENTED'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CARProperty(SpatialBase):
     __tablename__ = 'car_properties'
     
@@ -249,13 +270,42 @@ def init_db():
     except Exception as e:
         print(f"⚠️ NDVI column migration note: {e}")
 
+    except Exception as e:
+        print(f"⚠️ NDVI column migration note: {e}")
+
+def log_activity(chat_id, action, platform='whatsapp', details=None, status='SUCCESS', error_message=None):
+    """Auxiliar para registrar ações dos usuários (Analytics)."""
+    session = SessionLocal()
+    try:
+        # 1. Garante que o User existe
+        user = session.query(User).filter_by(chat_id=chat_id).first()
+        if not user:
+            user = User(chat_id=chat_id, platform=platform)
+            session.add(user)
+            session.flush()
+        
+        # 2. Registra o Log
+        new_log = ActivityLog(
+            user_id=chat_id,
+            action=action,
+            platform=platform,
+            details=details,
+            status=status,
+            error_message=error_message
+        )
+        session.add(new_log)
+        session.commit()
+    except Exception as e:
+        print(f"❌ Error logging activity: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
 def get_recent_prices(days=1095):
     """Retrieve price history for the last N days (default 3 years)."""
     session = SessionLocal()
     try:
         cutoff_date = datetime.utcnow() - pd.Timedelta(days=days)
-        # We need pandas for this anyway in charts, might as well return list of dicts to keep it decoupled
-        # or just return the query objects
         records = session.query(PriceHistory).filter(PriceHistory.date >= cutoff_date).order_by(PriceHistory.date).all()
         return [
             {'country': r.country, 'price': r.price, 'date': r.date}

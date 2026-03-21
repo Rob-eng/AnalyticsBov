@@ -282,16 +282,27 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
 
         elif name == "enviar_feedback_admin":
             from app.notifications import notify_feedback
-            from app.models import SessionLocal, User
+            from app.models import SessionLocal, User, Feedback, log_activity
             db = SessionLocal()
             u = db.query(User).filter_by(chat_id=user_id).first()
             u_name = u.username if u and u.username else "Usuário Desconhecido"
-            db.close()
-
+            
             msg_feedback = arguments.get("mensagem", "")
             if msg_feedback:
+                # 1. Salva no DB para o Analytics
+                new_f = Feedback(user_id=user_id, message=msg_feedback)
+                db.add(new_f)
+                db.commit()
+                db.close()
+                
+                # 2. Notifica o Admin (Telegram)
                 notify_feedback(user_id, msg_feedback, user_name=u_name)
+                
+                # 3. Log de Atividade
+                log_activity(user_id, "FEEDBACK", details=msg_feedback[:100])
+                
                 return "Sucesso! O feedback foi enviado ao administrador. O bot responderá ao usuário que a sugestão foi recebida."
+            db.close()
             return "Erro: mensagem de feedback está vazia."
 
         return "Ferramenta desconhecida. Informe ao usuário."

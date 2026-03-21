@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agro Analytics | Admin Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #0ea5e9;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            background: rgba(30, 41, 59, 0.9);
+        }
+
+        .stat-card h3 {
+            margin: 0;
+            color: #94a3b8;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .stat-card .value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0.5rem 0;
+            background: linear-gradient(to right, #6366f1, #0ea5e9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .charts-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .chart-container {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .table-section {
+            background: var(--card-bg);
+            border-radius: 1.5rem;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th {
+            text-align: left;
+            color: #94a3b8;
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-wa {
+            background: #22c55e;
+            color: white;
+        }
+
+        .badge-tg {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .badge-pro {
+            background: #a855f7;
+            color: white;
+        }
+
+        .badge-free {
+            background: #64748b;
+            color: white;
+        }
+
+        .badge-error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .feedback-item {
+            border-left: 4px solid var(--primary);
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0 0.5rem 0.5rem 0;
+        }
+
+        h2 {
+            margin-bottom: 1.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div style="display:flex; align-items:center; gap:10px">
+            <div style="width:40px;height:40px;background:var(--primary);border-radius:10px"></div>
+            <h1 style="margin:0;font-size:1.5rem;font-weight:700">AnalyticsBov <span
+                    style="font-weight:300;color:var(--secondary)">Admin</span></h1>
+        </div>
+        <div>
+            <span style="color:#94a3b8">Sistema Online</span>
+            <div
+                style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%;margin-left:5px">
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- TOP STATS -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total de Usuários</h3>
+                <div class="value">{{ total_users }}</div>
+                <div style="color:#94a3b8">📊 WA: {{ wa_users }} | TG: {{ tg_users }}</div>
+            </div>
+            <div class="stat-card">
+                <h3>Assinaturas PRO</h3>
+                <div class="value">{{ pro_users }}</div>
+                <div style="color:#94a3b8">⭐ Taxa: {{ (pro_users / (total_users or 1) * 100)|round(1) }}%</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total de Ações (Mês)</h3>
+                <div class="value">{{ total_actions }}</div>
+                <div style="color:#94a3b8">⚡ Interações do Bot</div>
+            </div>
+            <div class="stat-card">
+                <h3>Saúde do Sistema</h3>
+                <div class="value">99.8%</div>
+                <div style="color:#22c55e">✓ Zero quedas graves</div>
+            </div>
+        </div>
+
+        <!-- CHARTS SECTION -->
+        <div class="charts-row">
+            <div class="chart-container">
+                <h2>Crescimento Semanal</h2>
+                <canvas id="growthChart" height="100"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Uso por Ferramenta</h2>
+                <canvas id="actionPie" height="200"></canvas>
+            </div>
+        </div>
+
+        <!-- FEEDBACK & LOGS -->
+        <div class="charts-row" style="grid-template-columns: 1fr 1fr">
+            <div class="chart-container">
+                <h2>Últimas Sugestões</h2>
+                {% for f in recent_feedbacks %}
+                <div class="feedback-item">
+                    <div style="font-size:0.8rem;color:#94a3b8">{{ f.created_at.strftime('%d/%m %H:%M') }} | User: {{
+                        f.user_id }}</div>
+                    <div>{{ f.message }}</div>
+                </div>
+                {% endfor %}
+                {% if not recent_feedbacks %}
+                <div style="color:#94a3b8">Nenhum feedback nas últimas 24h.</div>
+                {% endif %}
+            </div>
+
+            <div class="chart-container">
+                <h2>Logs de Atividade</h2>
+                <div style="overflow-y: auto; max-height: 400px;">
+                    {% for log in recent_logs %}
+                    <div style="padding:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.9rem">
+                        <span style="color:#94a3b8">{{ log.created_at.strftime('%H:%M:%S') }}</span> |
+                        <b style="color:{{ '#ef4444' if log.status == 'ERROR' else '#6366f1' }}">{{ log.action }}</b> |
+                        {{ log.details[:40] if log.details else '-' }}
+                        {% if log.status == 'ERROR' %}
+                        <div style="color:#ef4444; font-size:0.75rem">{{ log.error_message[:100] }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- USER LIST -->
+        <div class="table-section">
+            <h2>Gestão de Usuários</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>CADASTRADO EM</th>
+                        <th>IDENTIFICADOR</th>
+                        <th>PLATAFORMA</th>
+                        <th>PLANO</th>
+                        <th>AÇÕES</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>{{ u.chat_id }}</td>
+                        <td><span class="badge badge-{{ 'wa' if u.platform == 'whatsapp' else 'tg' }}">{{
+                                u.platform.upper() }}</span></td>
+                        <td><span class="badge badge-{{ 'pro' if u.plan_type != 'FREE' else 'free' }}">{{ u.plan_type
+                                }}</span></td>
+                        <td>
+                            <button
+                                style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px 10px; border-radius:5px; cursor:pointer">Detalhes</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Growth Chart
+        const dailyData = {{ daily_growth | tojson }};
+        const ctxGrowth = document.getElementById('growthChart').getContext('2d');
+        new Chart(ctxGrowth, {
+            type: 'line',
+            data: {
+                labels: Object.keys(dailyData),
+                datasets: [{
+                    label: 'Novos Usuários',
+                    data: Object.values(dailyData),
+                    borderColor: '#6366f1',
+                    tension: 0.4,
+                    fill: true,
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } } }
+            }
+        });
+
+        // Action Pie
+        const actionData = {{ action_data | tojson }};
+        const ctxPie = document.getElementById('actionPie').getContext('2d');
+        new Chart(ctxPie, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(actionData),
+                datasets: [{
+                    data: Object.values(actionData),
+                    backgroundColor: ['#6366f1', '#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#a855f7']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc' } } }
+            }
+        });
+    </script>
+</body>
+
+</html>

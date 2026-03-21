@@ -51,13 +51,19 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         # Avisa que está processando
         send_whatsapp_text(sender_phone, f"⏳ Processando {fluxo}... Aguarde um momento.")
         
+        from app.models import log_activity
+        
         if fluxo == 'NDVI':
+            log_activity(sender_phone, "NDVI", details=f"{nome} ({lat},{lon})")
             await _handle_ndvi(sender_phone, lat, lon, nome, loop)
         elif fluxo == 'CLIMA':
+            log_activity(sender_phone, "CLIMA", details=f"{nome} ({lat},{lon})")
             await _handle_clima(sender_phone, lat, lon, nome, loop)
         elif fluxo == 'HISTORICO':
+            log_activity(sender_phone, "HISTORICO", details=f"{nome} ({lat},{lon})")
             await _handle_historico(sender_phone, lat, lon, nome, loop)
         elif fluxo == 'MDT':
+            log_activity(sender_phone, "MDT", details=f"{nome} ({lat},{lon})")
             await _handle_mdt(sender_phone, lat, lon, nome, loop)
         else:
             send_whatsapp_text(sender_phone, f"⚠️ Fluxo '{fluxo}' não reconhecido.")
@@ -66,6 +72,9 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         import traceback
         error_trace = traceback.format_exc()
         print(f"[WA TRIGGER ERROR] {error_trace}", flush=True)
+        
+        from app.models import log_activity
+        log_activity(sender_phone, "ERROR_TRIGGER", status='ERROR', error_message=str(e), details=trigger_string)
         
         # Busca nome do usuário no DB para notificação
         from app.models import SessionLocal, User
