@@ -45,19 +45,33 @@ PLANS = {
     }
 }
 
-@router.get("/checkout/{plan}/{chat_id}")
-async def create_checkout_session(plan: str, chat_id: str):
+@router.get("/checkout/{plan_choice}/{chat_id}")
+async def create_checkout_session(plan_choice: str, chat_id: str):
     """Cria uma sessão de checkout do Stripe para o plano escolhido."""
-    if plan not in PLANS or plan == "FREE":
-        raise HTTPException(status_code=400, detail="Plano inválido para cobrança")
-    
-    plan_info = PLANS[plan]
+    # Parse choice: STARTER_MONTHLY -> base="STARTER", interval="MONTHLY"
+    try:
+        if "_" in plan_choice:
+            base_plan, interval = plan_choice.split("_", 1)
+        else:
+            base_plan, interval = plan_choice, "MONTHLY"
+            
+        if base_plan not in PLANS or base_plan == "FREE":
+            raise ValueError("Plano base inválido")
+            
+        plan_info = PLANS[base_plan]
+        price_id = plan_info["prices"].get(interval)
+        
+        if not price_id:
+            raise ValueError("Intervalo inválido para este plano")
+            
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
-                'price': plan_info["price_id"],
+                'price': price_id,
                 'quantity': 1,
             }],
             mode='subscription',
@@ -66,7 +80,8 @@ async def create_checkout_session(plan: str, chat_id: str):
             client_reference_id=chat_id,
             metadata={
                 "chat_id": chat_id,
-                "plan": plan
+                "plan": base_plan,
+                "interval": interval
             }
         )
         return RedirectResponse(session.url)
@@ -120,8 +135,7 @@ def check_plan_limit(chat_id: str, action: str) -> bool:
     try:
         user = db.query(User).filter_by(chat_id=str(chat_id)).first()
         if not user or user.plan_type == 'FREE' or user.plan_type is None:
-            # Check daily usage logic could go here
-            return False # For now, limit strictly if we want to force payment
-        return True # PRO or above has unlimited access
+            return False
+        return True 
     finally:
         db.close()
