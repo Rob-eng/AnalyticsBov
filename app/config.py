@@ -16,7 +16,7 @@ class Config:
     CHART_URL = os.getenv('CHART_URL', '')
     
     # Stripe
-    STRIPE_API_KEY = os.getenv('STRIPE_API_KEY')
+    STRIPE_API_KEY = os.getenv('STRIPE_SECRET_KEY') or os.getenv('STRIPE_API_KEY')
     STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
     # Agromonitoring
