@@ -103,3 +103,4 @@ uvicorn==0.34.0
 httpx==0.28.1
 ijson==3.3.0
 openai>=1.14.0
+stripe
