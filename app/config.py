@@ -15,6 +15,10 @@ class Config:
     SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
     CHART_URL = os.getenv('CHART_URL', '')
     
+    # Stripe
+    STRIPE_API_KEY = os.getenv('STRIPE_API_KEY')
+    STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+
     # Agromonitoring
     AGROMONITORING_API_KEY = os.getenv('AGROMONITORING_API_KEY', '280441f10a0d93bfd62aae39fa4cdcaa')
 

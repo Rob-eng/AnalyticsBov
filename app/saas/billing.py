@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 import logging
 
-stripe.api_key = os.getenv("STRIPE_API_KEY")
+stripe.api_key = Config.STRIPE_API_KEY
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
@@ -94,7 +94,7 @@ async def stripe_webhook(request: Request):
     """Recebe notificações de pagamento do Stripe e atualiza o plano no banco."""
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
-    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    webhook_secret = Config.STRIPE_WEBHOOK_SECRET
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
