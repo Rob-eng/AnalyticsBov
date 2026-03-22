@@ -36,6 +36,12 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             await _handle_mercado_futuro(sender_phone, loop)
             return
 
+        if fluxo == 'PREMIUM':
+            from app.models import log_activity
+            log_activity(sender_phone, "PREMIUM_CHECK", details="User viewing plans")
+            await _handle_premium(sender_phone)
+            return
+
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
             return
@@ -73,9 +79,6 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         elif fluxo == 'MDT':
             log_activity(sender_phone, "MDT", details=f"{nome} ({lat},{lon})")
             await _handle_mdt(sender_phone, lat, lon, nome, loop)
-        elif fluxo == 'PREMIUM':
-            log_activity(sender_phone, "PREMIUM_CHECK", details="User viewing plans")
-            await _handle_premium(sender_phone)
         else:
             send_whatsapp_text(sender_phone, f"⚠️ Fluxo '{fluxo}' não reconhecido.")
         
