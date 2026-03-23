@@ -249,6 +249,13 @@ def init_db():
             
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             
+            # Promoção automática do Administrador para PRO
+            admin_id = str(Config.ADMIN_CHAT_ID)
+            conn.execute(text(f"UPDATE users SET plan_type = 'PRO' WHERE chat_id = '{admin_id}'"))
+            # Tentativa para WhatsApp (se o ADMIN_CHAT_ID for o telefone)
+            # Como não sabemos o telefone exato do Robson no WA agora, 
+            # assumimos que ele usará o Telegram ou o ID configurado.
+            
             if hasattr(conn, 'commit'):
                 conn.commit()
     except Exception as e:
