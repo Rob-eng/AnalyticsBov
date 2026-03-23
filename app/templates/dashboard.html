@@ -206,6 +206,34 @@
             </div>
         </div>
 
+        <!-- ERROR ALERTS -->
+        {% if recent_errors %}
+        <div class="table-section"
+            style="border: 1px solid #ef4444; background: rgba(239, 68, 68, 0.05); margin-bottom: 2rem;">
+            <h2 style="color:#ef4444; margin: 0 0 1rem 0; font-size: 1.2rem;">🚨 Alertas de Erros Recentes (Proativo)
+            </h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
+                {% for item in recent_errors %}
+                {% set log = item[0] %}
+                {% set username = item[1] %}
+                <div
+                    style="background: rgba(15, 23, 42, 0.5); padding: 1rem; border-radius: 12px; border-left: 4px solid #ef4444;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 5px;">
+                        <span>{{ log.created_at.strftime('%H:%M') }}</span>
+                        <a href="/admin/user/{{ log.user_id }}?api_key={{ api_key }}"
+                            style="color:#ef4444; font-weight: bold; text-decoration: none;">{{ username or log.user_id
+                            }}</a>
+                    </div>
+                    <div style="font-weight: 600; font-size: 0.9rem;">Falha em: {{ log.action }}</div>
+                    <div style="color: #cbd5e1; font-size: 0.8rem; margin-top: 5px;">⚠️ {{ log.error_message[:120] }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <!-- CHARTS SECTION -->
         <div class="charts-row">
             <div class="chart-container">

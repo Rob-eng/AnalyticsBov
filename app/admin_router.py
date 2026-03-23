@@ -88,6 +88,9 @@ async def admin_dashboard(request: Request, api_key: str = Query(None)):
         # Logs com Nomes de Usuários (Aumentado para 200 para não perder novos usuários)
         logs_query = db.query(ActivityLog, User.username).outerjoin(User, ActivityLog.user_id == User.chat_id).order_by(ActivityLog.created_at.desc()).limit(200).all()
         
+        # Erros Recentes (Status = ERROR)
+        recent_errors = db.query(ActivityLog, User.username).outerjoin(User, ActivityLog.user_id == User.chat_id).filter(ActivityLog.status == 'ERROR').order_by(ActivityLog.created_at.desc()).limit(10).all()
+
         # Atividade por Tipo (Pie Chart)
         action_stats = db.query(ActivityLog.action, func.count(ActivityLog.id)).group_by(ActivityLog.action).all()
         action_data = {a: c for a, c in action_stats}
