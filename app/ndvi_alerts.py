@@ -63,7 +63,8 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
     print(f"[NDVI ALERT] Checking '{loc.name}' ({loc.latitude:.4f}, {loc.longitude:.4f})", flush=True)
 
     # 1. Fetch CAR geometry (sync → executor)
-    geometry, car_status = await loop.run_in_executor(
+    # returns (geometry, status, cod_imovel)
+    geometry, car_status, cod_imovel = await loop.run_in_executor(
         None, fetch_car_perimeter, loc.latitude, loc.longitude
     )
 

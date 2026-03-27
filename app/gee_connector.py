@@ -722,8 +722,13 @@ def find_car_at_coordinate_gee(lat, lon):
         # Filtro Silencioso e Rápido
         for folder in CAR_FOLDERS:
             try:
-                # 🔍 Lista os 100+ chunks dessa UF
-                assets = ee.data.listAssets({'parent': folder})['assets']
+                # 🔍 Verifica se a pasta existe antes de listar (Silent Check)
+                try:
+                    assets_res = ee.data.listAssets({'parent': folder})
+                    assets = assets_res.get('assets', [])
+                except:
+                    continue # Pula silenciosamente se a pasta não existir
+                    
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
                 
                 # Para cada pedaço, verificamos se o ponto está dentro
@@ -743,9 +748,8 @@ def find_car_at_coordinate_gee(lat, lon):
                             "area": props.get('area'),
                             "geometry": feat.get('geometry')
                         }
-            except Exception as fe:
-                print(f"⚠️ [GEE] Erro ao ler pasta {folder}: {fe}")
-                continue
+            except Exception:
+                continue # Silent fail
 
         print(f"📍 [GEE] Nada encontrado em nenhuma UF mapeada.")
         return None
