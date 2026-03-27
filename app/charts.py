@@ -354,7 +354,9 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
                         ha='center', va='bottom', color=TEXT_COLOR, fontweight='bold')
     
     plt.tight_layout()
-    output_path = '/tmp/precip_history.png'
+    import time
+    timestamp = int(time.time() * 1000)
+    output_path = f'/tmp/precip_history_{timestamp}.png'
     plt.savefig(output_path, dpi=120, facecolor=BG_COLOR, bbox_inches='tight')
     plt.close()
     
