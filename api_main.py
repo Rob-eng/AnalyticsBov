@@ -10,6 +10,7 @@ import os
 from starlette.status import HTTP_403_FORBIDDEN
 
 from app.whatsapp.webhook import router as whatsapp_router
+from app.telegram_webhook import router as telegram_router
 from app.admin_router import router as admin_router
 from app.saas.billing import router as billing_router
 from app.auth import get_api_key
@@ -20,8 +21,38 @@ init_db()
 
 app = FastAPI(title="CAR Spatial API")
 app.include_router(whatsapp_router)
+app.include_router(telegram_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
+
+@app.on_event("startup")
+async def on_startup():
+    """Configura o sistema ao iniciar a API."""
+    try:
+        from app.telegram_webhook import get_bot_app
+        import os
+        
+        # 1. Obtém a aplicação do Bot (que contém os handlers)
+        application = await get_bot_app()
+        
+        # 2. Configura e Inicia o Scheduler (NDVI / Weekly Reports)
+        from app.scheduler import setup_scheduler
+        scheduler = setup_scheduler(application)
+        scheduler.start()
+        print("✅ API Startup: Scheduler iniciado com sucesso!")
+
+        # 3. Configura Webhook se estiver no Railway (URL disponível)
+        webhook_base = os.getenv("TELEGRAM_WEBHOOK_URL")
+        if webhook_base:
+            from app.config import Config
+            webhook_url = f"{webhook_base}/webhook/telegram/{Config.TELEGRAM_TOKEN}"
+            await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            print(f"✅ API Startup: Telegram Webhook configurado em {webhook_url}")
+        else:
+            print("⚠️ API Startup: TELEGRAM_WEBHOOK_URL não definida. Bot aguardando ou em Polling.")
+            
+    except Exception as e:
+        print(f"❌ API Startup Error: {e}")
 
 from fastapi.responses import HTMLResponse
 

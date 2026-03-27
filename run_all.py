@@ -128,30 +128,39 @@ if __name__ == "__main__":
     api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
     bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
     
-    # Start API first to ensure availability
+    # 1. Start API (Main process)
+    # The API now handles Scheduler + Webhooks for Telegram/WhatsApp
     api_proc.start()
     time.sleep(2) # Give API a moment to bind port
     
-    # Re-enable Bot
-    bot_proc.start()
+    # 2. Re-enable Bot ONLY if NOT using Webhooks (Fallback/Dev)
+    webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
+    if not webhook_url:
+        print("🤖 [run_all] No Webhook URL. Starting Bot Polling as separate process...", flush=True)
+        bot_proc.start()
+    else:
+        print("🌍 [run_all] Webhook URL found. Integrated Webhook mode active. 🚀", flush=True)
     
     try:
         # Monitor processes
         while True:
             if not api_proc.is_alive():
-                print("⚠️ API Process died! Restarting...", flush=True)
+                print("⚠️ [run_all] API Process died! Restarting...", flush=True)
                 api_proc = multiprocessing.Process(target=run_api_process, name="API_Process")
                 api_proc.start()
             
-            if not bot_proc.is_alive():
-                print("⚠️ Bot Process died! Restarting...", flush=True)
+            # Restart Bot Polling if it died (only if not in Webhook mode)
+            if not webhook_url and not bot_proc.is_alive():
+                print("⚠️ [run_all] Bot Polling Process died! Restarting...", flush=True)
                 bot_proc = multiprocessing.Process(target=run_bot_process, name="Bot_Process")
                 bot_proc.start()
             
-            time.sleep(5)
+            time.sleep(10)
     except KeyboardInterrupt:
         print("Stopping services...")
         api_proc.terminate()
-        bot_proc.terminate()
+        if not webhook_url:
+            bot_proc.terminate()
         api_proc.join()
-        bot_proc.join()
+        if not webhook_url:
+            bot_proc.join()
