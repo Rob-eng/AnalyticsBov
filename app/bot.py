@@ -3,7 +3,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from app.config import Config
 from app.models import SessionLocal, User, get_recent_prices
 from app.charts import generate_chart, generate_future_table
-from app.weather import geocode_location, get_precipitation_data, get_static_map_url, parse_coordinates, extract_coords_from_url, get_forecast_image
+from app.weather import (
+    geocode_location, get_precipitation_data, get_static_map_url, 
+    generate_weather_map_with_title, parse_coordinates, 
+    extract_coords_from_url, get_forecast_image
+)
 from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
 
 
