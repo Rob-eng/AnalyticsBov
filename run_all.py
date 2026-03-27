@@ -99,12 +99,13 @@ def run_bot_process():
         except Exception as e:
             err_str = str(e)
             if "Conflict" in err_str or "getUpdates" in err_str:
-                wait_sec = 30
-                print(f"⚠️ Bot Conflict (attempt {attempt}/{MAX_RETRIES}): old instance still running. "
-                      f"Waiting {wait_sec}s before retry...", flush=True)
+                # Se houver conflito, esperamos um pouco menos e tentamos 'retomar' o controle
+                # O drop_pending_updates na próxima tentativa deve forçar a nova instância a ser a oficial.
+                wait_sec = 20
+                print(f"⚠️ Telegram Conflict (instância anterior ainda ativa). Aguardando {wait_sec}s para retomar... 🔄", flush=True)
                 time.sleep(wait_sec)
             else:
-                print(f"❌ Bot Crash (attempt {attempt}/{MAX_RETRIES}): {e}", flush=True)
+                print(f"❌ Bot Crash (tentativa {attempt}/{MAX_RETRIES}): {e}", flush=True)
                 time.sleep(5)
 
 if __name__ == "__main__":
