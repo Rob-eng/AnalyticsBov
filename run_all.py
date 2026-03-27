@@ -65,22 +65,32 @@ def run_bot_process():
         # Start Polling
         print("Starting Bot Polling...", flush=True)
         await application.initialize()
+        
+        # Garante que não existe webhook ativo atrapalhando o polling
+        print(" Removing any existing Webhooks...", flush=True)
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        
         await application.start()
 
         # Drop pending updates to flush any old conflicting offset
-        print(" Clearing pending updates...", flush=True)
+        print(" Retaking control of @updates...", flush=True)
         await application.updater.start_polling(drop_pending_updates=True)
 
         print("✅ Bot Polling Started Successfully!", flush=True)
 
-        # Keep the bot running and monitor polling status
+        # Monitoramento ativo contra Conflitos do Telegram
         try:
             while application.updater.running:
+                # Se a aplicação ainda está 'rodando' mas parou de receber updates
+                # podemos checar o status interno se quisermos, mas o updater 
+                # costuma lançar erros no log. 
+                # Vamos apenas manter o loop vivo.
                 await asyncio.sleep(5)
             
-            # Se saiu do loop mas não mandamos, a polling crashou (Conflict)
-            print("⚠️ Telegram Polling parou inesperadamente. Disparando retry...", flush=True)
-            raise RuntimeError("Conflict: Telegram Polling parado.")
+            print("⚠️ Telegram Polling parou inesperadamente.", flush=True)
+            
+        except Exception as inner_e:
+            print(f"⚠️ Erro no loop do Bot: {inner_e}", flush=True)
             
         finally:
             print("🛑 Bot shutting down...", flush=True)
