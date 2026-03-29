@@ -1554,6 +1554,20 @@ async def receive_location_coords(update: Update, context: ContextTypes.DEFAULT_
     session = SessionLocal()
     try:
         from app.models import FavoriteLocation
+        from app.environmental import fetch_car_perimeter
+        
+        # 🛰️ Tenta localizar o CAR no momento do cadastro para garantir o perímetro
+        print(f"[REG] Validando perímetro para {lat}, {lon}...", flush=True)
+        geometry, car_status, cod_imovel = await loop.run_in_executor(
+            None, fetch_car_perimeter, lat, lon
+        )
+        
+        car_info_msg = ""
+        if car_status == 'OFFICIAL' and cod_imovel:
+             car_info_msg = f"\n🛰️ *CAR:* Imóvel _{cod_imovel}_ localizado!"
+        elif car_status == 'FALLBACK':
+             car_info_msg = f"\n⚠️ *Aviso:* Não localizamos perímetro oficial nesta coordenada. Usando área estimada (1km²)."
+
         new_loc = FavoriteLocation(
             user_id=chat_id,
             name=context.user_data.get('temp_loc_name', 'Sem nome'),
@@ -1563,7 +1577,7 @@ async def receive_location_coords(update: Update, context: ContextTypes.DEFAULT_
         session.add(new_loc)
         session.commit()
         await update.message.reply_text(
-            f"✅ *{new_loc.name}* cadastrada com sucesso!",
+            f"✅ *{new_loc.name}* cadastrada com sucesso!{car_info_msg}",
             parse_mode='Markdown',
             reply_markup=get_location_keyboard()
         )
