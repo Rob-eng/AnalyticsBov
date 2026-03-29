@@ -703,21 +703,22 @@ def find_car_at_coordinate_gee(lat, lon):
 
         point = ee.Geometry.Point([lon, lat])
         
-        # 📂 Lista de Pastas onde as UFs estão divididas em chunks (Bancos Espaciais na Nuvem)
-        # Estamos expandindo para SP, GO, TO, PR, SC e RS conforme solicitado.
-        CAR_FOLDERS = [
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/sp_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/go_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/to_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/pr_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/sc_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/rs_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mg_chunks'
+        # 📂 Lista de Pastas onde as UFs estão divididas em chunks
+        # Tentamos dois caminhos (o projeto atual 'analyticsbov' e o legado 'ee-ranjos')
+        PROJECT_IDS = ['analyticsbov', 'ee-ranjos']
+        UF_FOLDERS = [
+            'car/imovel/ms_chunks', 'car/imovel/mt_chunks', 'car/imovel/sp_chunks',
+            'car/imovel/go_chunks', 'car/imovel/to_chunks', 'car/imovel/pr_chunks',
+            'car/imovel/sc_chunks', 'car/imovel/rs_chunks', 'car/imovel/mg_chunks'
         ]
+        
+        # Gera a lista completa de caminhos para testar
+        CAR_FOLDERS = []
+        for pid in PROJECT_IDS:
+             for folder in UF_FOLDERS:
+                  CAR_FOLDERS.append(f'projects/{pid}/assets/analyticsbov/{folder}')
 
-        print(f"🛰️ [GEE LOOKUP] Iniciando busca inteligente na nuvem para: {lat}, {lon}")
+        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_FOLDERS)} pastas GEE para: {lat}, {lon}")
         
         # Filtro Silencioso e Rápido
         for folder in CAR_FOLDERS:
