@@ -727,28 +727,40 @@ def find_car_at_coordinate_gee(lat, lon):
                 try:
                     assets_res = ee.data.listAssets({'parent': folder})
                     assets = assets_res.get('assets', [])
-                except:
-                    continue # Pula silenciosamente se a pasta não existir
+                    if not assets:
+                         # print(f"ℹ️ [GEE] Pasta vazia: {folder}", flush=True)
+                         continue
+                except Exception as e_list:
+                    # print(f"⚠️ [GEE] Sem acesso ou erro em {folder}: {e_list}", flush=True)
+                    continue # Pula silenciosamente se a pasta não existir ou sem permissão
                     
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
+                # print(f"📂 [GEE] Verificando {len(asset_ids)} tabelas em {folder}...", flush=True)
                 
                 # Para cada pedaço, verificamos se o ponto está dentro
                 for aid in asset_ids:
-                    fc = ee.FeatureCollection(aid)
-                    # Filtra e pega o primeiro (limite 1 para velocidade)
-                    res = fc.filterBounds(point).limit(1).getInfo()
-                    
-                    if res.get('features'):
-                        feat = res['features'][0]
-                        props = feat.get('properties', {})
-                        print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}")
-                        return {
-                            "cod_imovel": props.get('cod_imovel'),
-                            "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
-                            "municipio": props.get('municipio'),
-                            "area": props.get('area'),
-                            "geometry": feat.get('geometry')
-                        }
+                    try:
+                        fc = ee.FeatureCollection(aid)
+                        # Filtra e pega o primeiro (limite 1 para velocidade)
+                        res = fc.filterBounds(point).limit(1).getInfo()
+                        
+                        if res.get('features'):
+                            feat = res['features'][0]
+                            props = feat.get('properties', {})
+                            print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}")
+                            return {
+                                "cod_imovel": props.get('cod_imovel'),
+                                "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
+                                "municipio": props.get('municipio'),
+                                "area": props.get('area'),
+                                "geometry": feat.get('geometry')
+                            }
+                    except Exception as e_fc:
+                        print(f"⚠️ [GEE] Erro ao filtrar asset {aid}: {e_fc}", flush=True)
+                        continue
+            except Exception as e_folder:
+                 print(f"❌ [GEE] Erro crítico na pasta {folder}: {e_folder}", flush=True)
+                 continue
             except Exception:
                 continue # Silent fail
 
