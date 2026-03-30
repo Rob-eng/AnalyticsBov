@@ -47,13 +47,14 @@ PAGE_SIZE = 5000
 # ============================================================
 
 def autenticar_gee():
-    """Autentica no GEE (pede login na primeira vez)."""
+    """Autentica no GEE (pede login na primeira vez no Colab)."""
     try:
-        ee.Initialize()
+        ee.Initialize(project='ee-ranjos')
         print("✅ GEE já autenticado!")
     except:
+        print("🔑 Autenticando no GEE... (siga as instruções abaixo)")
         ee.Authenticate()
-        ee.Initialize()
+        ee.Initialize(project='ee-ranjos')
         print("✅ GEE autenticado com sucesso!")
 
 def contar_features(uf):
