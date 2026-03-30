@@ -723,19 +723,19 @@ def find_car_at_coordinate_gee(lat, lon):
         # Filtro Silencioso e Rápido
         for folder in CAR_FOLDERS:
             try:
-                # 🔍 Tenta listar assets da pasta
-                assets_res = ee.data.listAssets({'parent': folder})
+                # 🔍 Tenta listar assets da pasta (Aumentamos o limite para 500 para cobrir todas as UFs)
+                assets_res = ee.data.listAssets({'parent': folder, 'pageSize': 500})
                 assets = assets_res.get('assets', [])
                 if not assets:
                      continue
                     
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
+                print(f"📂 [GEE] Varrendo {len(asset_ids)} tabelas em {folder}...", flush=True)
                 
                 # Para cada pedaço, verificamos se o ponto está dentro
                 for aid in asset_ids:
-                    # OTIMIZAÇÃO: Filtra apenas 1 feature e traz apenas metadados necessários
+                    # OTIMIZAÇÃO: Filtra apenas 1 feature 
                     fc = ee.FeatureCollection(aid).filterBounds(point)
-                    # Verifica se há algo sem dar o getInfo completo se vazio
                     res = fc.limit(1).getInfo()
                     
                     if res.get('features'):
@@ -750,7 +750,7 @@ def find_car_at_coordinate_gee(lat, lon):
                             "geometry": feat.get('geometry')
                         }
             except Exception as e:
-                # Silencioso para erros de permissão ou pasta não encontrada
+                # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
                 continue
             except Exception:
                 continue # Silent fail
