@@ -102,11 +102,54 @@ engine = create_engine(db_url, pool_pre_ping=True, connect_args={'connect_timeou
 SessionLocal = sessionmaker(bind=engine)
 
 # Secondary engine for CAR spatial data (Supabase)
+# Railway tem problemas com IPv6 para o Supabase.
+# Solução: usar o Transaction Pooler (porta 6543) que resolve via IPv4.
 car_db_url = Config.CAR_DATABASE_URL or db_url 
 if car_db_url and car_db_url.startswith("postgres://"):
     car_db_url = car_db_url.replace("postgres://", "postgresql://", 1)
 
-car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+# 🔧 AUTO-FIX: Se a URL do Supabase usa porta 5432 (direta), tenta usar o pooler (6543)
+# O pooler usa IPv4 e não sofre do erro "Network is unreachable" no Railway/IPv6.
+car_db_url_pooler = None
+if car_db_url and 'supabase.co' in car_db_url and ':5432' in car_db_url:
+    car_db_url_pooler = car_db_url.replace(':5432', ':6543').replace(
+        'db.', ''  # Pooler URL remove o prefixo 'db.'
+    )
+    # O pooler do Supabase usa o formato: 
+    # postgresql://user:pass@PROJECT_REF.pooler.supabase.com:6543/postgres
+    # Tentamos construir a URL automaticamente
+    import re
+    match = re.search(r'db\.([a-z]+\.supabase\.co)', car_db_url)
+    if match:
+        pooler_host = match.group(1).replace('.supabase.co', '.pooler.supabase.com')
+        car_db_url_pooler = re.sub(
+            r'@db\.[a-z]+\.supabase\.co:\d+',
+            f'@{pooler_host}:6543',
+            car_db_url
+        )
+        print(f"🔧 [CAR DB] Pooler URL gerada: ...@{pooler_host}:6543/...")
+
+# Tenta a conexão direta primeiro, se falhar, usa o pooler
+try:
+    car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 5})
+    with car_engine.connect() as test_conn:
+        test_conn.execute(text("SELECT 1"))
+    print("✅ [CAR DB] Conexão direta com Supabase OK.")
+except Exception as e:
+    print(f"⚠️ [CAR DB] Conexão direta falhou: {e}")
+    if car_db_url_pooler:
+        print(f"🔄 [CAR DB] Tentando via Transaction Pooler (IPv4)...")
+        try:
+            car_engine = create_engine(car_db_url_pooler, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+            with car_engine.connect() as test_conn:
+                test_conn.execute(text("SELECT 1"))
+            print("✅ [CAR DB] Conexão via Pooler OK!")
+        except Exception as e2:
+            print(f"❌ [CAR DB] Pooler também falhou: {e2}")
+            car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+    else:
+        car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
+
 CarSessionLocal = sessionmaker(bind=car_engine)
 
 def init_db():

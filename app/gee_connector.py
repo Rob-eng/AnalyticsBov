@@ -694,8 +694,8 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
 def find_car_at_coordinate_gee(lat, lon):
     """
     Busca o código do CAR (cod_imovel) em uma coordenada (lat/lon)
-    percorrendo os Assets do GEE (Mato Grosso e MS).
-    Isso substitui a busca no PostGIS para economizar memória e escala.
+    percorrendo os Assets do GEE (MS e MT chunks).
+    Complementa a busca no PostGIS (Supabase) que tem a base completa.
     """
     try:
         if not initialize_gee():
@@ -703,57 +703,33 @@ def find_car_at_coordinate_gee(lat, lon):
 
         point = ee.Geometry.Point([lon, lat])
         
-        # 📂 Lista de Pastas onde as UFs estão divididas em chunks
-        # Tentamos dois caminhos (o projeto atual 'analyticsbov' e o legado 'ee-ranjos')
-        PROJECT_IDS = ['analyticsbov', 'ee-ranjos']
-        UF_FOLDERS = [
-            'car/imovel/ms_chunks', 'car/imovel/mt_chunks', 'car/imovel/sp_chunks',
-            'car/imovel/go_chunks', 'car/imovel/to_chunks', 'car/imovel/pr_chunks',
-            'car/imovel/sc_chunks', 'car/imovel/rs_chunks', 'car/imovel/mg_chunks'
-        ]
-        
-        # Gera a lista completa de caminhos para testar
-        CAR_FOLDERS = []
-        for pid in PROJECT_IDS:
-             for folder in UF_FOLDERS:
-                  CAR_FOLDERS.append(f'projects/{pid}/assets/analyticsbov/{folder}')
-
-        print(f"🛰️ [GEE LOOKUP] Iniciando varredura em {len(CAR_FOLDERS)} locais para {lat}, {lon}", flush=True)
-        
-        # 📂 Lista de Pastas onde as UFs estão divididas em chunks
+        # 📂 Pastas reais onde os dados CAR estão armazenados
         CAR_FOLDERS = [
             'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks',
             'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks'
         ]
         
-        print(f"🛰️ [GEE LOOKUP] Iniciando varredura profunda em {len(CAR_FOLDERS)} pastas GEE para {lat}, {lon}", flush=True)
+        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_FOLDERS)} pastas para {lat}, {lon}", flush=True)
         
-        # Estratégia de Infiltração Total: Tenta padrões conhecidos DIRETAMENTE para máxima segurança
         for folder in CAR_FOLDERS:
             try:
-                # 1. 📖 Tenta listar assets (Pode vir incompleto)
                 assets_res = ee.data.listAssets({'parent': folder, 'pageSize': 500})
                 assets = assets_res.get('assets', [])
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
                 
-                # 2. 🚀 INJEÇÃO AGRESSIVA: Sempre adicionamos os padrões se a lista for menor que o esperado (200)
-                # No MS temos ~137 chunks, se o Google só mostra 18, nós forçamos os outros 119.
-                known_patterns = [f"{folder}/chunk_{i:03d}" for i in range(1, 201)]
-                all_to_check = sorted(list(set(asset_ids + known_patterns)))
+                if not asset_ids:
+                    continue
                 
-                print(f"📂 [GEE] Varrendo {len(all_to_check)} tabelas (Lista + Padrões) em {folder}...", flush=True)
+                print(f"📂 [GEE] Varrendo {len(asset_ids)} tabelas em {folder}...", flush=True)
                 
-                # Verificação Espacial Ultra-Rápida
-                for aid in all_to_check:
+                for aid in asset_ids:
                     try:
-                        # Usamos um filtro direto no GEE sem baixar nada (server-side)
                         res = ee.FeatureCollection(aid).filterBounds(point).limit(1).getInfo()
-                        
                         if res.get('features'):
                             feat = res['features'][0]
                             props = feat.get('properties', {})
                             cod_imovel = props.get('cod_imovel') or props.get('COD_IMOVEL')
-                            print(f"✅ [GEE] BINGO! Localizado em {aid} -> {cod_imovel}", flush=True)
+                            print(f"✅ [GEE] Localizado em {aid} -> {cod_imovel}", flush=True)
                             return {
                                 "cod_imovel": cod_imovel,
                                 "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
@@ -762,22 +738,14 @@ def find_car_at_coordinate_gee(lat, lon):
                                 "geometry": feat.get('geometry')
                             }
                     except:
-                        continue # Pula se o chunk não existir 
+                        continue
 
-            except Exception as e:
-                # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
-                continue
-
-            except Exception as e:
-                # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
-                continue
             except Exception:
-                continue # Silent fail
+                continue
 
-        print(f"📍 [GEE] Nada encontrado em nenhuma UF mapeada.")
+        print(f"📍 [GEE] Nada encontrado nos chunks GEE.", flush=True)
         return None
 
     except Exception as e:
-        print(f"❌ [GEE SEARCH ERROR] {e}")
-        import traceback; traceback.print_exc()
+        print(f"❌ [GEE SEARCH ERROR] {e}", flush=True)
         return None
