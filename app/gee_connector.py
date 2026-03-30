@@ -694,8 +694,8 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
 def find_car_at_coordinate_gee(lat, lon):
     """
     Busca o código do CAR (cod_imovel) em uma coordenada (lat/lon)
-    percorrendo os Assets do GEE (MS e MT chunks).
-    Complementa a busca no PostGIS (Supabase) que tem a base completa.
+    usando os assets completos do GEE (car_ms, car_mt).
+    Cada asset contém TODAS as propriedades do estado em uma única tabela.
     """
     try:
         if not initialize_gee():
@@ -703,47 +703,36 @@ def find_car_at_coordinate_gee(lat, lon):
 
         point = ee.Geometry.Point([lon, lat])
         
-        # 📂 Pastas reais onde os dados CAR estão armazenados
-        CAR_FOLDERS = [
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks',
-            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks'
+        # 📂 Assets COMPLETOS (uma tabela por estado, sem fragmentação)
+        CAR_ASSETS = [
+            'projects/ee-ranjos/assets/car_ms',    # 86.685 propriedades
+            'projects/ee-ranjos/assets/car_mt',    # ~198k propriedades (quando disponível)
         ]
         
-        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_FOLDERS)} pastas para {lat}, {lon}", flush=True)
+        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_ASSETS)} assets para {lat}, {lon}", flush=True)
         
-        for folder in CAR_FOLDERS:
+        for asset_id in CAR_ASSETS:
             try:
-                assets_res = ee.data.listAssets({'parent': folder, 'pageSize': 500})
-                assets = assets_res.get('assets', [])
-                asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
+                fc = ee.FeatureCollection(asset_id)
+                res = fc.filterBounds(point).limit(1).getInfo()
                 
-                if not asset_ids:
-                    continue
-                
-                print(f"📂 [GEE] Varrendo {len(asset_ids)} tabelas em {folder}...", flush=True)
-                
-                for aid in asset_ids:
-                    try:
-                        res = ee.FeatureCollection(aid).filterBounds(point).limit(1).getInfo()
-                        if res.get('features'):
-                            feat = res['features'][0]
-                            props = feat.get('properties', {})
-                            cod_imovel = props.get('cod_imovel') or props.get('COD_IMOVEL')
-                            print(f"✅ [GEE] Localizado em {aid} -> {cod_imovel}", flush=True)
-                            return {
-                                "cod_imovel": cod_imovel,
-                                "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
-                                "municipio": props.get('municipio'),
-                                "area": props.get('area'),
-                                "geometry": feat.get('geometry')
-                            }
-                    except:
-                        continue
-
-            except Exception:
+                if res.get('features'):
+                    feat = res['features'][0]
+                    props = feat.get('properties', {})
+                    cod_imovel = props.get('cod_imovel') or props.get('COD_IMOVEL')
+                    print(f"✅ [GEE] Localizado em {asset_id} -> {cod_imovel}", flush=True)
+                    return {
+                        "cod_imovel": cod_imovel,
+                        "uf": props.get('uf', ''),
+                        "municipio": props.get('municipio', ''),
+                        "area": props.get('area'),
+                        "geometry": feat.get('geometry')
+                    }
+            except Exception as e:
+                print(f"⚠️ [GEE] Asset {asset_id}: {e}", flush=True)
                 continue
 
-        print(f"📍 [GEE] Nada encontrado nos chunks GEE.", flush=True)
+        print(f"📍 [GEE] Nada encontrado nos assets GEE.", flush=True)
         return None
 
     except Exception as e:
