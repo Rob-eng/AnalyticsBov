@@ -726,45 +726,47 @@ def find_car_at_coordinate_gee(lat, lon):
             'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks'
         ]
         
-        print(f"🛰️ [GEE LOOKUP] Iniciando varredura em {len(CAR_FOLDERS)} pastas GEE para {lat}, {lon}", flush=True)
+        print(f"🛰️ [GEE LOOKUP] Iniciando varredura profunda em {len(CAR_FOLDERS)} pastas GEE para {lat}, {lon}", flush=True)
         
-        # Estratégia de Busca Híbrida: Lista assets E tenta padrões conhecidos
+        # Estratégia de Infiltração Total: Tenta padrões conhecidos DIRETAMENTE para máxima segurança
         for folder in CAR_FOLDERS:
             try:
-                # 1. 📖 Tenta listar assets (com limite estendido)
+                # 1. 📖 Tenta listar assets (Pode vir incompleto)
                 assets_res = ee.data.listAssets({'parent': folder, 'pageSize': 500})
                 assets = assets_res.get('assets', [])
-                
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
                 
-                # Se listar retornou pouco, podemos estar vivendo um erro de paginação/permissão
-                # Vamos injetar padrões conhecidos (chunk_xxx) para garantir cobertura total
-                if len(asset_ids) < 10: # Algo está errado, pasta parece vazia?
-                      print(f"⚠️ [GEE] Pasta {folder} parece restrita. Tentando modo de infiltração por padrão...", flush=True)
-                      for i in range(1, 201):
-                           asset_ids.append(f"{folder}/chunk_{i:03d}")
+                # 2. 🚀 INJEÇÃO AGRESSIVA: Sempre adicionamos os padrões se a lista for menor que o esperado (200)
+                # No MS temos ~137 chunks, se o Google só mostra 18, nós forçamos os outros 119.
+                known_patterns = [f"{folder}/chunk_{i:03d}" for i in range(1, 201)]
+                all_to_check = sorted(list(set(asset_ids + known_patterns)))
                 
-                print(f"📂 [GEE] Varrendo {len(set(asset_ids))} tabelas em {folder}...", flush=True)
+                print(f"📂 [GEE] Varrendo {len(all_to_check)} tabelas (Lista + Padrões) em {folder}...", flush=True)
                 
-                # Verificação Espacial
-                for aid in sorted(list(set(asset_ids))):
+                # Verificação Espacial Ultra-Rápida
+                for aid in all_to_check:
                     try:
-                        fc = ee.FeatureCollection(aid).filterBounds(point)
-                        res = fc.limit(1).getInfo()
+                        # Usamos um filtro direto no GEE sem baixar nada (server-side)
+                        res = ee.FeatureCollection(aid).filterBounds(point).limit(1).getInfo()
                         
                         if res.get('features'):
                             feat = res['features'][0]
                             props = feat.get('properties', {})
-                            print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}", flush=True)
+                            cod_imovel = props.get('cod_imovel') or props.get('COD_IMOVEL')
+                            print(f"✅ [GEE] BINGO! Localizado em {aid} -> {cod_imovel}", flush=True)
                             return {
-                                "cod_imovel": props.get('cod_imovel'),
+                                "cod_imovel": cod_imovel,
                                 "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
                                 "municipio": props.get('municipio'),
                                 "area": props.get('area'),
                                 "geometry": feat.get('geometry')
                             }
                     except:
-                        continue # Pula se o chunk não existir (quando injetado via padrão)
+                        continue # Pula se o chunk não existir 
+
+            except Exception as e:
+                # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
+                continue
 
             except Exception as e:
                 # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
