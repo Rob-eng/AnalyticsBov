@@ -718,49 +718,40 @@ def find_car_at_coordinate_gee(lat, lon):
              for folder in UF_FOLDERS:
                   CAR_FOLDERS.append(f'projects/{pid}/assets/analyticsbov/{folder}')
 
-        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_FOLDERS)} pastas GEE para: {lat}, {lon}")
+        print(f"🛰️ [GEE LOOKUP] Iniciando varredura em {len(CAR_FOLDERS)} locais para {lat}, {lon}", flush=True)
         
         # Filtro Silencioso e Rápido
         for folder in CAR_FOLDERS:
             try:
-                # 🔍 Verifica se a pasta existe antes de listar (Silent Check)
-                try:
-                    assets_res = ee.data.listAssets({'parent': folder})
-                    assets = assets_res.get('assets', [])
-                    if not assets:
-                         # print(f"ℹ️ [GEE] Pasta vazia: {folder}", flush=True)
-                         continue
-                except Exception as e_list:
-                    # print(f"⚠️ [GEE] Sem acesso ou erro em {folder}: {e_list}", flush=True)
-                    continue # Pula silenciosamente se a pasta não existir ou sem permissão
+                # 🔍 Tenta listar assets da pasta
+                assets_res = ee.data.listAssets({'parent': folder})
+                assets = assets_res.get('assets', [])
+                if not assets:
+                     continue
                     
                 asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
-                # print(f"📂 [GEE] Verificando {len(asset_ids)} tabelas em {folder}...", flush=True)
                 
                 # Para cada pedaço, verificamos se o ponto está dentro
                 for aid in asset_ids:
-                    try:
-                        fc = ee.FeatureCollection(aid)
-                        # Filtra e pega o primeiro (limite 1 para velocidade)
-                        res = fc.filterBounds(point).limit(1).getInfo()
-                        
-                        if res.get('features'):
-                            feat = res['features'][0]
-                            props = feat.get('properties', {})
-                            print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}")
-                            return {
-                                "cod_imovel": props.get('cod_imovel'),
-                                "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
-                                "municipio": props.get('municipio'),
-                                "area": props.get('area'),
-                                "geometry": feat.get('geometry')
-                            }
-                    except Exception as e_fc:
-                        print(f"⚠️ [GEE] Erro ao filtrar asset {aid}: {e_fc}", flush=True)
-                        continue
-            except Exception as e_folder:
-                 print(f"❌ [GEE] Erro crítico na pasta {folder}: {e_folder}", flush=True)
-                 continue
+                    # OTIMIZAÇÃO: Filtra apenas 1 feature e traz apenas metadados necessários
+                    fc = ee.FeatureCollection(aid).filterBounds(point)
+                    # Verifica se há algo sem dar o getInfo completo se vazio
+                    res = fc.limit(1).getInfo()
+                    
+                    if res.get('features'):
+                        feat = res['features'][0]
+                        props = feat.get('properties', {})
+                        print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}", flush=True)
+                        return {
+                            "cod_imovel": props.get('cod_imovel'),
+                            "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
+                            "municipio": props.get('municipio'),
+                            "area": props.get('area'),
+                            "geometry": feat.get('geometry')
+                        }
+            except Exception as e:
+                # Silencioso para erros de permissão ou pasta não encontrada
+                continue
             except Exception:
                 continue # Silent fail
 
