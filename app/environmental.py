@@ -82,7 +82,7 @@ def fetch_car_perimeter(lat, lon):
         from geoalchemy2.shape import to_shape
         from shapely.geometry import mapping
         
-        print(f"🐘 [Environmental] Querying PostGIS fallback for {lat}, {lon}")
+        print(f"🐘 [Environmental] Querying PostGIS fallback for {lat}, {lon}...", flush=True)
         session = CarSessionLocal()
         point_wkt = f'POINT({lon} {lat})'
         
@@ -92,11 +92,13 @@ def fetch_car_perimeter(lat, lon):
 
         if prop:
             geom_shape = to_shape(prop.geometry)
-            print(f"✓ PostGIS found property: {prop.cod_imovel}")
+            print(f"✅ [Environmental] PostGIS found property: {prop.cod_imovel}", flush=True)
             return (mapping(geom_shape), 'OFFICIAL', prop.cod_imovel)
+        else:
+            print(f"📍 [Environmental] No property found in PostGIS for this coordinate.", flush=True)
         session.close()
     except Exception as e:
-        print(f"⚠️ Local PostGIS fallback failed: {e}")
+        print(f"❌ [Environmental] PostGIS Error: {e}", flush=True)
     
     # 3. Last resort: estimated area
     print("⚠ All sources failed. Using estimated 1km² area")
