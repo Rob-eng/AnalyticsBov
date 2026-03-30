@@ -3,6 +3,9 @@ import os
 import json
 from datetime import datetime, timedelta
 
+# Caminho base dos assets CAR no GEE
+GEE_PROJECT_BASE = 'projects/ee-ranjos/assets'
+
 def initialize_gee(key_file="service_account.json"):
     """
     Initializes Google Earth Engine with Service Account credentials.
@@ -694,8 +697,8 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
 def find_car_at_coordinate_gee(lat, lon):
     """
     Busca o código do CAR (cod_imovel) em uma coordenada (lat/lon)
-    usando os assets completos do GEE (car_ms, car_mt).
-    Cada asset contém TODAS as propriedades do estado em uma única tabela.
+    usando os assets completos do GEE (car_ms, car_mt, car_go, etc).
+    Detecta automaticamente a UF pela coordenada e busca no asset correto.
     """
     try:
         if not initialize_gee():
@@ -703,15 +706,38 @@ def find_car_at_coordinate_gee(lat, lon):
 
         point = ee.Geometry.Point([lon, lat])
         
-        # 📂 Assets COMPLETOS (uma tabela por estado, sem fragmentação)
-        CAR_ASSETS = [
-            'projects/ee-ranjos/assets/car_ms',    # 86.685 propriedades
-            'projects/ee-ranjos/assets/car_mt',    # ~198k propriedades (quando disponível)
-        ]
+        # 🗺️ Detectar UF pela coordenada (bounding boxes estaduais)
+        STATES_BBOX = {
+            "ac": (-73.99, -11.14, -66.62, -7.11), "al": (-38.24, -10.50, -35.15, -8.81),
+            "am": (-73.79, -9.81, -56.10, 2.24),   "ap": (-51.64, -1.24, -49.87, 4.44),
+            "ba": (-46.62, -18.35, -37.34, -8.53),  "ce": (-41.42, -7.86, -37.25, -2.78),
+            "df": (-48.29, -16.05, -47.31, -15.50), "es": (-41.88, -21.30, -39.68, -17.89),
+            "go": (-53.25, -19.49, -45.74, -12.39), "ma": (-48.76, -10.26, -41.79, -1.04),
+            "mg": (-51.05, -22.92, -39.86, -14.23), "ms": (-57.65, -24.06, -53.26, -17.17),
+            "mt": (-61.63, -18.04, -50.22, -7.35),  "pa": (-58.89, -9.84, -46.06, 2.58),
+            "pb": (-38.77, -8.30, -34.79, -6.02),   "pe": (-41.35, -9.48, -34.80, -7.03),
+            "pi": (-45.99, -10.92, -40.37, -2.74),  "pr": (-54.62, -26.71, -48.02, -22.51),
+            "rj": (-44.88, -23.36, -40.95, -20.76), "rn": (-38.58, -6.98, -34.96, -4.83),
+            "ro": (-66.81, -13.69, -59.77, -7.94),  "rr": (-64.81, -1.58, -58.88, 5.27),
+            "rs": (-57.64, -33.75, -49.69, -27.08), "sc": (-53.83, -29.35, -48.32, -25.92),
+            "se": (-38.24, -11.56, -36.36, -9.51),  "sp": (-53.11, -25.31, -44.16, -19.77),
+            "to": (-50.74, -13.46, -45.69, -5.16)
+        }
         
-        print(f"🛰️ [GEE LOOKUP] Buscando em {len(CAR_ASSETS)} assets para {lat}, {lon}", flush=True)
+        # Identifica possíveis UFs para esta coordenada
+        candidate_ufs = []
+        for uf, (min_lon, min_lat, max_lon, max_lat) in STATES_BBOX.items():
+            if min_lon <= lon <= max_lon and min_lat <= lat <= max_lat:
+                candidate_ufs.append(uf)
         
-        for asset_id in CAR_ASSETS:
+        if not candidate_ufs:
+            candidate_ufs = ['ms', 'mt', 'go', 'sp']  # Fallback para região Centro-Oeste
+        
+        print(f"🛰️ [GEE LOOKUP] Buscando em {len(candidate_ufs)} estados ({', '.join(u.upper() for u in candidate_ufs)}) para {lat}, {lon}", flush=True)
+        
+        # Busca no asset de cada UF candidata
+        for uf in candidate_ufs:
+            asset_id = f"{GEE_PROJECT_BASE}/car_{uf}"
             try:
                 fc = ee.FeatureCollection(asset_id)
                 res = fc.filterBounds(point).limit(1).getInfo()
@@ -723,13 +749,13 @@ def find_car_at_coordinate_gee(lat, lon):
                     print(f"✅ [GEE] Localizado em {asset_id} -> {cod_imovel}", flush=True)
                     return {
                         "cod_imovel": cod_imovel,
-                        "uf": props.get('uf', ''),
+                        "uf": props.get('uf', uf.upper()),
                         "municipio": props.get('municipio', ''),
                         "area": props.get('area'),
                         "geometry": feat.get('geometry')
                     }
             except Exception as e:
-                print(f"⚠️ [GEE] Asset {asset_id}: {e}", flush=True)
+                # Asset pode não existir ainda (estado não sincronizado)
                 continue
 
         print(f"📍 [GEE] Nada encontrado nos assets GEE.", flush=True)
