@@ -23,8 +23,9 @@ import json
 import time
 import requests
 import warnings
-import geopandas as gpd
-from shapely.geometry import shape
+import subprocess
+import re
+import shutil
 from datetime import datetime
 
 warnings.filterwarnings('ignore')
@@ -46,6 +47,25 @@ SICAR_WFS_URL = "https://geoserver.car.gov.br/geoserver/sicar/wfs"
 PAGE_SIZE = 5000
 # ============================================================
 
+# Adaptador SSL para o servidor antigo do SICAR
+from requests.adapters import HTTPAdapter
+try:
+    from urllib3.util.ssl_ import create_urllib3_context
+    class LegacySSLAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            ctx = create_urllib3_context(ciphers='DEFAULT:@SECLEVEL=1')
+            kwargs['ssl_context'] = ctx
+            return super().init_poolmanager(*args, **kwargs)
+    HAS_LEGACY_SSL = True
+except:
+    HAS_LEGACY_SSL = False
+
+# Sessão HTTP persistente
+session = requests.Session()
+if HAS_LEGACY_SSL:
+    session.mount('https://', LegacySSLAdapter())
+session.verify = False
+
 def autenticar_gee():
     """Autentica no GEE (pede login na primeira vez no Colab)."""
     try:
@@ -59,7 +79,6 @@ def autenticar_gee():
 
 def contar_features(uf):
     """Conta features de um estado no SICAR."""
-    import re
     params = {
         'service': 'WFS', 'version': '2.0.0',
         'request': 'GetFeature',
@@ -67,11 +86,29 @@ def contar_features(uf):
         'resultType': 'hits'
     }
     try:
-        r = requests.get(SICAR_WFS_URL, params=params, timeout=60, verify=False)
+        r = session.get(SICAR_WFS_URL, params=params, timeout=60)
         m = re.search(r'numberMatched="(\d+)"', r.text)
         return int(m.group(1)) if m else 0
-    except:
+    except Exception as e:
+        print(f"   ⚠️ Erro ao contar {uf.upper()}: {e}")
         return 0
+
+def testar_conexao():
+    """Testa se conseguimos conectar ao SICAR."""
+    print("🔌 Testando conexão com o SICAR...")
+    try:
+        r = session.get(SICAR_WFS_URL, params={
+            'service': 'WFS', 'request': 'GetCapabilities'
+        }, timeout=30)
+        if r.status_code == 200:
+            print(f"   ✅ Conexão OK! (Status {r.status_code})")
+            return True
+        else:
+            print(f"   ❌ Status {r.status_code}: {r.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"   ❌ Falha de conexão: {e}")
+        return False
 
 def baixar_estado(uf):
     """Baixa todas as propriedades de um estado via WFS."""
@@ -99,7 +136,7 @@ def baixar_estado(uf):
         
         for tentativa in range(3):
             try:
-                r = requests.get(SICAR_WFS_URL, params=params, timeout=300, verify=False)
+                r = session.get(SICAR_WFS_URL, params=params, timeout=300)
                 if r.status_code == 200:
                     feats = r.json().get('features', [])
                     if not feats:
@@ -139,6 +176,12 @@ def baixar_estado(uf):
 def converter_shapefile(geojson_path, uf):
     """Converte GeoJSON para Shapefile."""
     print(f"   🔄 Convertendo para Shapefile...")
+    try:
+        import geopandas as gpd
+    except ImportError:
+        os.system('pip install geopandas -q')
+        import geopandas as gpd
+    
     try:
         gdf = gpd.read_file(geojson_path)
         
@@ -220,6 +263,15 @@ if __name__ == '__main__':
     print(f"   Destino: {GEE_PROJECT}/car_{{uf}}\n")
     
     autenticar_gee()
+    
+    # Testar conexão com o SICAR primeiro
+    if not testar_conexao():
+        print("\n❌ Não foi possível conectar ao SICAR.")
+        print("   Possíveis causas:")
+        print("   1. O servidor geoserver.car.gov.br pode estar fora do ar")
+        print("   2. O Colab pode estar bloqueando a conexão SSL")
+        print("   Tente rodar localmente: python3 sync_car_gee.py MT GO SP")
+        exit(1)
     
     # Contagem prévia
     print("\n📊 Propriedades por estado:")
