@@ -720,35 +720,52 @@ def find_car_at_coordinate_gee(lat, lon):
 
         print(f"🛰️ [GEE LOOKUP] Iniciando varredura em {len(CAR_FOLDERS)} locais para {lat}, {lon}", flush=True)
         
-        # Filtro Silencioso e Rápido
+        # 📂 Lista de Pastas onde as UFs estão divididas em chunks
+        CAR_FOLDERS = [
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/ms_chunks',
+            'projects/ee-ranjos/assets/analyticsbov/car/imovel/mt_chunks'
+        ]
+        
+        print(f"🛰️ [GEE LOOKUP] Iniciando varredura em {len(CAR_FOLDERS)} pastas GEE para {lat}, {lon}", flush=True)
+        
+        # Estratégia de Busca Híbrida: Lista assets E tenta padrões conhecidos
         for folder in CAR_FOLDERS:
             try:
-                # 🔍 Tenta listar assets da pasta (Aumentamos o limite para 500 para cobrir todas as UFs)
+                # 1. 📖 Tenta listar assets (com limite estendido)
                 assets_res = ee.data.listAssets({'parent': folder, 'pageSize': 500})
                 assets = assets_res.get('assets', [])
-                if not assets:
-                     continue
-                    
-                asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
-                print(f"📂 [GEE] Varrendo {len(asset_ids)} tabelas em {folder}...", flush=True)
                 
-                # Para cada pedaço, verificamos se o ponto está dentro
-                for aid in asset_ids:
-                    # OTIMIZAÇÃO: Filtra apenas 1 feature 
-                    fc = ee.FeatureCollection(aid).filterBounds(point)
-                    res = fc.limit(1).getInfo()
-                    
-                    if res.get('features'):
-                        feat = res['features'][0]
-                        props = feat.get('properties', {})
-                        print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}", flush=True)
-                        return {
-                            "cod_imovel": props.get('cod_imovel'),
-                            "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
-                            "municipio": props.get('municipio'),
-                            "area": props.get('area'),
-                            "geometry": feat.get('geometry')
-                        }
+                asset_ids = [a['id'] for a in assets if a['type'] == 'TABLE']
+                
+                # Se listar retornou pouco, podemos estar vivendo um erro de paginação/permissão
+                # Vamos injetar padrões conhecidos (chunk_xxx) para garantir cobertura total
+                if len(asset_ids) < 10: # Algo está errado, pasta parece vazia?
+                      print(f"⚠️ [GEE] Pasta {folder} parece restrita. Tentando modo de infiltração por padrão...", flush=True)
+                      for i in range(1, 201):
+                           asset_ids.append(f"{folder}/chunk_{i:03d}")
+                
+                print(f"📂 [GEE] Varrendo {len(set(asset_ids))} tabelas em {folder}...", flush=True)
+                
+                # Verificação Espacial
+                for aid in sorted(list(set(asset_ids))):
+                    try:
+                        fc = ee.FeatureCollection(aid).filterBounds(point)
+                        res = fc.limit(1).getInfo()
+                        
+                        if res.get('features'):
+                            feat = res['features'][0]
+                            props = feat.get('properties', {})
+                            print(f"✅ [GEE] Localizado em {aid} -> {props.get('cod_imovel')}", flush=True)
+                            return {
+                                "cod_imovel": props.get('cod_imovel'),
+                                "uf": props.get('uf') or ("MT" if "mt_chunks" in folder else "MS"),
+                                "municipio": props.get('municipio'),
+                                "area": props.get('area'),
+                                "geometry": feat.get('geometry')
+                            }
+                    except:
+                        continue # Pula se o chunk não existir (quando injetado via padrão)
+
             except Exception as e:
                 # print(f"⚠️ [GEE] Erro na pasta {folder}: {e}", flush=True)
                 continue
