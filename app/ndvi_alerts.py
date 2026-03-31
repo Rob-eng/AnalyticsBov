@@ -5,7 +5,7 @@ Automated NDVI alert scanner that runs every 12 hours.
 For each registered FavoriteLocation with ndvi_alerts_enabled=True:
 - Fetches the latest cloud-free Sentinel-2 image FOR THE POLYGON (not scene-level)
 - Compares image date with last_ndvi_date stored in DB
-- If newer: generates NDVI composite image and sends it via Telegram
+- If newer: generates NDVI composite image and sends it via Telegram OR WhatsApp
 - Updates last_ndvi_date in DB
 """
 
@@ -13,7 +13,7 @@ import asyncio
 import logging
 from datetime import datetime
 
-from app.models import SessionLocal, FavoriteLocation
+from app.models import SessionLocal, FavoriteLocation, User
 from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
 from app.gee_connector import get_ndvi_image
 
@@ -55,7 +55,7 @@ async def run_ndvi_alert_scan(application):
 async def _check_and_alert(application, session, loc: FavoriteLocation):
     """
     Checks a single property for a new image and sends if found.
-    Runs GEE in executor so it doesn't block the async event loop.
+    Dispatches to Telegram or WhatsApp based on user platform.
     """
     chat_id = loc.user_id
     loop = asyncio.get_running_loop()
@@ -63,13 +63,11 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
     print(f"[NDVI ALERT] Checking '{loc.name}' ({loc.latitude:.4f}, {loc.longitude:.4f})", flush=True)
 
     # 1. Fetch CAR geometry (sync → executor)
-    # returns (geometry, status, cod_imovel)
     geometry, car_status, cod_imovel = await loop.run_in_executor(
         None, fetch_car_perimeter, loc.latitude, loc.longitude
     )
 
-    # 2. Query GEE for latest cloud-free image DATE (lightweight — metadata only)
-    #    get_ndvi_image already filters clouds WITHIN the polygon via SCL band
+    # 2. Query GEE for latest cloud-free image DATE
     gee_meta = await loop.run_in_executor(None, get_ndvi_image, geometry)
 
     if not gee_meta:
@@ -129,26 +127,46 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
         f"{ndvi_icon} *NDVI Médio:* {ndvi_val:.2f}\n"
         f"☁️ *Nuvens no polígono:* {cloud_pct:.1f}%\n"
         f"🗺️ *Perímetro:* {perimeter_label}\n\n"
-        f"_Alertas automáticos a cada 12h · /propriedades para gerenciar_"
+        f"_Alertas automáticos a cada 12h_"
     )
 
-    # 6. Send via Telegram
+    # 6. Determine user platform and send accordingly
     photo = image_buffer if image_buffer else analysis.get("ndvi_img")
-    if photo:
-        await application.bot.send_photo(
-            chat_id=chat_id,
-            photo=photo,
-            caption=caption,
-            parse_mode="Markdown",
-        )
-        print(f"[NDVI ALERT] Sent to {chat_id} for '{loc.name}'.", flush=True)
+
+    # Check which platform this user registered on
+    user = session.query(User).filter(User.chat_id == str(chat_id)).first()
+    platform = user.platform if user else 'telegram'
+
+    if platform == 'whatsapp':
+        # ===== WHATSAPP =====
+        try:
+            from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text
+            # WhatsApp uses different bold syntax, remove Markdown underscores
+            wa_caption = caption.replace('_', '')
+            if photo:
+                send_whatsapp_image(str(chat_id), photo, wa_caption)
+            else:
+                send_whatsapp_text(str(chat_id), wa_caption)
+            print(f"[NDVI ALERT] ✅ Sent to WhatsApp {chat_id} for '{loc.name}'.", flush=True)
+        except Exception as e:
+            print(f"[NDVI ALERT] ❌ WhatsApp send failed for {chat_id}: {e}", flush=True)
     else:
-        # Text-only fallback
-        await application.bot.send_message(
-            chat_id=chat_id,
-            text=caption,
-            parse_mode="Markdown",
-        )
+        # ===== TELEGRAM =====
+        if photo:
+            await application.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                parse_mode="Markdown",
+            )
+            print(f"[NDVI ALERT] ✅ Sent to Telegram {chat_id} for '{loc.name}'.", flush=True)
+        else:
+            await application.bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                parse_mode="Markdown",
+            )
+            print(f"[NDVI ALERT] ✅ Sent text to Telegram {chat_id} for '{loc.name}'.", flush=True)
 
     # 7. Persist new date
     loc.last_ndvi_date = image_date
