@@ -70,7 +70,9 @@ def get_keyboard(chat_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
-    username = update.effective_chat.username
+    raw_username = update.effective_chat.username
+    first_name = update.effective_chat.first_name or "Usuario"
+    username = f"{first_name} (@{raw_username})" if raw_username else first_name
     
     session = SessionLocal()
     try:
@@ -227,6 +229,30 @@ def format_chart_caption(data, title="Cotação do Boi no Mundo", note=None):
     
     return caption
 
+def _log_tg_activity(update: Update, action: str, details: str = None, status: str = 'SUCCESS', error_message: str = None):
+    try:
+        from app.models import log_activity
+        chat = update.effective_chat
+        if not chat: return
+        
+        chat_id = str(chat.id)
+        name = chat.first_name or "Usuario"
+        if chat.username:
+            name += f" (@{chat.username})"
+            
+        log_activity(
+            chat_id=chat_id,
+            action=action,
+            platform='telegram',
+            details=details,
+            status=status,
+            error_message=error_message,
+            trigger_type='USER_REQUEST',
+            username=name
+        )
+    except Exception as e:
+        print(f"Error logging TG activity: {e}")
+
 async def broadcast_report(application, data):
     if not data:
         print("No data to broadcast")
@@ -263,6 +289,7 @@ async def broadcast_report(application, data):
 
 async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
+    _log_tg_activity(update, "COTACAO")
     first_name = update.effective_chat.first_name
     username = update.effective_chat.username
     
@@ -322,6 +349,7 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
+    _log_tg_activity(update, "MERCADO_FUTURO")
     
     await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
     
@@ -361,6 +389,7 @@ async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
+    _log_tg_activity(update, "SYNC_HISTORY")
     await update.message.reply_text("⏳ Iniciando importação do histórico da planilha... Isso pode levar alguns segundos.")
     
     try:
@@ -625,6 +654,7 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             except Exception as poly_err:
                 print(f"  CAR polygon unavailable: {poly_err}", flush=True)
 
+            _log_tg_activity(update, "CLIMA", details=loc_name)
             await status_msg.edit_text(f"⏳ Baixando previsão ECMWF {period_label}... Até 3 minutos.")
             wide_buf, close_buf, err_detail = get_forecast_image(lat, lon, days, polygon_geojson=polygon)
             sent_any = False
@@ -653,6 +683,7 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
             return ConversationHandler.END
 
         # ── HISTORICO mode: precipitation data + heatmap ─────────────────
+        _log_tg_activity(update, "HISTORICO", details=loc_name)
         print(f"[WEATHER] Modo histórico para {lat}, {lon}", flush=True)
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, get_precipitation_data, lat, lon)
@@ -888,6 +919,7 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # ── MDT branch ────────────────────────────────────────────────────
         if env_mode == 'mdt':
+            _log_tg_activity(update, "MDT", details=prop_name or "MDT")
             await status_msg.edit_text("🏔️ Buscando dados de elevação (DEM)... Aguarde.")
 
             loop = asyncio.get_running_loop()
@@ -961,6 +993,7 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # ── NDVI branch (original, unchanged) ────────────────────────────
         else:
+            _log_tg_activity(update, "NDVI", details=prop_name or "NDVI")
             # 3. Get NDVI Analysis
             analysis = get_ndvi_analysis(geometry)
             if not analysis:

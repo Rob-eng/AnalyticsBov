@@ -206,7 +206,7 @@ def log_activity(chat_id, action, platform='whatsapp', details=None, status='SUC
             session.add(user)
             session.flush()
         else:
-            if username and not user.username:
+            if username and user.username != username:
                 user.username = username
             if platform and user.platform != platform:
                 user.platform = platform
