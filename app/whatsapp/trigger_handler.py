@@ -596,3 +596,35 @@ async def _handle_premium(phone):
         "_Segurança garantida via Stripe. Cancele quando quiser._"
     )
     send_whatsapp_text(phone, msg)
+
+async def process_whatsapp_audio(phone: str, media_id: str, user_name: str):
+    from app.whatsapp.sender import download_whatsapp_media, send_whatsapp_text
+    from app.agent import transcribe_audio_bytes, process_whatsapp_message
+    import asyncio
+    
+    loop = asyncio.get_running_loop()
+    
+    # 1. Avisa que está escutando
+    # Opcional: send_whatsapp_text(phone, "🎙️ Escutando seu áudio...")
+    
+    # 2. Download do áudio
+    audio_bytes = await loop.run_in_executor(None, download_whatsapp_media, media_id)
+    if not audio_bytes:
+        send_whatsapp_text(phone, "❌ Não consegui baixar o áudio.")
+        return
+        
+    # 3. Transcreve o áudio via OpenAI Whisper
+    try:
+        texto = await transcribe_audio_bytes(audio_bytes)
+        if not texto or not texto.strip():
+            send_whatsapp_text(phone, "⚠️ Não consegui entender o que foi dito no áudio.")
+            return
+            
+        send_whatsapp_text(phone, f"🎙️ _Entendi:_ \"{texto}\"")
+        
+        # 4. Encaminha para o bot normal como se fosse texto
+        await process_whatsapp_message(phone, texto)
+        
+    except Exception as e:
+        print(f"[WA AUDIO] Erro na transcrição: {e}", flush=True)
+        send_whatsapp_text(phone, "❌ Ocorreu um erro ao processar seu áudio.")

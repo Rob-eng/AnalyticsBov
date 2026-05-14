@@ -61,6 +61,15 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                                 log_activity(sender_phone, "ZIP_UPLOAD", platform='whatsapp', details=doc.get("filename"), username=user_name)
                                 from app.whatsapp.trigger_handler import process_whatsapp_zip_upload
                                 background_tasks.add_task(process_whatsapp_zip_upload, sender_phone, media_id)
+                                
+                        elif msg_type == "audio":
+                            audio_msg = msg.get("audio", {})
+                            media_id = audio_msg.get("id")
+                            if media_id:
+                                from app.models import log_activity
+                                log_activity(sender_phone, "AUDIO_MESSAGE", platform='whatsapp', details="Voice command", username=user_name)
+                                from app.whatsapp.trigger_handler import process_whatsapp_audio
+                                background_tasks.add_task(process_whatsapp_audio, sender_phone, media_id, user_name)
                         
                         print(f"[Webhook] {sender_phone} ({user_name}) disse: {texto if texto else msg_type}")
                         

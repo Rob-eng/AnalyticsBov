@@ -140,16 +140,39 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
     if platform == 'whatsapp':
         # ===== WHATSAPP =====
         try:
-            from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text
+            from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text, send_whatsapp_template_alert, _upload_media
             # WhatsApp uses different bold syntax, remove Markdown underscores
             wa_caption = caption.replace('_', '')
+            
+            success = False
             if photo:
-                send_whatsapp_image(str(chat_id), photo, wa_caption)
+                success = send_whatsapp_image(str(chat_id), photo, wa_caption)
             else:
-                send_whatsapp_text(str(chat_id), wa_caption)
-            print(f"[NDVI ALERT] ✅ Sent to WhatsApp {chat_id} for '{loc.name}'.", flush=True)
+                success = send_whatsapp_text(str(chat_id), wa_caption)
+                
+            if success:
+                print(f"[NDVI ALERT] ✅ Sent to WhatsApp {chat_id} for '{loc.name}'.", flush=True)
+            else:
+                print(f"[NDVI ALERT] ⚠️ Envio WhatsApp falhou (possível restrição 24h). Tentando Template...", flush=True)
+                if photo:
+                    media_id = _upload_media(photo, "image/png", "map.png")
+                    if media_id:
+                        tpl_success = send_whatsapp_template_alert(
+                            to_phone=str(chat_id),
+                            media_id=media_id,
+                            prop_nome=loc.name,
+                            data_str=date_str,
+                            ndvi_val=f"{ndvi_val:.2f}"
+                        )
+                        if tpl_success:
+                            print(f"[NDVI ALERT] ✅ WA Template enviado para {chat_id}.", flush=True)
+                        else:
+                            print(f"[NDVI ALERT] ❌ WA Template falhou. (Criou o template na Meta?)", flush=True)
+                else:
+                    print(f"[NDVI ALERT] ❌ Sem imagem para o Header do Template. Alerta não enviado.", flush=True)
+                    
         except Exception as e:
-            print(f"[NDVI ALERT] ❌ WhatsApp send failed for {chat_id}: {e}", flush=True)
+            print(f"[NDVI ALERT] ❌ WhatsApp send error for {chat_id}: {e}", flush=True)
     else:
         # ===== TELEGRAM =====
         if photo:

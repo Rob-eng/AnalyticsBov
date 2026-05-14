@@ -337,3 +337,61 @@ def send_whatsapp_menu(to_phone: str):
     if success:
         print(f"✅ WA Menu enviado para {to_phone}", flush=True)
     return success
+
+def send_whatsapp_template_alert(to_phone: str, media_id: str, prop_nome: str, data_str: str, ndvi_val: str):
+    """
+    Envia um Message Template contendo mídia e variáveis, usado para alertas fora da janela de 24h.
+    O template 'alerta_ndvi_satelite' precisa estar criado e aprovado na Meta Business Suite.
+    """
+    if not _check_credentials():
+        return False
+
+    template_name = os.getenv("WHATSAPP_NDVI_TEMPLATE_NAME", "alerta_ndvi_satelite")
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "pt_BR"
+            },
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": "image",
+                            "image": {
+                                "id": media_id
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": str(prop_nome)[:128]
+                        },
+                        {
+                            "type": "text",
+                            "text": str(data_str)[:128]
+                        },
+                        {
+                            "type": "text",
+                            "text": str(ndvi_val)[:128]
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA template enviado para {to_phone}", flush=True)
+    return success

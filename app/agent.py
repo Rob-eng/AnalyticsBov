@@ -494,3 +494,39 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
             send_whatsapp_text(sender_phone, "⚠️ Desculpe, tive um problema técnico. Tente novamente em instantes.")
         except Exception:
             pass
+
+async def transcribe_audio_bytes(audio_bytes: bytes, ext: str = ".ogg") -> str:
+    """
+    Transcreve um arquivo de áudio para texto usando OpenAI Whisper.
+    Salva temporariamente no disco para compatibilidade com a API.
+    """
+    import tempfile
+    import os
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("[AGENT] OPENAI_API_KEY não configurada para Whisper.")
+        return ""
+        
+    client = AsyncOpenAI(api_key=api_key)
+    
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_name = tmp.name
+        
+    try:
+        with open(tmp_name, "rb") as f:
+            response = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                language="pt"
+            )
+            return response.text
+    except Exception as e:
+        print(f"[WHISPER ERROR] {e}", flush=True)
+        return ""
+    finally:
+        try:
+            os.remove(tmp_name)
+        except Exception:
+            pass

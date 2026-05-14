@@ -1924,10 +1924,40 @@ def create_bot_application(post_init=None):
     
     # 3. Message Handlers
     app.add_handler(MessageHandler(filters.Document.MimeType("application/zip"), receive_car_zip_tg))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, receive_voice_tg))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_keyboard_buttons))
     
     app.add_error_handler(error_handler)
     return app
+
+async def receive_voice_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lida com mensagens de voz ou áudio no Telegram."""
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        return
+        
+    status_msg = await update.message.reply_text("🎙️ Processando áudio...")
+    
+    try:
+        file = await context.bot.get_file(voice.file_id)
+        audio_bytearray = await file.download_as_bytearray()
+        
+        from app.agent import transcribe_audio_bytes
+        texto = await transcribe_audio_bytes(bytes(audio_bytearray))
+        
+        if not texto or not texto.strip():
+            await status_msg.edit_text("⚠️ Não consegui entender o áudio.")
+            return
+            
+        await status_msg.edit_text(f"🎙️ _Entendi:_ \"{texto}\"", parse_mode='Markdown')
+        
+        # Substitui o texto da mensagem e chama o handler principal de texto
+        update.message.text = texto
+        await handle_keyboard_buttons(update, context)
+        
+    except Exception as e:
+        print(f"[TG VOICE] Erro: {e}")
+        await status_msg.edit_text("❌ Ocorreu um erro ao processar seu áudio.")
 
 async def _send_tg_car_zip_guide(update, context, cod_imovel):
     """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional no Telegram."""
