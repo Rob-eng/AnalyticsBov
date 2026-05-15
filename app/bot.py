@@ -276,12 +276,28 @@ async def broadcast_report(application, data):
         caption = format_chart_caption(data)
         for user in users:
             try:
-                await application.bot.send_photo(
-                    chat_id=user.chat_id, 
-                    photo=open(chart_path, 'rb'),
-                    caption=caption,
-                    parse_mode='Markdown'
-                )
+                if getattr(user, 'platform', 'telegram') == 'whatsapp':
+                    from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_market_template, _upload_media
+                    from io import BytesIO
+                    
+                    # Tenta envio orgânico (funciona se tiver interagido nas últimas 24h)
+                    with open(chart_path, 'rb') as f:
+                        success = send_whatsapp_image(user.chat_id, BytesIO(f.read()), caption)
+                        
+                    # Fallback para o Template pré-aprovado da Meta se falhar
+                    if not success:
+                        print(f"[WA] Broadcast orgânico falhou para {user.chat_id}. Tentando Template Fallback.")
+                        with open(chart_path, 'rb') as f:
+                            media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
+                        if media_id:
+                            send_whatsapp_market_template(user.chat_id, media_id)
+                else:
+                    await application.bot.send_photo(
+                        chat_id=user.chat_id, 
+                        photo=open(chart_path, 'rb'),
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
             except Exception as e:
                 print(f"Failed to send to {user.chat_id}: {e}")
     finally:

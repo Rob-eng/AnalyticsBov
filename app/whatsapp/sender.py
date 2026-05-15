@@ -395,3 +395,44 @@ def send_whatsapp_template_alert(to_phone: str, media_id: str, prop_nome: str, d
     if success:
         print(f"✅ WA template enviado para {to_phone}", flush=True)
     return success
+
+def send_whatsapp_market_template(to_phone: str, media_id: str):
+    """
+    Envia um Message Template para o relatório de mercado semanal.
+    O template 'alerta_cotacao_semanal' deve ter um Header de Mídia (Imagem) e um Corpo de texto sem variáveis.
+    """
+    if not _check_credentials():
+        return False
+
+    template_name = os.getenv("WHATSAPP_MARKET_TEMPLATE_NAME", "alerta_cotacao_semanal")
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "pt_BR"
+            },
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": "image",
+                            "image": {
+                                "id": media_id
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA Market template enviado para {to_phone}", flush=True)
+    return success
