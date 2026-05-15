@@ -396,10 +396,10 @@ def send_whatsapp_template_alert(to_phone: str, media_id: str, prop_nome: str, d
         print(f"✅ WA template enviado para {to_phone}", flush=True)
     return success
 
-def send_whatsapp_market_template(to_phone: str, media_id: str):
+def send_whatsapp_market_template(to_phone: str, media_id: str, caption: str):
     """
     Envia um Message Template para o relatório de mercado semanal.
-    O template 'alerta_cotacao_semanal' deve ter um Header de Mídia (Imagem) e um Corpo de texto sem variáveis.
+    O template 'alerta_cotacao_semanal' deve ter um Header de Mídia (Imagem) e um Corpo contendo exatos 1 parâmetro de texto {{1}}.
     """
     if not _check_credentials():
         return False
@@ -425,6 +425,15 @@ def send_whatsapp_market_template(to_phone: str, media_id: str):
                             "image": {
                                 "id": media_id
                             }
+                        }
+                    ]
+                },
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": caption[:32768]
                         }
                     ]
                 }

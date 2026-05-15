@@ -290,7 +290,7 @@ async def broadcast_report(application, data):
                         with open(chart_path, 'rb') as f:
                             media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
                         if media_id:
-                            send_whatsapp_market_template(user.chat_id, media_id)
+                            send_whatsapp_market_template(user.chat_id, media_id, caption)
                 else:
                     await application.bot.send_photo(
                         chat_id=user.chat_id, 
