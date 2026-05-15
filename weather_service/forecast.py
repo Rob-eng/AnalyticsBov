@@ -93,7 +93,7 @@ def download_ecmwf_precip(forecast_days: int, target_dir: str) -> str:
     if step is None:
         raise ValueError(f"forecast_days must be 1, 5 or 10. Got {forecast_days}")
 
-    client = Client(source="ecmwf")
+    client = Client(source="azure")
     outfile = os.path.join(target_dir, f"ecmwf_tp_{forecast_days}d.grib2")
     logger.info(f"Downloading ECMWF tp step={step}h ...")
     client.retrieve(type="fc", param="tp", step=step, target=outfile)
