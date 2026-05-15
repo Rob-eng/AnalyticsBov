@@ -1170,8 +1170,13 @@ async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle keyboard button presses"""
-    text = update.message.text
-    
+    return await _process_text_command(update, context, update.message.text)
+
+async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Processa texto vindo de botões, comandos ou áudio transcrito."""
+    if not text:
+        return
+
     if text == "📊 Cotação Atual":
         await current_analysis(update, context)
     elif text == "📈 Status":
@@ -1951,9 +1956,8 @@ async def receive_voice_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         await status_msg.edit_text(f"🎙️ _Entendi:_ \"{texto}\"", parse_mode='Markdown')
         
-        # Substitui o texto da mensagem e chama o handler principal de texto
-        update.message.text = texto
-        await handle_keyboard_buttons(update, context)
+        # Chama a rotina principal passando o texto transcrito
+        await _process_text_command(update, context, texto)
         
     except Exception as e:
         print(f"[TG VOICE] Erro: {e}")
