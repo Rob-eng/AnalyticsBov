@@ -290,7 +290,22 @@ async def broadcast_report(application, data):
                         with open(chart_path, 'rb') as f:
                             media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
                         if media_id:
-                            send_whatsapp_market_template(user.chat_id, media_id, caption)
+                            # Prepara variáveis sem quebras de linha para o template Meta (Opção 1)
+                            date_str = data[0]['date'].strftime('%d/%m/%Y') if data else ""
+                            sorted_data = sorted(data, key=lambda x: x['price'], reverse=True)
+                            country_map = {item['country']: f"{item['price']:.2f}" for item in sorted_data}
+                            vars_list = [
+                                date_str,
+                                country_map.get("China", "N/A"),
+                                country_map.get("Estados Unidos", "N/A"),
+                                country_map.get("Irlanda", "N/A"),
+                                country_map.get("Argentina", "N/A"),
+                                country_map.get("Austrália", country_map.get("Australia", "N/A")),
+                                country_map.get("Uruguai", "N/A"),
+                                country_map.get("Paraguai", "N/A"),
+                                country_map.get("Brasil", "N/A")
+                            ]
+                            send_whatsapp_market_template(user.chat_id, media_id, vars_list)
                 else:
                     await application.bot.send_photo(
                         chat_id=user.chat_id, 
