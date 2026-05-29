@@ -358,6 +358,16 @@ def run_cda_backfill(max_pages=100, max_urls=None):
 
 
 def run_cda_daily_cycle():
-    # Daily cycle is incremental: process listing page and newest result links.
-    return run_cda_backfill(max_pages=3, max_urls=20)
+    session = SessionLocal()
+    try:
+        lot_count = session.query(CdaLotResult.id).count()
+    finally:
+        session.close()
 
+    if lot_count == 0:
+        # First run on empty DB: perform a full historical backfill.
+        print("[CDA] Empty database detected. Running initial full backfill...", flush=True)
+        return run_cda_backfill(max_pages=100, max_urls=None)
+
+    # Daily cycle is incremental after initial load.
+    return run_cda_backfill(max_pages=3, max_urls=20)
