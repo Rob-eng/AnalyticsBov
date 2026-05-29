@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, create_engine, text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, create_engine, text, ForeignKey, Text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -43,6 +43,65 @@ class PriceHistory(Base):
     country = Column(String)
     price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
+
+class CdaEvent(Base):
+    __tablename__ = 'cda_events'
+
+    id = Column(Integer, primary_key=True)
+    event_name = Column(String, nullable=True)
+    event_date = Column(DateTime, nullable=True, index=True)
+    event_location = Column(String, nullable=True)
+    source_url = Column(String, nullable=False, index=True)
+    source_page = Column(String, nullable=True)
+    collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class CdaLotResult(Base):
+    __tablename__ = 'cda_lot_results'
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey('cda_events.id'), nullable=True, index=True)
+    source_url = Column(String, nullable=False, index=True)
+    source_page = Column(String, nullable=True)
+
+    lot_ref = Column(String, nullable=True)
+    race_raw = Column(String, nullable=True, index=True)
+    sex_raw = Column(String, nullable=True, index=True)
+    era_raw = Column(String, nullable=True, index=True)
+    weight_kg = Column(Float, nullable=True)
+    arrobas = Column(Float, nullable=True)
+    closed_price_brl = Column(Float, nullable=True)
+    price_per_arroba_brl = Column(Float, nullable=True)
+    currency = Column(String, default='BRL', nullable=False)
+
+    row_raw = Column(Text, nullable=True)
+    hash_key = Column(String, nullable=False, unique=True, index=True)
+
+    collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    event = relationship("CdaEvent", backref="lots")
+
+class CdaMarketComparison(Base):
+    __tablename__ = 'cda_market_comparisons'
+
+    id = Column(Integer, primary_key=True)
+    reference_date = Column(DateTime, nullable=False, index=True)
+    race_norm = Column(String, nullable=True, index=True)
+    sex_norm = Column(String, nullable=True, index=True)
+    era_norm = Column(String, nullable=True, index=True)
+
+    avg_cda_price_per_arroba_brl = Column(Float, nullable=True)
+    avg_cda_closed_price_brl = Column(Float, nullable=True)
+    lots_count = Column(Integer, nullable=False, default=0)
+
+    scot_country = Column(String, nullable=True, index=True)
+    scot_price_usd = Column(Float, nullable=True)
+    cda_to_scot_ratio = Column(Float, nullable=True)
+
+    hash_key = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class CARCaptchaSession(Base):
     """
@@ -238,5 +297,37 @@ def get_recent_prices(days=1095):
         cutoff_date = datetime.utcnow() - pd.Timedelta(days=days)
         records = session.query(PriceHistory).filter(PriceHistory.date >= cutoff_date).order_by(PriceHistory.date).all()
         return [{'country': r.country, 'price': r.price, 'date': r.date} for r in records]
+    finally:
+        session.close()
+
+
+def get_cda_comparisons(start_date=None, end_date=None, limit=500):
+    session = SessionLocal()
+    try:
+        query = session.query(CdaMarketComparison)
+        if start_date is not None:
+            query = query.filter(CdaMarketComparison.reference_date >= start_date)
+        if end_date is not None:
+            query = query.filter(CdaMarketComparison.reference_date <= end_date)
+        rows = (
+            query.order_by(CdaMarketComparison.reference_date.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "reference_date": r.reference_date,
+                "race_norm": r.race_norm,
+                "sex_norm": r.sex_norm,
+                "era_norm": r.era_norm,
+                "avg_cda_price_per_arroba_brl": r.avg_cda_price_per_arroba_brl,
+                "avg_cda_closed_price_brl": r.avg_cda_closed_price_brl,
+                "lots_count": r.lots_count,
+                "scot_country": r.scot_country,
+                "scot_price_usd": r.scot_price_usd,
+                "cda_to_scot_ratio": r.cda_to_scot_ratio,
+            }
+            for r in rows
+        ]
     finally:
         session.close()
