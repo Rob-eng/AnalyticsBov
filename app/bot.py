@@ -270,11 +270,15 @@ async def broadcast_report(application, data):
         print("Failed to generate chart")
         return
 
+    from app.models import log_activity
+
     session = SessionLocal()
     try:
         users = session.query(User).all()
         caption = format_chart_caption(data)
         for user in users:
+            delivery_success = False
+            delivery_error = None
             try:
                 if getattr(user, 'platform', 'telegram') == 'whatsapp':
                     from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_market_template, _upload_media
@@ -305,7 +309,23 @@ async def broadcast_report(application, data):
                                 country_map.get("Paraguai", "N/A"),
                                 country_map.get("Brasil", "N/A")
                             ]
-                            send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                            success = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                        else:
+                            delivery_error = "WA media upload failed for market template"
+
+                    delivery_success = bool(success)
+                    if not delivery_success and not delivery_error:
+                        delivery_error = "WA organic and template delivery failed"
+
+                    log_activity(
+                        user.chat_id,
+                        "MARKET_WEEKLY_ALERT",
+                        platform="whatsapp",
+                        details="weekly_report",
+                        status="SUCCESS" if delivery_success else "ERROR",
+                        error_message=delivery_error,
+                        trigger_type="AUTO_ALERT",
+                    )
                 else:
                     await application.bot.send_photo(
                         chat_id=user.chat_id, 
@@ -313,8 +333,27 @@ async def broadcast_report(application, data):
                         caption=caption,
                         parse_mode='Markdown'
                     )
+                    delivery_success = True
+                    log_activity(
+                        user.chat_id,
+                        "MARKET_WEEKLY_ALERT",
+                        platform="telegram",
+                        details="weekly_report",
+                        status="SUCCESS",
+                        trigger_type="AUTO_ALERT",
+                    )
             except Exception as e:
+                delivery_error = str(e)
                 print(f"Failed to send to {user.chat_id}: {e}")
+                log_activity(
+                    user.chat_id,
+                    "MARKET_WEEKLY_ALERT",
+                    platform=getattr(user, 'platform', 'telegram'),
+                    details="weekly_report",
+                    status="ERROR",
+                    error_message=delivery_error,
+                    trigger_type="AUTO_ALERT",
+                )
     finally:
         session.close()
 
