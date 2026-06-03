@@ -20,6 +20,15 @@ def _check_credentials():
     return True
 
 
+def _sanitize_string(s: str) -> str:
+    """Remove tokens, secrets ou chaves longas de strings de log para segurança."""
+    import re
+    if not s:
+        return s
+    # Remove strings do tipo token da Meta (EAAC... ou alfanuméricas muito longas)
+    return re.sub(r'[A-Za-z0-9+/]{30,}', '[SECRET_TOKEN_REMOVED]', s)
+
+
 def _send_message(payload):
     """Envia uma mensagem via Graph API."""
     headers = {**HEADERS, "Content-Type": "application/json"}
@@ -28,10 +37,12 @@ def _send_message(payload):
         if response.status_code in (200, 201):
             return True
         else:
-            print(f"❌ WA send error ({response.status_code}): {response.text[:300]}", flush=True)
+            sanitized_txt = _sanitize_string(response.text)
+            print(f"❌ WA send error ({response.status_code}): {sanitized_txt[:300]}", flush=True)
             return False
     except Exception as e:
-        print(f"⚠️ WA connection error: {e}", flush=True)
+        sanitized_err = _sanitize_string(str(e))
+        print(f"⚠️ WA connection error: {sanitized_err}", flush=True)
         return False
 
 
@@ -106,10 +117,12 @@ def _upload_media(file_buffer, mime_type, filename="file"):
             print(f"✅ WA media uploaded: {media_id} ({mime_type})", flush=True)
             return media_id
         else:
-            print(f"❌ WA upload error ({response.status_code}): {response.text[:300]}", flush=True)
+            sanitized_txt = _sanitize_string(response.text)
+            print(f"❌ WA upload error ({response.status_code}): {sanitized_txt[:300]}", flush=True)
             return None
     except Exception as e:
-        print(f"⚠️ WA upload connection error: {e}", flush=True)
+        sanitized_err = _sanitize_string(str(e))
+        print(f"⚠️ WA upload connection error: {sanitized_err}", flush=True)
         return None
 
 
@@ -142,11 +155,42 @@ def download_whatsapp_media(media_id: str):
             else:
                 print(f"❌ WA media download failed ({media_response.status_code})", flush=True)
         else:
-            print(f"❌ WA media info failed ({response.status_code}): {response.text[:300]}", flush=True)
+            sanitized_txt = _sanitize_string(response.text)
+            print(f"❌ WA media info failed ({response.status_code}): {sanitized_txt[:300]}", flush=True)
     except Exception as e:
-        print(f"⚠️ WA media download connection error: {e}", flush=True)
+        sanitized_err = _sanitize_string(str(e))
+        print(f"⚠️ WA media download connection error: {sanitized_err}", flush=True)
         
     return None
+
+
+def send_whatsapp_image_by_id(to_phone: str, media_id: str, caption: str = ""):
+    """
+    Envia uma imagem que já foi enviada/upload na Meta usando o media_id.
+    Isso otimiza o fluxo de fallback sem a necessidade de múltiplos uploads.
+    """
+    if not _check_credentials():
+        return False
+
+    caption = caption.replace('_', '').strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "image",
+        "image": {
+            "id": media_id,
+            "caption": caption
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA imagem enviada via media_id para {to_phone}", flush=True)
+    return success
 
 
 def send_whatsapp_image(to_phone: str, image_buffer, caption: str = ""):
@@ -170,21 +214,7 @@ def send_whatsapp_image(to_phone: str, image_buffer, caption: str = ""):
         print("⚠️ WA: Upload falhou, enviando só texto", flush=True)
         return send_whatsapp_text(to_phone, caption or "Não foi possível enviar a imagem.")
 
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": "image",
-        "image": {
-            "id": media_id,
-            "caption": caption
-        }
-    }
-
-    success = _send_message(payload)
-    if success:
-        print(f"✅ WA imagem enviada para {to_phone}", flush=True)
-    return success
+    return send_whatsapp_image_by_id(to_phone, media_id, caption)
 
 
 def send_whatsapp_video(to_phone: str, video_buffer, caption: str = ""):

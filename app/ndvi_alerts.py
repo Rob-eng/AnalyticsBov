@@ -13,7 +13,7 @@ import asyncio
 import logging
 from datetime import datetime
 
-from app.models import SessionLocal, FavoriteLocation, User
+from app.models import SessionLocal, FavoriteLocation, User, log_activity
 from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
 from app.gee_connector import get_ndvi_image
 
@@ -137,20 +137,30 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
     user = session.query(User).filter(User.chat_id == str(chat_id)).first()
     platform = user.platform if user else 'telegram'
 
+    sent_success = False
+    send_error = None
+
     if platform == 'whatsapp':
         # ===== WHATSAPP =====
         try:
-            from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text, send_whatsapp_template_alert, _upload_media
+            from app.whatsapp.sender import (
+                send_whatsapp_text,
+                send_whatsapp_image_by_id,
+                send_whatsapp_template_alert,
+                _upload_media
+            )
+            from app.models import log_activity
+            
             # WhatsApp uses different bold syntax, remove Markdown underscores
             wa_caption = caption.replace('_', '')
             
-            success = False
+<<<<<<< Updated upstream
             if photo:
-                success = send_whatsapp_image(str(chat_id), photo, wa_caption)
+                sent_success = send_whatsapp_image(str(chat_id), photo, wa_caption)
             else:
-                success = send_whatsapp_text(str(chat_id), wa_caption)
+                sent_success = send_whatsapp_text(str(chat_id), wa_caption)
                 
-            if success:
+            if sent_success:
                 print(f"[NDVI ALERT] ✅ Sent to WhatsApp {chat_id} for '{loc.name}'.", flush=True)
             else:
                 print(f"[NDVI ALERT] ⚠️ Envio WhatsApp falhou (possível restrição 24h). Tentando Template...", flush=True)
@@ -158,39 +168,145 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
                     media_id = _upload_media(photo, "image/png", "map.png")
                     if media_id:
                         tpl_success = send_whatsapp_template_alert(
+=======
+            success = False
+            used_template = False
+            
+            if photo:
+                # 1. Faz o upload da imagem apenas UMA vez
+                print(f"[NDVI ALERT] Realizando upload único de mídia para {chat_id}...", flush=True)
+                media_id = _upload_media(photo, "image/png", "map.png")
+                
+                if media_id:
+                    # 2. Tenta o envio livre com o media_id obtido
+                    print(f"[NDVI ALERT] Tentando envio livre de imagem para {chat_id}...", flush=True)
+                    success = send_whatsapp_image_by_id(str(chat_id), media_id, wa_caption)
+                    
+                    if not success:
+                        # 3. Fallback: Se falhar (ex: janela 24h), tenta o template usando o MESMO media_id
+                        print(f"[NDVI ALERT] ⚠️ Envio livre falhou (janela 24h). Tentando Template com media_id existente...", flush=True)
+                        success = send_whatsapp_template_alert(
+>>>>>>> Stashed changes
                             to_phone=str(chat_id),
                             media_id=media_id,
                             prop_nome=loc.name,
                             data_str=date_str,
                             ndvi_val=f"{ndvi_val:.2f}"
                         )
+<<<<<<< Updated upstream
                         if tpl_success:
+                            sent_success = True
                             print(f"[NDVI ALERT] ✅ WA Template enviado para {chat_id}.", flush=True)
                         else:
+                            send_error = "WA template failed"
                             print(f"[NDVI ALERT] ❌ WA Template falhou. (Criou o template na Meta?)", flush=True)
+                    else:
+                        send_error = "WA media upload failed"
                 else:
+                    send_error = "No image available for WhatsApp template header"
                     print(f"[NDVI ALERT] ❌ Sem imagem para o Header do Template. Alerta não enviado.", flush=True)
                     
         except Exception as e:
+            send_error = str(e)
             print(f"[NDVI ALERT] ❌ WhatsApp send error for {chat_id}: {e}", flush=True)
+
+        log_activity(
+            str(chat_id),
+            "NDVI_ALERT",
+            platform="whatsapp",
+            details=f"{loc.name} | image_date={image_date}",
+            status="SUCCESS" if sent_success else "ERROR",
+            error_message=send_error,
+            trigger_type="AUTO_ALERT",
+        )
+=======
+                        used_template = True
+                else:
+                    print(f"[NDVI ALERT] ❌ Upload de imagem falhou. Tentando enviar apenas texto...", flush=True)
+                    success = send_whatsapp_text(str(chat_id), wa_caption)
+            else:
+                success = send_whatsapp_text(str(chat_id), wa_caption)
+                
+            if success:
+                channel_str = "Template" if used_template else "Livre"
+                print(f"[NDVI ALERT] ✅ Enviado com sucesso via WhatsApp ({channel_str}) para {chat_id} | '{loc.name}'.", flush=True)
+                log_activity(
+                    chat_id=chat_id,
+                    action="NDVI_ALERT_SEND",
+                    platform="whatsapp",
+                    details=f"Propriedade: {loc.name} ({channel_str})",
+                    status="SUCCESS",
+                    trigger_type="AUTO_ALERT"
+                )
+            else:
+                print(f"[NDVI ALERT] ❌ Falha no envio para WhatsApp {chat_id} (ambos canais falharam).", flush=True)
+                log_activity(
+                    chat_id=chat_id,
+                    action="NDVI_ALERT_SEND",
+                    platform="whatsapp",
+                    details=f"Propriedade: {loc.name}",
+                    status="ERROR",
+                    error_message="Envio livre e template falharam (restrição Meta ou template ausente)",
+                    trigger_type="AUTO_ALERT"
+                )
+                
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[NDVI ALERT] ❌ WhatsApp send error for {chat_id}: {err_msg}", flush=True)
+            try:
+                from app.models import log_activity
+                log_activity(
+                    chat_id=chat_id,
+                    action="NDVI_ALERT_SEND",
+                    platform="whatsapp",
+                    details=f"Propriedade: {loc.name}",
+                    status="ERROR",
+                    error_message=f"Crash no fluxo: {err_msg}",
+                    trigger_type="AUTO_ALERT"
+                )
+            except Exception:
+                pass
+>>>>>>> Stashed changes
     else:
         # ===== TELEGRAM =====
-        if photo:
-            await application.bot.send_photo(
-                chat_id=chat_id,
-                photo=photo,
-                caption=caption,
-                parse_mode="Markdown",
-            )
-            print(f"[NDVI ALERT] ✅ Sent to Telegram {chat_id} for '{loc.name}'.", flush=True)
-        else:
-            await application.bot.send_message(
-                chat_id=chat_id,
-                text=caption,
-                parse_mode="Markdown",
-            )
-            print(f"[NDVI ALERT] ✅ Sent text to Telegram {chat_id} for '{loc.name}'.", flush=True)
+        try:
+            if photo:
+                await application.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=caption,
+                    parse_mode="Markdown",
+                )
+                print(f"[NDVI ALERT] ✅ Sent to Telegram {chat_id} for '{loc.name}'.", flush=True)
+            else:
+                await application.bot.send_message(
+                    chat_id=chat_id,
+                    text=caption,
+                    parse_mode="Markdown",
+                )
+                print(f"[NDVI ALERT] ✅ Sent text to Telegram {chat_id} for '{loc.name}'.", flush=True)
+            sent_success = True
+        except Exception as e:
+            send_error = str(e)
+            print(f"[NDVI ALERT] ❌ Telegram send error for {chat_id}: {e}", flush=True)
+
+        log_activity(
+            str(chat_id),
+            "NDVI_ALERT",
+            platform="telegram",
+            details=f"{loc.name} | image_date={image_date}",
+            status="SUCCESS" if sent_success else "ERROR",
+            error_message=send_error,
+            trigger_type="AUTO_ALERT",
+        )
 
     # 7. Persist new date
+    if not sent_success:
+        print(
+            f"[NDVI ALERT] Not updating last_ndvi_date for '{loc.name}' because delivery failed.",
+            flush=True,
+        )
+        return
+
     loc.last_ndvi_date = image_date
     session.commit()

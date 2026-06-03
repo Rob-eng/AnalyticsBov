@@ -1,6 +1,8 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.scraper import run_scraping_cycle
+from app.scraper_cda import run_cda_daily_cycle
+from app.cda_analytics import build_cda_scot_comparisons
 from app.bot import broadcast_report
 from app.ndvi_alerts import run_ndvi_alert_scan
 import asyncio
@@ -39,6 +41,24 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
-    print(f"✓ Scheduler configured (tz={USER_TZ}): weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00)", flush=True)
-    return scheduler
+    # ── Coleta diária Correa da Costa (05:30 local) ──────────────────────
+    async def cda_daily_job():
+        print("[Scheduler] Running Correa da Costa daily ingestion...", flush=True)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, run_cda_daily_cycle)
+        print("[Scheduler] Building CDA vs Scot comparisons...", flush=True)
+        await loop.run_in_executor(None, build_cda_scot_comparisons)
 
+    scheduler.add_job(
+        cda_daily_job,
+        CronTrigger(hour=5, minute=30, timezone=USER_TZ),
+        id='cda_daily_ingest',
+        replace_existing=True,
+    )
+
+    print(
+        f"✓ Scheduler configured (tz={USER_TZ}): "
+        "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) + cda_daily_ingest (daily 05:30)",
+        flush=True
+    )
+    return scheduler

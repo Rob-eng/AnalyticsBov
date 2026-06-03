@@ -270,18 +270,22 @@ async def broadcast_report(application, data):
         print("Failed to generate chart")
         return
 
+    from app.models import log_activity
+
     session = SessionLocal()
     try:
         users = session.query(User).all()
         caption = format_chart_caption(data)
         
-        wa_count = sum(1 for u in users if getattr(u, 'platform', 'telegram') == 'whatsapp')
-        tg_count = sum(1 for u in users if getattr(u, 'platform', 'telegram') != 'whatsapp')
+        wa_count = sum(1 for u in users if (getattr(u, 'platform', 'telegram') or 'telegram') == 'whatsapp')
+        tg_count = len(users) - wa_count
         print(f"[Broadcast] Total users: {len(users)} | Telegram: {tg_count} | WhatsApp: {wa_count}", flush=True)
         
         for user in users:
             user_platform = getattr(user, 'platform', 'telegram') or 'telegram'
             print(f"[Broadcast] Sending to {user.chat_id} (platform={user_platform})", flush=True)
+            delivery_success = False
+            delivery_error = None
             try:
                 if user_platform == 'whatsapp':
                     from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_market_template, _upload_media
@@ -316,8 +320,24 @@ async def broadcast_report(application, data):
                                 country_map.get("Brasil", "N/A")
                             ]
                             print(f"[Broadcast WA] Template vars: {vars_list}", flush=True)
-                            template_ok = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
-                            print(f"[Broadcast WA] Template send to {user.chat_id}: {'OK' if template_ok else 'FAILED'}", flush=True)
+                            success = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                            print(f"[Broadcast WA] Template send to {user.chat_id}: {'OK' if success else 'FAILED'}", flush=True)
+                        else:
+                            delivery_error = "WA media upload failed for market template"
+
+                    delivery_success = bool(success)
+                    if not delivery_success and not delivery_error:
+                        delivery_error = "WA organic and template delivery failed"
+
+                    log_activity(
+                        user.chat_id,
+                        "MARKET_WEEKLY_ALERT",
+                        platform="whatsapp",
+                        details="weekly_report",
+                        status="SUCCESS" if delivery_success else "ERROR",
+                        error_message=delivery_error,
+                        trigger_type="AUTO_ALERT",
+                    )
                 else:
                     await application.bot.send_photo(
                         chat_id=user.chat_id, 
@@ -325,9 +345,28 @@ async def broadcast_report(application, data):
                         caption=caption,
                         parse_mode='Markdown'
                     )
+                    delivery_success = True
                     print(f"[Broadcast TG] Sent to {user.chat_id}: OK", flush=True)
+                    log_activity(
+                        user.chat_id,
+                        "MARKET_WEEKLY_ALERT",
+                        platform="telegram",
+                        details="weekly_report",
+                        status="SUCCESS",
+                        trigger_type="AUTO_ALERT",
+                    )
             except Exception as e:
+                delivery_error = str(e)
                 print(f"[Broadcast] Failed to send to {user.chat_id} (platform={user_platform}): {e}", flush=True)
+                log_activity(
+                    user.chat_id,
+                    "MARKET_WEEKLY_ALERT",
+                    platform=user_platform,
+                    details="weekly_report",
+                    status="ERROR",
+                    error_message=delivery_error,
+                    trigger_type="AUTO_ALERT",
+                )
     finally:
         session.close()
 

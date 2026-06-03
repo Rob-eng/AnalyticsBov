@@ -270,7 +270,9 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
                 # Garantir que o usuário existe
                 user = session.query(User).filter(User.chat_id == user_id).first()
                 if not user:
-                    user = User(chat_id=user_id, platform='whatsapp' if 'whatsapp' in user_id else 'telegram')
+                    # Se o ID for numérico e longo (ex: telefone WhatsApp com DDI/DDD), classifica como WhatsApp
+                    is_wa = user_id.isdigit() and len(user_id) >= 11
+                    user = User(chat_id=user_id, platform='whatsapp' if is_wa else 'telegram')
                     session.add(user)
                     session.flush()
 
