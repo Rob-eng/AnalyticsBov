@@ -181,6 +181,14 @@ def init_db():
             # Tentativa para WhatsApp (Robson)
             conn.execute(text(f"UPDATE users SET plan_type = 'PRO' WHERE chat_id = '556784013193'"))
             
+            # FIX: Garantir que usuários com chat_id numérico longo (telefone) tenham platform='whatsapp'
+            # Telefones brasileiros com DDI: 55 + DDD(2) + número(8-9) = 12-13 dígitos
+            result = conn.execute(text(
+                "UPDATE users SET platform = 'whatsapp' "
+                "WHERE platform IS NULL OR (platform = 'telegram' AND LENGTH(chat_id) >= 11 AND chat_id ~ '^[0-9]+$')"
+            ))
+            print(f"✅ [Migration] Fixed WhatsApp platform for users with phone-number chat_ids", flush=True)
+            
             if hasattr(conn, 'commit'):
                 conn.commit()
     except Exception as e:

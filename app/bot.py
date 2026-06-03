@@ -274,21 +274,31 @@ async def broadcast_report(application, data):
     try:
         users = session.query(User).all()
         caption = format_chart_caption(data)
+        
+        wa_count = sum(1 for u in users if getattr(u, 'platform', 'telegram') == 'whatsapp')
+        tg_count = sum(1 for u in users if getattr(u, 'platform', 'telegram') != 'whatsapp')
+        print(f"[Broadcast] Total users: {len(users)} | Telegram: {tg_count} | WhatsApp: {wa_count}", flush=True)
+        
         for user in users:
+            user_platform = getattr(user, 'platform', 'telegram') or 'telegram'
+            print(f"[Broadcast] Sending to {user.chat_id} (platform={user_platform})", flush=True)
             try:
-                if getattr(user, 'platform', 'telegram') == 'whatsapp':
+                if user_platform == 'whatsapp':
                     from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_market_template, _upload_media
                     from io import BytesIO
                     
                     # Tenta envio orgânico (funciona se tiver interagido nas últimas 24h)
                     with open(chart_path, 'rb') as f:
                         success = send_whatsapp_image(user.chat_id, BytesIO(f.read()), caption)
+                    
+                    print(f"[Broadcast WA] Organic send to {user.chat_id}: {'OK' if success else 'FAILED'}", flush=True)
                         
                     # Fallback para o Template pré-aprovado da Meta se falhar
                     if not success:
-                        print(f"[WA] Broadcast orgânico falhou para {user.chat_id}. Tentando Template Fallback.")
+                        print(f"[WA] Broadcast orgânico falhou para {user.chat_id}. Tentando Template Fallback.", flush=True)
                         with open(chart_path, 'rb') as f:
                             media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
+                        print(f"[Broadcast WA] Upload media for template: {'OK media_id=' + str(media_id) if media_id else 'FAILED'}", flush=True)
                         if media_id:
                             # Prepara variáveis sem quebras de linha para o template Meta (Opção 1)
                             date_str = data[0]['date'].strftime('%d/%m/%Y') if data else ""
@@ -305,7 +315,9 @@ async def broadcast_report(application, data):
                                 country_map.get("Paraguai", "N/A"),
                                 country_map.get("Brasil", "N/A")
                             ]
-                            send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                            print(f"[Broadcast WA] Template vars: {vars_list}", flush=True)
+                            template_ok = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                            print(f"[Broadcast WA] Template send to {user.chat_id}: {'OK' if template_ok else 'FAILED'}", flush=True)
                 else:
                     await application.bot.send_photo(
                         chat_id=user.chat_id, 
@@ -313,8 +325,9 @@ async def broadcast_report(application, data):
                         caption=caption,
                         parse_mode='Markdown'
                     )
+                    print(f"[Broadcast TG] Sent to {user.chat_id}: OK", flush=True)
             except Exception as e:
-                print(f"Failed to send to {user.chat_id}: {e}")
+                print(f"[Broadcast] Failed to send to {user.chat_id} (platform={user_platform}): {e}", flush=True)
     finally:
         session.close()
 
