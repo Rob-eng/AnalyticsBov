@@ -36,8 +36,21 @@ async def run_ndvi_alert_scan(application):
         )
         print(f"[NDVI ALERT] {len(locations)} properties to check.", flush=True)
 
+        # Log detalhado de todas as propriedades e seus estados
+        for loc in locations:
+            user = session.query(User).filter(User.chat_id == str(loc.user_id)).first()
+            plat = (user.platform or 'telegram') if user else 'telegram'
+            print(
+                f"[NDVI ALERT]   · '{loc.name}' | user={loc.user_id} | platform={plat} "
+                f"| last_ndvi_date={loc.last_ndvi_date or 'nunca'}",
+                flush=True
+            )
+
         for loc in locations:
             try:
+                # Refresh para garantir que o last_ndvi_date está atualizado
+                # (evita stale data se um run anterior commitou mas o objeto ainda está em memória)
+                session.refresh(loc)
                 await _check_and_alert(application, session, loc)
             except Exception as e:
                 print(f"[NDVI ALERT] Error on '{loc.name}': {e}", flush=True)
@@ -134,8 +147,10 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
     photo = image_buffer if image_buffer else analysis.get("ndvi_img")
 
     # Check which platform this user registered on
+    # Usar 'or' para tratar platform=None (usuários antigos) como 'telegram'
     user = session.query(User).filter(User.chat_id == str(chat_id)).first()
-    platform = user.platform if user else 'telegram'
+    platform = (user.platform or 'telegram') if user else 'telegram'
+    print(f"[NDVI ALERT] Platform resolvido para {chat_id}: '{platform}'", flush=True)
 
     sent_success = False
     send_error = None
