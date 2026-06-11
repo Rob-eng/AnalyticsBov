@@ -617,3 +617,229 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     plt.close()
     buf.seek(0)
     return buf.read()
+
+
+def generate_cda_price_chart(days=365):
+    """
+    Gera um gráfico premium de evolução de preços do Leilão Correa da Costa.
+
+    Painel superior: preço médio/@BRL por categoria de raça ao longo do tempo.
+    Painel inferior: número de lotes negociados por semana (volume de mercado).
+    Sobrepõe a cotação Scot Brasil (USD) como benchmark de referência.
+
+    Returns: path do arquivo PNG ou None se sem dados.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import matplotlib.ticker as mticker
+    from matplotlib.lines import Line2D
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime, timedelta
+    from app.models import SessionLocal, CdaMarketComparison, PriceHistory
+    from sqlalchemy import func
+
+    # ── 1. Carregar dados ────────────────────────────────────────────────────
+    session = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        rows = (
+            session.query(CdaMarketComparison)
+            .filter(CdaMarketComparison.reference_date >= cutoff)
+            .order_by(CdaMarketComparison.reference_date.asc())
+            .all()
+        )
+
+        scot_rows = (
+            session.query(PriceHistory)
+            .filter(
+                PriceHistory.country == 'Brasil',
+                PriceHistory.date >= cutoff
+            )
+            .order_by(PriceHistory.date.asc())
+            .all()
+        )
+    finally:
+        session.close()
+
+    if not rows:
+        return None
+
+    # ── 2. Montar DataFrames ─────────────────────────────────────────────────
+    df = pd.DataFrame([{
+        'date': r.reference_date,
+        'race': r.race_norm or 'Outros',
+        'price_arroba': r.avg_cda_price_per_arroba_brl,
+        'lots': r.lots_count or 0,
+    } for r in rows])
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.dropna(subset=['price_arroba'])
+
+    df_scot = pd.DataFrame([{
+        'date': r.date,
+        'price_usd': r.price,
+    } for r in scot_rows])
+    if not df_scot.empty:
+        df_scot['date'] = pd.to_datetime(df_scot['date'])
+        df_scot = df_scot.groupby('date')['price_usd'].mean().reset_index()
+        df_scot = df_scot.sort_values('date')
+
+    # Agrupar volume semanal
+    df_vol = df.copy()
+    df_vol = df_vol.set_index('date').resample('W')['lots'].sum().reset_index()
+
+    # Escolher as 5 raças mais frequentes para a legenda
+    top_races = (
+        df.groupby('race')['lots'].sum()
+        .nlargest(5)
+        .index.tolist()
+    )
+    df_top = df[df['race'].isin(top_races)].copy()
+
+    # Suavização: média móvel de 4 semanas por raça
+    def smooth_series(sub):
+        sub = sub.set_index('date').resample('W')['price_arroba'].mean().reset_index()
+        sub['price_arroba'] = sub['price_arroba'].rolling(4, min_periods=1).mean()
+        return sub
+
+    # ── 3. Paleta e tema ─────────────────────────────────────────────────────
+    BG        = '#0D1117'
+    PANEL_BG  = '#161B22'
+    GRID      = '#21262D'
+    TEXT      = '#E6EDF3'
+    SUBTEXT   = '#8B949E'
+    ACCENT    = '#58A6FF'
+    VOLUME    = '#1F6FEB'
+
+    RACE_PALETTE = [
+        '#F78166',  # coral
+        '#3FB950',  # green
+        '#D2A8FF',  # purple
+        '#FFA657',  # orange
+        '#79C0FF',  # light-blue
+    ]
+
+    # ── 4. Figura com 2 painéis ──────────────────────────────────────────────
+    fig = plt.figure(figsize=(15, 10), facecolor=BG)
+    gs  = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.06)
+    ax_price  = fig.add_subplot(gs[0])
+    ax_volume = fig.add_subplot(gs[1], sharex=ax_price)
+
+    for ax in (ax_price, ax_volume):
+        ax.set_facecolor(PANEL_BG)
+        ax.spines[:].set_color(GRID)
+        ax.tick_params(colors=SUBTEXT, labelsize=10)
+        ax.yaxis.grid(True, color=GRID, linewidth=0.7, linestyle='--')
+        ax.xaxis.grid(True, color=GRID, linewidth=0.5, linestyle=':')
+        ax.set_axisbelow(True)
+
+    # ── 5. Painel superior: preço/@ por raça ────────────────────────────────
+    legend_handles = []
+    for i, race in enumerate(top_races):
+        color = RACE_PALETTE[i % len(RACE_PALETTE)]
+        sub = df_top[df_top['race'] == race]
+        sub_smooth = smooth_series(sub[['date', 'price_arroba']].copy())
+
+        ax_price.plot(
+            sub_smooth['date'], sub_smooth['price_arroba'],
+            color=color, linewidth=2.4, alpha=0.92, zorder=5
+        )
+        # Marcador no último valor
+        last = sub_smooth.dropna().iloc[-1] if not sub_smooth.dropna().empty else None
+        if last is not None:
+            ax_price.scatter(last['date'], last['price_arroba'],
+                             color=color, s=55, zorder=8, edgecolors='white', linewidth=0.8)
+            ax_price.annotate(
+                f"R$ {last['price_arroba']:,.0f}",
+                xy=(last['date'], last['price_arroba']),
+                xytext=(8, 0), textcoords='offset points',
+                fontsize=9, color=color, va='center', fontweight='bold'
+            )
+
+        # Área sombreada suave
+        ax_price.fill_between(
+            sub_smooth['date'], sub_smooth['price_arroba'],
+            alpha=0.06, color=color, zorder=2
+        )
+        label = race.title() if race else 'Outros'
+        legend_handles.append(Line2D([0], [0], color=color, linewidth=2.2, label=label))
+
+    # Eixo secundário: Scot USD
+    if not df_scot.empty:
+        ax2 = ax_price.twinx()
+        ax2.set_facecolor(PANEL_BG)
+        scot_smooth = df_scot.set_index('date')['price_usd'].rolling(4, min_periods=1).mean()
+        ax2.plot(
+            scot_smooth.index, scot_smooth.values,
+            color=ACCENT, linewidth=1.6, linestyle='--', alpha=0.7, zorder=4
+        )
+        ax2.set_ylabel('Cotação Scot Brasil (US$/cabeça)', color=ACCENT, fontsize=10, labelpad=10)
+        ax2.tick_params(colors=ACCENT, labelsize=9)
+        ax2.spines[:].set_color(GRID)
+        ax2.yaxis.label.set_color(ACCENT)
+        ax2.tick_params(axis='y', colors=ACCENT)
+        legend_handles.append(
+            Line2D([0], [0], color=ACCENT, linewidth=1.6, linestyle='--', label='Scot Brasil (US$)')
+        )
+
+    ax_price.set_ylabel('Preço Médio R$/@ (Leilão CDA)', color=TEXT, fontsize=11, labelpad=12)
+    ax_price.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'R$ {x:,.0f}'))
+    ax_price.tick_params(axis='x', labelbottom=False)
+
+    ax_price.legend(
+        handles=legend_handles,
+        loc='upper left',
+        frameon=True, facecolor='#161B22', edgecolor=GRID,
+        labelcolor=TEXT, fontsize=10,
+    )
+
+    # ── 6. Painel inferior: volume (lotes/semana) ───────────────────────────
+    ax_volume.bar(
+        df_vol['date'], df_vol['lots'],
+        width=6, color=VOLUME, alpha=0.75, zorder=3
+    )
+    ax_volume.set_ylabel('Lotes / semana', color=SUBTEXT, fontsize=9, labelpad=8)
+    ax_volume.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{int(x):,}'))
+    ax_volume.tick_params(axis='y', colors=SUBTEXT, labelsize=9)
+
+    # ── 7. Eixo X compartilhado ──────────────────────────────────────────────
+    locator = mdates.MonthLocator(interval=2) if days <= 365 else mdates.MonthLocator(interval=4)
+    ax_volume.xaxis.set_major_locator(locator)
+    ax_volume.xaxis.set_major_formatter(mdates.DateFormatter('%b/%y'))
+    plt.setp(ax_volume.xaxis.get_majorticklabels(), rotation=30, ha='right', color=SUBTEXT)
+
+    # ── 8. Título e rodapé ──────────────────────────────────────────────────
+    period_label = f'Últimos {days} dias' if days < 3650 else 'Histórico completo'
+    fig.suptitle(
+        f'📈 Evolução de Preços — Leilão Correa da Costa (CDA)\n{period_label}',
+        fontsize=17, fontweight='bold', color=TEXT,
+        y=0.97
+    )
+    fig.text(
+        0.5, 0.01,
+        f'Fonte: Correa da Costa Agropecuária  •  Gerado em {datetime.now().strftime("%d/%m/%Y %H:%M")}  •  Agro Analytics Bot',
+        ha='center', fontsize=8.5, color=SUBTEXT, style='italic'
+    )
+
+    # Watermark logo
+    logo_path = 'app/assets/logo.jpg'
+    if os.path.exists(logo_path):
+        try:
+            logo_img = plt.imread(logo_path)
+            newax = fig.add_axes([0.35, 0.25, 0.30, 0.30], zorder=0)
+            newax.imshow(logo_img, alpha=0.04)
+            newax.axis('off')
+        except Exception:
+            pass
+
+    plt.subplots_adjust(left=0.08, right=0.88, top=0.91, bottom=0.10)
+
+    import time
+    output_path = f'/tmp/cda_price_chart_{int(time.time())}.png'
+    plt.savefig(output_path, dpi=150, facecolor=BG, bbox_inches='tight')
+    plt.close()
+    return output_path
+

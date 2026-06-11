@@ -36,6 +36,11 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             await _handle_mercado_futuro(sender_phone, loop)
             return
 
+        if fluxo == 'LEILAO':
+            loop = asyncio.get_running_loop()
+            await _handle_cda_chart(sender_phone, loop)
+            return
+
         if fluxo == 'PREMIUM':
             from app.models import log_activity
             log_activity(sender_phone, "PREMIUM_CHECK", details="User viewing plans")
@@ -378,6 +383,39 @@ async def _handle_mercado_futuro(phone, loop):
 
     send_whatsapp_image(phone, img_bytes, caption)
     print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)
+
+
+async def _handle_cda_chart(phone, loop):
+    """Pipeline Leilão CDA → envia gráfico de evolução de preços via WhatsApp."""
+    from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text
+    from app.charts import generate_cda_price_chart
+
+    send_whatsapp_text(phone, "📈 Gerando gráfico de evolução do Leilão Correa da Costa... Aguarde.")
+
+    chart_path = await loop.run_in_executor(None, lambda: generate_cda_price_chart(days=365))
+
+    if not chart_path:
+        send_whatsapp_text(
+            phone,
+            "⚠️ Sem dados do Leilão CDA disponíveis ainda.\n"
+            "Os dados são coletados automaticamente às 05h30 todos os dias."
+        )
+        return
+
+    caption = (
+        "📈 *Leilão Correa da Costa — Evolução de Preços*\n"
+        "Últimos 365 dias\n\n"
+        "• Linhas = preço médio R$/@ por raça\n"
+        "• Linha azul tracejada = Scot Brasil (US$/cabeça)\n"
+        "• Barras = volume de lotes/semana\n\n"
+        "Fonte: Correa da Costa Agropecuária + Scot Consultoria"
+    )
+
+    with open(chart_path, "rb") as f:
+        img_bytes = f.read()
+
+    send_whatsapp_image(phone, img_bytes, caption)
+    print("[WA TRIGGER] Gráfico CDA enviado com sucesso!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):
     """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""

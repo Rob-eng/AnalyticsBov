@@ -430,6 +430,52 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error in current_analysis: {traceback.format_exc()}")
         await update.message.reply_text(error_msg)
 
+
+async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /leilao — envia o gráfico de evolução de preços da Correa da Costa."""
+    _log_tg_activity(update, "CDA_CHART")
+    # Período via argumento: /leilao 180  (padrão 365 dias)
+    days = 365
+    if context.args:
+        try:
+            days = max(30, min(3650, int(context.args[0])))
+        except ValueError:
+            pass
+
+    await update.message.reply_text(
+        f"📈 Gerando gráfico de leilão CDA (últimos {days} dias)... Aguarde."
+    )
+    try:
+        from app.charts import generate_cda_price_chart
+        loop = asyncio.get_running_loop()
+        chart_path = await loop.run_in_executor(
+            None, lambda: generate_cda_price_chart(days=days)
+        )
+        if not chart_path:
+            await update.message.reply_text(
+                "⚠️ Sem dados suficientes da Correa da Costa para gerar o gráfico.\n"
+                "Os dados são coletados automaticamente às 05h30 todos os dias."
+            )
+            return
+
+        caption = (
+            f"📈 *Leilão Correa da Costa — Evolução de Preços*\n"
+            f"Período: últimos {days} dias\n\n"
+            f"• Linhas coloridas = preço médio R$/@ por raça\n"
+            f"• Linha azul tracejada = cotação Scot Brasil (US$/cabeça)\n"
+            f"• Barras = volume de lotes negociados por semana\n\n"
+            f"_Fonte: Correa da Costa Agropecuária + Scot Consultoria_"
+        )
+        await update.message.reply_photo(
+            photo=open(chart_path, 'rb'),
+            caption=caption,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        import traceback
+        print(f"[CDA Chart] Error: {traceback.format_exc()}")
+        await update.message.reply_text(f"❌ Erro ao gerar gráfico: {str(e)}")
+
 async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     _log_tg_activity(update, "MERCADO_FUTURO")
@@ -2006,6 +2052,7 @@ def create_bot_application(post_init=None):
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("atual", current_analysis))
     app.add_handler(CommandHandler("futuro", future_market))
+    app.add_handler(CommandHandler("leilao", cda_chart))
     app.add_handler(CommandHandler("importar", sync_history))
     app.add_handler(CommandHandler("users", list_users))
     app.add_handler(CommandHandler("admin_locais", list_all_locations_admin))
