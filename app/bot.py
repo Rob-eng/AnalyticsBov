@@ -493,7 +493,7 @@ async def cda_ingest_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /ingestcda (admin only) — dispara backfill CDA imediatamente."""
     chat_id = str(update.effective_chat.id)
     if not is_admin(chat_id):
-        await update.message.reply_text("⛔ Acesso negado.")
+        await update.message.reply_text("Acesso negado.")
         return
 
     pages = 5
@@ -504,9 +504,8 @@ async def cda_ingest_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     await update.message.reply_text(
-        f"⚙️ *CDA Backfill iniciado* (max_pages={pages})\n"
-        f"Acompanhe os logs no Railway. Pode levar alguns minutos...",
-        parse_mode='Markdown'
+        f"CDA Backfill iniciado (max_pages={pages})\n"
+        f"Acompanhe os logs no Railway. Pode levar alguns minutos..."
     )
 
     async def _run_backfill():
@@ -520,30 +519,37 @@ async def cda_ingest_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             cmp = await loop.run_in_executor(None, build_cda_scot_comparisons)
 
+            discovered  = summary.get('urls_discovered', 0)
+            processed   = summary.get('urls_processed', 0)
+            scraped     = summary.get('rows_scraped', 0)
+            inserted    = summary.get('inserted', 0)
+            updated     = summary.get('updated', 0)
+            failed      = len(summary.get('failed_urls', []))
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=(
-                    f"✅ *CDA Backfill concluído!*\n\n"
-                    f"📋 URLs descobertas: {summary.get('urls_discovered', 0)}\n"
-                    f"✅ URLs processadas: {summary.get('urls_processed', 0)}\n"
-                    f"📦 Lotes coletados: {summary.get('rows_scraped', 0)}\n"
-                    f"🆕 Inseridos: {summary.get('inserted', 0)}\n"
-                    f"🔄 Atualizados: {summary.get('updated', 0)}\n"
-                    f"❌ Falhas: {len(summary.get('failed_urls', []))}\n\n"
-                    f"📊 Comparativos Scot: {cmp if isinstance(cmp, dict) else 'OK'}"
+                    f"CDA Backfill concluido!\n\n"
+                    f"URLs descobertas: {discovered}\n"
+                    f"URLs processadas: {processed}\n"
+                    f"Lotes coletados: {scraped}\n"
+                    f"Inseridos: {inserted}\n"
+                    f"Atualizados: {updated}\n"
+                    f"Falhas: {failed}\n\n"
+                    f"Comparativos Scot recalculados: {'OK' if not isinstance(cmp, Exception) else str(cmp)}"
                 ),
-                parse_mode='Markdown'
             )
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()[-500:]
+            tb = traceback.format_exc()[-800:]
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"❌ *Erro no CDA Backfill:*\n```{tb}```",
-                parse_mode='Markdown'
+                text=f"ERRO no CDA Backfill:\n{tb}",
             )
 
     asyncio.create_task(_run_backfill())
+
+
 
 
 async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
