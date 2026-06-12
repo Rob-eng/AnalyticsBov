@@ -489,6 +489,63 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"[CDA Chart] Error: {traceback.format_exc()}")
         await update.message.reply_text(f"❌ Erro ao gerar gráfico: {str(e)}")
 
+async def cda_ingest_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /ingestcda (admin only) — dispara backfill CDA imediatamente."""
+    chat_id = str(update.effective_chat.id)
+    if not is_admin(chat_id):
+        await update.message.reply_text("⛔ Acesso negado.")
+        return
+
+    pages = 5
+    if context.args:
+        try:
+            pages = max(1, min(20, int(context.args[0])))
+        except ValueError:
+            pass
+
+    await update.message.reply_text(
+        f"⚙️ *CDA Backfill iniciado* (max_pages={pages})\n"
+        f"Acompanhe os logs no Railway. Pode levar alguns minutos...",
+        parse_mode='Markdown'
+    )
+
+    async def _run_backfill():
+        loop = asyncio.get_running_loop()
+        try:
+            from app.scraper_cda import run_cda_backfill
+            from app.cda_analytics import build_cda_scot_comparisons
+
+            summary = await loop.run_in_executor(
+                None, lambda: run_cda_backfill(max_pages=pages, max_urls=None)
+            )
+            cmp = await loop.run_in_executor(None, build_cda_scot_comparisons)
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"✅ *CDA Backfill concluído!*\n\n"
+                    f"📋 URLs descobertas: {summary.get('urls_discovered', 0)}\n"
+                    f"✅ URLs processadas: {summary.get('urls_processed', 0)}\n"
+                    f"📦 Lotes coletados: {summary.get('rows_scraped', 0)}\n"
+                    f"🆕 Inseridos: {summary.get('inserted', 0)}\n"
+                    f"🔄 Atualizados: {summary.get('updated', 0)}\n"
+                    f"❌ Falhas: {len(summary.get('failed_urls', []))}\n\n"
+                    f"📊 Comparativos Scot: {cmp if isinstance(cmp, dict) else 'OK'}"
+                ),
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()[-500:]
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ *Erro no CDA Backfill:*\n```{tb}```",
+                parse_mode='Markdown'
+            )
+
+    asyncio.create_task(_run_backfill())
+
+
 async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     _log_tg_activity(update, "MERCADO_FUTURO")
@@ -2066,6 +2123,7 @@ def create_bot_application(post_init=None):
     app.add_handler(CommandHandler("atual", current_analysis))
     app.add_handler(CommandHandler("futuro", future_market))
     app.add_handler(CommandHandler("leilao", cda_chart))
+    app.add_handler(CommandHandler("ingestcda", cda_ingest_admin))
     app.add_handler(CommandHandler("importar", sync_history))
     app.add_handler(CommandHandler("users", list_users))
     app.add_handler(CommandHandler("admin_locais", list_all_locations_admin))
