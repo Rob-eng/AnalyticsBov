@@ -1,18 +1,23 @@
 """
-Scraper Correa da Costa — versão corrigida.
+Scraper Correa da Costa — versão final com estrutura HTML real confirmada.
 
-Problemas encontrados na versão anterior:
-  1. Filtro de URL usava '/resultado' mas o site usa '/leiloes/<slug>'
-  2. Os dados de lote estão nas páginas individuais /leiloes/<slug>,
-     renderizados como <tr data-raca="..." data-sexo="..." ...>
-  3. A API /HistoricoMedias/Historico requer X-Captcha-Token (impossível
-     sem browser), então usamos scraping direto do HTML das páginas.
+Estrutura real de cada <tr> de lote (confirmada via inspeção do browser):
+  <tr data-sexo="F" data-raca="NELORE" data-status="vendido" data-peso="276.00" ...>
+    <td> <img ...> </td>                              ← col 0: foto
+    <td id="leilao-lote-458276">                      ← col 1: badge de status/preço
+        <span class="badge bg-success">Vendido<br>R$ 3050,00</span>
+    </td>
+    <td>015</td>                                      ← col 2: número do lote
+    <td>10</td>                                       ← col 3: quantidade de animais
+    <td>F</td>                                        ← col 4: sexo
+    <td>NELORE</td>                                   ← col 5: raça
+    <td>276kg</td>                                    ← col 6: peso médio/animal
+    <td>R$ 11,05</td>                                 ← col 7: preço R$/kg vivo
+    <td></td>                                         ← col 8: obs
+  </tr>
 
-Estratégia:
-  - /resultados → descobre slugs das páginas de leilão (padrão /leiloes/<slug>)
-  - Cada página de leilão → extrai <tr> com data-raca / data-sexo / data-peso /
-    data-valor ou colunas da <table> padrão
-  - Persiste em CdaEvent + CdaLotResult com deduplicação via hash SHA-256
+O preço fechado está no badge. Não existe coluna "Valor/@" direta.
+Calculamos: arroba = peso_kg / 15; price_arroba = preco_fechado / arrobas
 """
 
 import hashlib
@@ -26,9 +31,9 @@ from bs4 import BeautifulSoup
 
 from app.models import SessionLocal, CdaEvent, CdaLotResult
 
-BASE_URL         = "https://www.correadacosta.com.br"
-RESULTS_URL      = f"{BASE_URL}/resultados"
-REQUEST_TIMEOUT  = 40
+BASE_URL        = "https://www.correadacosta.com.br"
+RESULTS_URL     = f"{BASE_URL}/resultados"
+REQUEST_TIMEOUT = 40
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -49,7 +54,7 @@ def _to_float(value):
     txt = _clean_text(value)
     if not txt:
         return None
-    txt = txt.replace("R$", "").replace("US$", "").replace("@", "")
+    txt = re.sub(r"[Rr]\$|US\$|@|kg", "", txt)
     txt = txt.replace(".", "").replace(",", ".")
     txt = re.sub(r"[^0-9.\-]", "", txt)
     if not txt:
@@ -61,10 +66,13 @@ def _to_float(value):
 
 
 def _to_date(value):
+    """Converte strings de data variadas para datetime.
+    Suporta: '11/junho/2026', '2026-06-11', 'quinta, 11/junho/2026'
+    """
     text = _clean_text(value)
     if not text:
         return None
-    # "quinta, 11/junho/2026" → "11/junho/2026" → tenta vários formatos
+    # Remove dia da semana
     text = re.sub(r"^[a-zçãõáéíóúâêîôûà-]+,\s*", "", text, flags=re.IGNORECASE)
     MONTHS_PT = {
         "janeiro": "01", "fevereiro": "02", "março": "03", "marco": "03",
@@ -82,25 +90,13 @@ def _to_date(value):
     return None
 
 
-def _normalize_header(value):
-    txt = _clean_text(value)
-    if not txt:
-        return None
-    txt = txt.lower()
-    for src, dst in [
-        ("ç","c"),("ã","a"),("á","a"),("â","a"),("é","e"),("ê","e"),
-        ("í","i"),("ó","o"),("ô","o"),("õ","o"),("ú","u"),
-    ]:
-        txt = txt.replace(src, dst)
-    return txt
-
 # ── Descoberta de URLs de leilão ──────────────────────────────────────────────
 
 def fetch_cda_auction_urls(max_pages: int = 10) -> list:
     """
-    Varre /resultados?page=N e coleta todas as URLs de leilão individuais.
-    Padrão: https://www.correadacosta.com.br/leiloes/<slug>
-    Exclui URLs de seções genéricas (/leiloes, /leiloes/medias, /resultados, etc.)
+    Varre /resultados?page=N e coleta URLs de leilão individuais.
+    Padrão válido: /leiloes/<slug> onde slug tem pelo menos um hífen (é uma página de evento).
+    Exclui: /leiloes, /leiloes/medias/*, /leiloes/agenda, etc.
     """
     headers = {"User-Agent": USER_AGENT}
     found   = set()
@@ -118,238 +114,212 @@ def fetch_cda_auction_urls(max_pages: int = 10) -> list:
                 raise RuntimeError(f"Falha ao acessar {page_url}: {resp.status_code}")
             break
 
-        soup = BeautifulSoup(resp.text, "lxml")
+        soup   = BeautifulSoup(resp.text, "lxml")
         before = len(found)
 
         for anchor in soup.select("a[href]"):
-            href = anchor.get("href", "")
+            href     = anchor.get("href", "")
             absolute = urljoin(BASE_URL, href)
             parsed   = urlparse(absolute)
 
-            # Deve ser do domínio CDA
             if "correadacosta.com.br" not in parsed.netloc:
                 continue
 
-            # Deve estar em /leiloes/<slug> com um slug real (não apenas /leiloes)
             path = parsed.path.rstrip("/")
-            if not re.match(r"^/leiloes/[^/]+$", path):
+
+            # Deve seguir /leiloes/<slug> com slug real (contém hífen)
+            if not re.match(r"^/leiloes/[a-z0-9]+-[a-z0-9].*$", path):
                 continue
 
-            # Excluir seções genéricas
-            if path in ("/leiloes/medias", "/leiloes/agenda"):
-                continue
-            if "/medias/" in path:
+            # Exclui sub-seções
+            if any(x in path for x in ["/medias", "/agenda", "/lote-"]):
                 continue
 
             found.add(absolute)
 
-        # Se não encontrou novos links, paginação terminou
         if page > 1 and len(found) == before:
+            print(f"[CDA] Paginação encerrada na página {page} (sem novos links).", flush=True)
             break
 
+    print(f"[CDA] {len(found)} URLs de leilão descobertas.", flush=True)
     return sorted(found)
 
-# ── Scraping de uma página de leilão ─────────────────────────────────────────
+
+# ── Metadados do evento ───────────────────────────────────────────────────────
 
 def _extract_event_meta(soup, source_url: str) -> dict:
-    """Extrai nome, data e local do evento a partir do <h1> e do texto da página."""
+    """Extrai nome, data e local do evento a partir do H1 e da URL."""
     meta = {"event_name": None, "event_date": None, "event_location": None}
 
     h1 = soup.find("h1")
     if h1:
         meta["event_name"] = _clean_text(h1.get_text(" ", strip=True))
 
-    # Data: tenta capturar da URL ou de algum texto "dd/mês/aaaa"
-    date_match = re.search(r"\d{4}-\d{2}-\d{2}", source_url)
+    # Data a partir do slug na URL: /leiloes/4809-...-2026-06-11
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", source_url)
     if date_match:
-        meta["event_date"] = datetime.strptime(date_match.group(), "%Y-%m-%d")
-    else:
-        # Busca no body algo como "quinta, 11/junho/2026"
+        try:
+            meta["event_date"] = datetime.strptime(date_match.group(1), "%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # Fallback: procura "quinta, 11/junho/2026" no texto da página
+    if not meta["event_date"]:
         body_text = soup.get_text(" ")
-        date_match2 = re.search(
+        dm = re.search(
             r"(?:segunda|terça|quarta|quinta|sexta|sábado|domingo),?\s*"
             r"(\d{1,2})[/\s]([a-záêçõ]+)[/\s](\d{4})",
             body_text, re.IGNORECASE
         )
-        if date_match2:
-            day, month_pt, year = date_match2.groups()
-            meta["event_date"] = _to_date(f"{day}/{month_pt}/{year}")
+        if dm:
+            meta["event_date"] = _to_date(f"{dm.group(1)}/{dm.group(2)}/{dm.group(3)}")
 
-    # Local: busca "Local:" no texto
-    local_match = re.search(r"[Ll]ocal:\s*(.+?)(?:[/\n]|Leiloeiro|$)", soup.get_text(" "))
-    if local_match:
-        meta["event_location"] = _clean_text(local_match.group(1))
+    # Local: "Local: Estância Orsi / Leiloeiro: ..."
+    local_m = re.search(r"[Ll]ocal:\s*(.+?)(?:[/\n]|Leiloeiro|$)", soup.get_text(" "))
+    if local_m:
+        meta["event_location"] = _clean_text(local_m.group(1))
 
     return meta
 
 
-def _parse_lot_rows_from_data_attrs(soup) -> list:
+# ── Extração de lotes ─────────────────────────────────────────────────────────
+
+def _extract_price_from_badge(td) -> float | None:
     """
-    Extrai lotes dos <tr> com data-attributes:
-    data-raca, data-sexo, data-peso, data-valor (ou data-preco)
+    Extrai o preço do badge de status:
+      <span class="badge bg-success">Vendido<br>R$ 3.050,00</span>
+    """
+    badge = td.find("span", class_="badge")
+    if not badge:
+        return None
+    # Remove o texto "Vendido" e captura apenas o valor monetário
+    badge_text = badge.get_text(" ", strip=True)
+    # Extrai padrão R$ 3.050,00 ou R$ 4000,00
+    m = re.search(r"R\$\s*([\d.,]+)", badge_text)
+    if m:
+        return _to_float("R$ " + m.group(1))
+    return None
+
+
+def _parse_lot_rows(soup) -> list:
+    """
+    Extrai lotes das <tr> com data-raca / data-sexo / data-peso.
+    Estrutura real (confirmada):
+      col 0: foto
+      col 1: badge Vendido/R$
+      col 2: número do lote
+      col 3: quantidade animais
+      col 4: sexo
+      col 5: raça
+      col 6: peso médio (kg)
+      col 7: R$/kg vivo
+      col 8: obs
     """
     rows = []
-    for tr in soup.find_all("tr"):
-        raca   = tr.get("data-raca") or tr.get("data-classificacao")
-        sexo   = tr.get("data-sexo")
-        peso   = tr.get("data-peso")
-        valor  = tr.get("data-valor") or tr.get("data-preco")
-        status = tr.get("data-status", "")
+    for tr in soup.find_all("tr", attrs={"data-raca": True}):
+        raca   = _clean_text(tr.get("data-raca"))
+        sexo   = _clean_text(tr.get("data-sexo"))
+        status = (tr.get("data-status") or "").lower()
+        peso_s = tr.get("data-peso")  # peso médio por animal em kg
 
-        # Ignora lotes não vendidos
-        if status and "vendid" not in status.lower() and "negociad" not in status.lower():
-            # Se o status não contém nada útil, tenta mesmo assim
-            if status.strip():
-                continue
-
-        if not any([raca, sexo, peso, valor]):
+        # Só processa lotes vendidos / negociados
+        if status and status not in ("vendido", "negociado", "vendidos", "negociados", ""):
             continue
 
-        peso_f  = _to_float(peso)
-        valor_f = _to_float(valor)
-
-        # Tenta extrair arroba e preço/@
-        arrobas = round(peso_f / 15, 2) if peso_f else None
-        arroba_price = round(valor_f / arrobas, 2) if valor_f and arrobas else None
-
-        # Número do lote (pode estar em <td> dentro do <tr>)
         tds = tr.find_all("td")
-        lot_ref = _clean_text(tds[0].get_text(" ", strip=True)) if tds else None
+
+        # Preço fechado do badge (col 1)
+        closed_price = None
+        if len(tds) > 1:
+            closed_price = _extract_price_from_badge(tds[1])
+
+        # Número do lote (col 2)
+        lot_ref = _clean_text(tds[2].get_text(" ", strip=True)) if len(tds) > 2 else None
+
+        # Quantidade de animais (col 3)
+        qtde = None
+        if len(tds) > 3:
+            qtde = _to_float(tds[3].get_text(" ", strip=True))
+
+        # Peso médio por animal (col 6 ou data-peso)
+        peso_kg = _to_float(peso_s)
+        if peso_kg is None and len(tds) > 6:
+            peso_kg = _to_float(tds[6].get_text(" ", strip=True))
+
+        # Total de arrobas do lote: qtde_animais * (peso_kg / 15)
+        arrobas = None
+        if peso_kg and qtde:
+            arrobas = round(qtde * (peso_kg / 15.0), 2)
+        elif peso_kg:
+            arrobas = round(peso_kg / 15.0, 2)
+
+        # Preço por arroba
+        arroba_price = None
+        if closed_price and arrobas and arrobas > 0:
+            arroba_price = round(closed_price / arrobas, 2)
+
+        # Preço R$/kg vivo (col 7) — armazenamos em era_raw como metadado
+        preco_kg_vivo = None
+        if len(tds) > 7:
+            preco_kg_vivo = _clean_text(tds[7].get_text(" ", strip=True))
+
+        if not any([raca, closed_price, arroba_price]):
+            continue
 
         rows.append({
-            "lot_ref":            lot_ref,
-            "race_raw":           _clean_text(raca),
-            "sex_raw":            _clean_text(sexo),
-            "era_raw":            None,
-            "weight_kg":          peso_f,
-            "arrobas":            arrobas,
-            "closed_price_brl":   valor_f,
+            "lot_ref":              lot_ref,
+            "race_raw":             raca,
+            "sex_raw":              sexo,
+            "era_raw":              preco_kg_vivo,   # reutilizamos era_raw para R$/kg vivo
+            "weight_kg":            peso_kg,
+            "arrobas":              arrobas,
+            "qtde_animals":         int(qtde) if qtde else None,
+            "closed_price_brl":     closed_price,
             "price_per_arroba_brl": arroba_price,
         })
+
     return rows
 
 
-def _parse_lot_rows_from_table(soup) -> list:
-    """
-    Fallback: extrai lotes de uma <table> convencional com cabeçalhos.
-    Tenta mapear colunas por nome normalizado.
-    """
-    rows = []
-    for table in soup.find_all("table"):
-        headers = []
-        # Cabeçalhos podem estar em <th> ou primeira <tr>
-        ths = table.find_all("th")
-        if ths:
-            headers = [_normalize_header(th.get_text(" ", strip=True)) for th in ths]
-        else:
-            first_tr = table.find("tr")
-            if first_tr:
-                headers = [_normalize_header(c.get_text(" ", strip=True))
-                           for c in first_tr.find_all(["th", "td"])]
-
-        def pick_idx(*candidates):
-            for c in candidates:
-                for i, h in enumerate(headers):
-                    if h and c in h:
-                        return i
-            return None
-
-        idx_lot    = pick_idx("lote")
-        idx_raca   = pick_idx("raca", "raça", "classificacao", "tipo")
-        idx_sexo   = pick_idx("sexo")
-        idx_era    = pick_idx("era", "idade", "categoria")
-        idx_peso   = pick_idx("peso", "kg")
-        idx_arr    = pick_idx("arroba", "@")
-        idx_valor  = pick_idx("valor fechado", "preco fechado", "preco", "valor")
-        idx_prarr  = pick_idx("preco/@", "preço/@", "valor/@", "media/@")
-
-        for tr in table.find_all("tr"):
-            tds = tr.find_all("td")
-            if not tds:
-                continue
-            cells = [_clean_text(td.get_text(" ", strip=True)) for td in tds]
-            if not any(cells):
-                continue
-
-            def get(idx):
-                return cells[idx] if idx is not None and idx < len(cells) else None
-
-            race        = get(idx_raca)
-            sex         = get(idx_sexo)
-            era         = get(idx_era)
-            lot_ref     = get(idx_lot)
-            peso_f      = _to_float(get(idx_peso))
-            arrobas     = _to_float(get(idx_arr))
-            closed_price = _to_float(get(idx_valor))
-            arroba_price = _to_float(get(idx_prarr))
-
-            # Fallback posicional se nenhum mapeamento funcionou
-            if not any([race, sex, closed_price, arroba_price]) and len(cells) >= 4:
-                lot_ref  = cells[0]
-                race     = cells[1] if len(cells) > 1 else None
-                sex      = cells[2] if len(cells) > 2 else None
-                era      = cells[3] if len(cells) > 3 else None
-                closed_price = _to_float(cells[-1])
-
-            if not any([race, sex, era, closed_price, arroba_price]):
-                continue
-
-            if arroba_price is None and closed_price and arrobas:
-                arroba_price = round(closed_price / arrobas, 4)
-
-            rows.append({
-                "lot_ref":              _clean_text(lot_ref),
-                "race_raw":             _clean_text(race),
-                "sex_raw":              _clean_text(sex),
-                "era_raw":              _clean_text(era),
-                "weight_kg":            peso_f,
-                "arrobas":              arrobas,
-                "closed_price_brl":     closed_price,
-                "price_per_arroba_brl": arroba_price,
-            })
-    return rows
-
+# ── Scraping de uma página de leilão ─────────────────────────────────────────
 
 def scrape_cda_url(url: str) -> list:
-    """Faz o request e extrai os lotes de uma página de leilão individual."""
+    """Faz o request e extrai todos os lotes de uma página de leilão."""
     headers = {"User-Agent": USER_AGENT}
     resp = requests.get(url, timeout=REQUEST_TIMEOUT, headers=headers)
     resp.raise_for_status()
 
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup       = BeautifulSoup(resp.text, "lxml")
     event_meta = _extract_event_meta(soup, url)
+    rows       = _parse_lot_rows(soup)
 
-    # Tenta primeiro os data-attributes (mais limpo), depois tabela
-    rows = _parse_lot_rows_from_data_attrs(soup)
-    if not rows:
-        rows = _parse_lot_rows_from_table(soup)
-
-    # Anexa metadados do evento a cada linha e calcula hash
+    # Calcula hash e anexa metadados do evento
     parsed = []
     for row in rows:
         row.update(event_meta)
-        row_text = "|".join(str(v) for v in row.values() if v is not None)
         stable = {
-            "source_url":          url,
-            "event_name":          row.get("event_name"),
-            "event_date":          row["event_date"].isoformat() if row.get("event_date") else None,
-            "lot_ref":             row.get("lot_ref"),
-            "race_raw":            row.get("race_raw"),
-            "sex_raw":             row.get("sex_raw"),
-            "era_raw":             row.get("era_raw"),
-            "weight_kg":           row.get("weight_kg"),
-            "arrobas":             row.get("arrobas"),
-            "closed_price_brl":    row.get("closed_price_brl"),
-            "price_per_arroba_brl":row.get("price_per_arroba_brl"),
-            "row_text":            row_text,
+            "source_url":           url,
+            "event_name":           row.get("event_name"),
+            "event_date":           row["event_date"].isoformat() if row.get("event_date") else None,
+            "lot_ref":              row.get("lot_ref"),
+            "race_raw":             row.get("race_raw"),
+            "sex_raw":              row.get("sex_raw"),
+            "weight_kg":            row.get("weight_kg"),
+            "closed_price_brl":     row.get("closed_price_brl"),
+            "price_per_arroba_brl": row.get("price_per_arroba_brl"),
         }
         row["hash_key"] = hashlib.sha256(
             json.dumps(stable, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        row["row_raw"] = row_text
+        row["row_raw"] = (
+            f"{row.get('lot_ref')} | {row.get('race_raw')} | {row.get('sex_raw')} | "
+            f"{row.get('weight_kg')}kg | R$ {row.get('closed_price_brl')} | "
+            f"R$ {row.get('price_per_arroba_brl')}/@"
+        )
         parsed.append(row)
 
     return parsed
+
 
 # ── Persistência ──────────────────────────────────────────────────────────────
 
@@ -370,7 +340,7 @@ def _get_or_create_event(session, source_url: str, payload: dict):
     now = datetime.utcnow()
     if existing:
         existing.event_location = event_location or existing.event_location
-        existing.updated_at = now
+        existing.updated_at     = now
         return existing
 
     event = CdaEvent(
@@ -389,7 +359,7 @@ def _get_or_create_event(session, source_url: str, payload: dict):
 
 def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
     session  = SessionLocal()
-    inserted = updated = skipped = 0
+    inserted = updated = 0
     try:
         now = datetime.utcnow()
         for payload in parsed_rows:
@@ -404,14 +374,14 @@ def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
                 continue
 
             event = _get_or_create_event(session, source_url, payload)
-            lot = CdaLotResult(
+            lot   = CdaLotResult(
                 event_id=event.id if event else None,
                 source_url=source_url,
                 source_page=RESULTS_URL,
                 lot_ref=payload.get("lot_ref"),
                 race_raw=payload.get("race_raw"),
                 sex_raw=payload.get("sex_raw"),
-                era_raw=payload.get("era_raw"),
+                era_raw=payload.get("era_raw"),          # R$/kg vivo
                 weight_kg=payload.get("weight_kg"),
                 arrobas=payload.get("arrobas"),
                 closed_price_brl=payload.get("closed_price_brl"),
@@ -431,23 +401,24 @@ def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
         raise
     finally:
         session.close()
-    return {"inserted": inserted, "updated": updated, "skipped": skipped}
+    return {"inserted": inserted, "updated": updated}
+
 
 # ── Ciclos de execução ────────────────────────────────────────────────────────
 
 def run_cda_backfill(max_pages: int = 10, max_urls: int = None) -> dict:
-    """Descobre leilões e processa cada um. Usado para backfill histórico."""
+    """Descobre leilões e processa cada um."""
     urls = fetch_cda_auction_urls(max_pages=max_pages)
     if max_urls:
         urls = urls[:max_urls]
 
     summary = {
-        "urls_discovered": len(urls),
-        "urls_processed": 0,
-        "rows_scraped": 0,
-        "inserted": 0,
-        "updated": 0,
-        "failed_urls": [],
+        "urls_discovered":  len(urls),
+        "urls_processed":   0,
+        "rows_scraped":     0,
+        "inserted":         0,
+        "updated":          0,
+        "failed_urls":      [],
     }
 
     for url in urls:
@@ -459,23 +430,23 @@ def run_cda_backfill(max_pages: int = 10, max_urls: int = None) -> dict:
             summary["inserted"]       += result["inserted"]
             summary["updated"]        += result["updated"]
             print(
-                f"[CDA] {url} → rows={len(parsed)} "
-                f"inserted={result['inserted']} updated={result['updated']}",
+                f"[CDA] {url.split('/')[-1]} → "
+                f"rows={len(parsed)} inserted={result['inserted']} updated={result['updated']}",
                 flush=True,
             )
         except Exception as exc:
             summary["failed_urls"].append({"url": url, "error": str(exc)})
             print(f"[CDA] ERROR {url}: {exc}", flush=True)
 
-    print(f"[CDA] Backfill summary: {summary}", flush=True)
+    print(f"[CDA] Backfill concluído: {summary}", flush=True)
     return summary
 
 
 def run_cda_daily_cycle() -> dict:
     """
     Ciclo diário:
-    - Se banco vazio → backfill histórico completo (10 páginas de listagem)
-    - Caso contrário → incremental: só as 2 últimas páginas (~40 leilões recentes)
+    - Banco vazio → backfill histórico completo (10 páginas ≈ 200+ leilões)
+    - Banco com dados → incremental: só as 2 últimas páginas (~40 leilões recentes)
     """
     session = SessionLocal()
     try:
@@ -484,14 +455,13 @@ def run_cda_daily_cycle() -> dict:
         session.close()
 
     if lot_count == 0:
-        print("[CDA] Banco vazio. Iniciando backfill histórico completo...", flush=True)
+        print("[CDA] Banco vazio. Iniciando backfill histórico...", flush=True)
         return run_cda_backfill(max_pages=10, max_urls=None)
 
-    # Incremental: últimas 2 páginas de resultados
-    print(f"[CDA] {lot_count} lotes já no banco. Rodando ciclo incremental...", flush=True)
+    print(f"[CDA] {lot_count} lotes no banco. Ciclo incremental...", flush=True)
     return run_cda_backfill(max_pages=2, max_urls=None)
 
 
-# ── Alias de compatibilidade (nome antigo) ────────────────────────────────────
+# ── Alias de compatibilidade ──────────────────────────────────────────────────
 def fetch_cda_history_urls(max_pages=100):
     return fetch_cda_auction_urls(max_pages=max_pages)
