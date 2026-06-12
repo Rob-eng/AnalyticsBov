@@ -432,8 +432,9 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /leilao — envia o gráfico de evolução de preços da Correa da Costa."""
+    """Comando /leilao — envia o gráfico + resumo textual dos últimos preços da CDA."""
     _log_tg_activity(update, "CDA_CHART")
+
     # Período via argumento: /leilao 180  (padrão 365 dias)
     days = 365
     if context.args:
@@ -443,14 +444,20 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     await update.message.reply_text(
-        f"📈 Gerando gráfico de leilão CDA (últimos {days} dias)... Aguarde."
+        f"📈 Buscando dados do Leilão CDA (últimos {days} dias)... Aguarde."
     )
     try:
         from app.charts import generate_cda_price_chart
+        from app.models import get_cda_latest_summary, format_cda_summary_text
+
         loop = asyncio.get_running_loop()
-        chart_path = await loop.run_in_executor(
-            None, lambda: generate_cda_price_chart(days=days)
+
+        # Gera gráfico e busca resumo em paralelo
+        chart_path, summary = await asyncio.gather(
+            loop.run_in_executor(None, lambda: generate_cda_price_chart(days=days)),
+            loop.run_in_executor(None, get_cda_latest_summary),
         )
+
         if not chart_path:
             await update.message.reply_text(
                 "⚠️ Sem dados suficientes da Correa da Costa para gerar o gráfico.\n"
@@ -458,19 +465,25 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        caption = (
-            f"📈 *Leilão Correa da Costa — Evolução de Preços*\n"
-            f"Período: últimos {days} dias\n\n"
-            f"• Linhas coloridas = preço médio R$/@ por raça\n"
-            f"• Linha azul tracejada = cotação Scot Brasil (US$/cabeça)\n"
-            f"• Barras = volume de lotes negociados por semana\n\n"
-            f"_Fonte: Correa da Costa Agropecuária + Scot Consultoria_"
+        # Caption do gráfico: legenda compacta
+        legend_caption = (
+            f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
+            f"• Linhas = preço médio R$/@ por raça\n"
+            f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+            f"• Barras = lotes negociados/semana"
         )
+
+        # Envia o gráfico
         await update.message.reply_photo(
             photo=open(chart_path, 'rb'),
-            caption=caption,
+            caption=legend_caption,
             parse_mode='Markdown'
         )
+
+        # Envia o resumo textual dos últimos valores como mensagem separada
+        summary_text = format_cda_summary_text(summary, for_whatsapp=False)
+        await update.message.reply_text(summary_text, parse_mode='Markdown')
+
     except Exception as e:
         import traceback
         print(f"[CDA Chart] Error: {traceback.format_exc()}")

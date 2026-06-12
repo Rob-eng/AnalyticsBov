@@ -386,13 +386,19 @@ async def _handle_mercado_futuro(phone, loop):
 
 
 async def _handle_cda_chart(phone, loop):
-    """Pipeline Leilão CDA → envia gráfico de evolução de preços via WhatsApp."""
+    """Pipeline Leilão CDA → envia gráfico + resumo textual de preços via WhatsApp."""
     from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text
     from app.charts import generate_cda_price_chart
+    from app.models import get_cda_latest_summary, format_cda_summary_text
 
-    send_whatsapp_text(phone, "📈 Gerando gráfico de evolução do Leilão Correa da Costa... Aguarde.")
+    send_whatsapp_text(phone, "📈 Buscando dados do Leilão Correa da Costa... Aguarde.")
 
-    chart_path = await loop.run_in_executor(None, lambda: generate_cda_price_chart(days=365))
+    # Gera gráfico e busca resumo em paralelo
+    import asyncio as _aio
+    chart_path, summary = await _aio.gather(
+        loop.run_in_executor(None, lambda: generate_cda_price_chart(days=365)),
+        loop.run_in_executor(None, get_cda_latest_summary),
+    )
 
     if not chart_path:
         send_whatsapp_text(
@@ -402,20 +408,22 @@ async def _handle_cda_chart(phone, loop):
         )
         return
 
-    caption = (
-        "📈 *Leilão Correa da Costa — Evolução de Preços*\n"
-        "Últimos 365 dias\n\n"
+    # 1. Envia o gráfico com caption-legenda compacta
+    legend_caption = (
+        "📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n\n"
         "• Linhas = preço médio R$/@ por raça\n"
-        "• Linha azul tracejada = Scot Brasil (US$/cabeça)\n"
-        "• Barras = volume de lotes/semana\n\n"
-        "Fonte: Correa da Costa Agropecuária + Scot Consultoria"
+        "• Tracejado azul = Scot Brasil (US$/cab.)\n"
+        "• Barras = lotes negociados/semana"
     )
-
     with open(chart_path, "rb") as f:
         img_bytes = f.read()
-
-    send_whatsapp_image(phone, img_bytes, caption)
+    send_whatsapp_image(phone, img_bytes, legend_caption)
     print("[WA TRIGGER] Gráfico CDA enviado com sucesso!", flush=True)
+
+    # 2. Envia o resumo textual dos últimos preços como mensagem separada
+    summary_text = format_cda_summary_text(summary, for_whatsapp=True)
+    send_whatsapp_text(phone, summary_text)
+    print("[WA TRIGGER] Resumo textual CDA enviado!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):
     """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""

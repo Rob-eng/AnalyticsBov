@@ -339,3 +339,177 @@ def get_cda_comparisons(start_date=None, end_date=None, limit=500):
         ]
     finally:
         session.close()
+
+
+def get_cda_latest_summary(top_n_races: int = 8) -> dict:
+    """
+    Retorna um dicionário com:
+      - 'text': texto formatado com os últimos preços por raça
+      - 'event_date': data do último leilão encontrado
+      - 'rows': lista bruta de dicts com os dados
+
+    Busca o leilão mais recente na tabela cda_events e agrega
+    os preços médios por raça/sexo/era dos lotes desse evento.
+    Se não houver dados de evento, usa a última semana de cda_market_comparisons.
+    """
+    session = SessionLocal()
+    try:
+        # ── Estratégia 1: usar o último evento real de cda_events ──────────
+        last_event = (
+            session.query(CdaEvent)
+            .filter(CdaEvent.event_date.isnot(None))
+            .order_by(CdaEvent.event_date.desc())
+            .first()
+        )
+
+        if last_event and last_event.event_date:
+            event_date = last_event.event_date
+            # Pega todos os lotes deste evento
+            lots = (
+                session.query(CdaLotResult)
+                .filter(CdaLotResult.event_id == last_event.id)
+                .all()
+            )
+
+            if lots:
+                # Agrupa por raça e calcula médias
+                from collections import defaultdict
+                race_data = defaultdict(lambda: {'prices': [], 'lots': 0})
+                for lot in lots:
+                    key = (lot.race_raw or 'Não informado').strip()
+                    if lot.price_per_arroba_brl:
+                        race_data[key]['prices'].append(lot.price_per_arroba_brl)
+                    race_data[key]['lots'] += 1
+
+                rows = []
+                for race, data in race_data.items():
+                    if data['prices']:
+                        avg_price = sum(data['prices']) / len(data['prices'])
+                        rows.append({
+                            'race': race,
+                            'avg_price_arroba': avg_price,
+                            'lots_count': data['lots'],
+                        })
+
+                rows.sort(key=lambda x: x['avg_price_arroba'], reverse=True)
+                rows = rows[:top_n_races]
+
+                return {
+                    'event_name': last_event.event_name or 'Leilão CDA',
+                    'event_date': event_date,
+                    'event_location': last_event.event_location or '',
+                    'rows': rows,
+                    'source': 'event',
+                }
+
+        # ── Estratégia 2: fallback para cda_market_comparisons ────────────
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=90)
+        comparisons = (
+            session.query(CdaMarketComparison)
+            .filter(CdaMarketComparison.reference_date >= cutoff)
+            .order_by(CdaMarketComparison.reference_date.desc())
+            .limit(100)
+            .all()
+        )
+
+        if not comparisons:
+            return {'event_name': None, 'event_date': None, 'rows': [], 'source': 'empty'}
+
+        # Data mais recente nos comparativos
+        latest_date = comparisons[0].reference_date
+
+        # Filtrar apenas registros do mesmo dia mais recente
+        same_day = [c for c in comparisons
+                    if c.reference_date and
+                    abs((c.reference_date - latest_date).days) <= 3]
+
+        rows = []
+        for c in same_day:
+            if c.avg_cda_price_per_arroba_brl:
+                rows.append({
+                    'race': c.race_norm or 'Outros',
+                    'avg_price_arroba': c.avg_cda_price_per_arroba_brl,
+                    'lots_count': c.lots_count or 0,
+                    'scot_price_usd': c.scot_price_usd,
+                    'ratio': c.cda_to_scot_ratio,
+                })
+
+        rows.sort(key=lambda x: x['avg_price_arroba'], reverse=True)
+        rows = rows[:top_n_races]
+
+        return {
+            'event_name': 'Leilão CDA',
+            'event_date': latest_date,
+            'event_location': '',
+            'rows': rows,
+            'source': 'comparison',
+        }
+
+    finally:
+        session.close()
+
+
+def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
+    """
+    Formata o dicionário retornado por get_cda_latest_summary() como texto rico.
+    for_whatsapp=True → usa *negrito* do WA em vez de Markdown do Telegram.
+    """
+    if not summary or not summary.get('rows'):
+        return (
+            "⚠️ Ainda não há dados do Leilão Correa da Costa disponíveis.\n"
+            "Os dados são coletados automaticamente às 05h30 todos os dias."
+        )
+
+    bold = lambda s: f"*{s}*" if for_whatsapp else f"*{s}*"
+
+    event_name = summary.get('event_name') or 'Leilão CDA'
+    event_date = summary.get('event_date')
+    location   = summary.get('event_location') or ''
+
+    date_str = event_date.strftime('%d/%m/%Y') if event_date else 'data não informada'
+    loc_str  = f" — {location}" if location else ''
+
+    header = (
+        f"🐂 {bold(event_name)}{loc_str}\n"
+        f"📅 Data: {date_str}\n"
+        f"{'─' * 28}\n"
+    )
+
+    # Ícones para ranking
+    medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
+
+    lines = []
+    for i, row in enumerate(summary['rows']):
+        medal  = medals[i] if i < len(medals) else '▪️'
+        race   = (row.get('race') or 'Outros').title()
+        price  = row.get('avg_price_arroba', 0)
+        lots   = row.get('lots_count', 0)
+        ratio  = row.get('ratio')
+        scot   = row.get('scot_price_usd')
+
+        line = f"{medal} {bold(race)}: R$ {price:,.2f}/@"
+        if lots:
+            line += f"  ({lots} lotes)"
+        if ratio:
+            pct = ratio * 100
+            emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
+            line += f"\n   {emoji} {pct:.1f}% do benchmark Scot"
+            if scot:
+                line += f" (US$ {scot:.2f}/cab.)"
+        lines.append(line)
+
+    footer = (
+        f"\n{'─' * 28}\n"
+        f"_Fonte: Correa da Costa Agropecuária_\n"
+        f"_Gráfico: Agro Analytics Bot_"
+    )
+    if for_whatsapp:
+        footer = (
+            f"\n{'─' * 28}\n"
+            f"Fonte: Correa da Costa Agropecuária\n"
+            f"Agro Analytics Bot"
+        )
+
+    return header + '\n'.join(lines) + footer
+
