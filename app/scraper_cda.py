@@ -284,14 +284,27 @@ def _parse_lot_rows(soup) -> list:
 # ── Scraping de uma página de leilão ─────────────────────────────────────────
 
 def scrape_cda_url(url: str) -> list:
-    """Faz o request e extrai todos os lotes de uma página de leilão."""
+    """
+    Faz o request e extrai todos os lotes/médias de uma página de leilão.
+
+    Estratégia dual:
+    1. Tenta extrair lotes individuais via data-raca (leilão mais recente)
+    2. Se não encontrar, tenta a tabela de médias (Classificação|Idade|Peso|Valor)
+       presente nos leilões de segunda/terça já encerrados.
+    """
     headers = {"User-Agent": USER_AGENT}
     resp = requests.get(url, timeout=REQUEST_TIMEOUT, headers=headers)
     resp.raise_for_status()
 
     soup       = BeautifulSoup(resp.text, "lxml")
     event_meta = _extract_event_meta(soup, url)
-    rows       = _parse_lot_rows(soup)
+
+    # Tenta lotes individuais primeiro
+    rows = _parse_lot_rows(soup)
+
+    # Fallback: tabela de médias dos leilões encerrados
+    if not rows:
+        rows = _parse_medias_table(soup)
 
     # Calcula hash e anexa metadados do evento
     parsed = []
@@ -304,6 +317,7 @@ def scrape_cda_url(url: str) -> list:
             "lot_ref":              row.get("lot_ref"),
             "race_raw":             row.get("race_raw"),
             "sex_raw":              row.get("sex_raw"),
+            "era_raw":              row.get("era_raw"),
             "weight_kg":            row.get("weight_kg"),
             "closed_price_brl":     row.get("closed_price_brl"),
             "price_per_arroba_brl": row.get("price_per_arroba_brl"),
@@ -312,13 +326,16 @@ def scrape_cda_url(url: str) -> list:
             json.dumps(stable, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         row["row_raw"] = (
-            f"{row.get('lot_ref')} | {row.get('race_raw')} | {row.get('sex_raw')} | "
+            f"{row.get('lot_ref') or 'media'} | {row.get('race_raw')} | "
+            f"{row.get('sex_raw') or ''} | {row.get('era_raw') or ''} | "
             f"{row.get('weight_kg')}kg | R$ {row.get('closed_price_brl')} | "
             f"R$ {row.get('price_per_arroba_brl')}/@"
         )
         parsed.append(row)
 
     return parsed
+
+
 
 
 # ── Persistência ──────────────────────────────────────────────────────────────
@@ -405,6 +422,93 @@ def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
 
 
 # ── Ciclos de execução ────────────────────────────────────────────────────────
+
+def _parse_medias_table(soup) -> list:
+    """
+    Extrai médias da tabela de resumo presente em leilões já encerrados.
+
+    Estrutura confirmada (leilões de segunda/terça):
+      th: Classificação | Idade | Peso | Valor | R$/Kg
+      td: ANELHORADO    | 08 A 10 MESES | 199 kg | R$ 2.950,00 | 14,82
+
+    Calcula price_per_arroba_brl = valor / (peso_kg / 15)
+    """
+    rows = []
+
+    for table in soup.find_all("table"):
+        headers_raw = [
+            _clean_text(th.get_text(" ", strip=True))
+            for th in table.find_all("th")
+        ]
+        if not headers_raw:
+            first_tr = table.find("tr")
+            if first_tr:
+                headers_raw = [
+                    _clean_text(c.get_text(" ", strip=True))
+                    for c in first_tr.find_all(["th", "td"])
+                ]
+
+        # Normaliza para detectar a tabela de médias
+        headers_norm = [h.lower() if h else "" for h in headers_raw]
+        has_class   = any("classif" in h for h in headers_norm)
+        has_valor   = any("valor" in h for h in headers_norm)
+        has_peso    = any("peso" in h for h in headers_norm)
+
+        if not (has_class and has_valor and has_peso):
+            continue
+
+        # Mapa de índices por coluna
+        def col(keyword):
+            for i, h in enumerate(headers_norm):
+                if keyword in h:
+                    return i
+            return None
+
+        idx_race  = col("classif") or col("raca")
+        idx_age   = col("idade") or col("era") or col("categ")
+        idx_peso  = col("peso")
+        idx_valor = col("valor")
+        idx_prkg  = col("r$/kg") or col("kg")
+
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+            cells = [_clean_text(td.get_text(" ", strip=True)) for td in tds]
+            if not any(cells):
+                continue
+
+            def get(idx):
+                return cells[idx] if idx is not None and idx < len(cells) else None
+
+            race    = get(idx_race)
+            age     = get(idx_age)
+            peso_s  = get(idx_peso)
+            valor_s = get(idx_valor)
+
+            peso_f  = _to_float(peso_s)
+            valor_f = _to_float(valor_s)
+
+            if not race or not valor_f or not peso_f:
+                continue
+
+            arrobas      = round(peso_f / 15.0, 2) if peso_f else None
+            arroba_price = round(valor_f / arrobas, 2) if valor_f and arrobas else None
+
+            rows.append({
+                "lot_ref":              None,
+                "race_raw":             race,
+                "sex_raw":              None,
+                "era_raw":              age,              # ex: "08 A 10 MESES"
+                "weight_kg":            peso_f,
+                "arrobas":              arrobas,
+                "qtde_animals":         None,
+                "closed_price_brl":     valor_f,         # valor médio do lote
+                "price_per_arroba_brl": arroba_price,
+            })
+
+    return rows
+
 
 def run_cda_backfill(max_pages: int = 10, max_urls: int = None) -> dict:
     """Descobre leilões e processa cada um."""
