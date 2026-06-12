@@ -27,6 +27,18 @@ def get_tools_definition():
             }
         },
         {
+            "type": "function",
+            "function": {
+                "name": "consultar_leilao_cda",
+                "description": "Mostra o gráfico de evolução de preços do Leilão Correa da Costa (CDA) com os últimos preços médios por raça (R$/@). Use quando o usuário mencionar 'leilão', 'leilão CDA', 'Correa da Costa', 'preço arroba leilão', 'resultado leilão' ou pedir gráfico de preços de leilão.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
+        {
              "type": "function",
              "function": {
                  "name": "obter_cotacao_fisica_atual",
@@ -204,6 +216,9 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
     try:
         if name == "consultar_mercado_futuro":
             return "TRIGGER_FLOW: MERCADO_FUTURO"
+
+        elif name == "consultar_leilao_cda":
+            return "TRIGGER_FLOW: LEILAO"
             
         elif name == "obter_cotacao_fisica_atual":
             return "TRIGGER_FLOW: COTACAO"
@@ -361,7 +376,8 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "   - Plano Diamond (Enterprise): Para grandes empresas/API.\n"
             "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
             "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
-            "8. NUNCA invente números."
+            "8. NUNCA invente números.\n"
+            "9. Se o Patrão mencionar 'leilão', 'CDA', 'Correa da Costa', 'preço arroba leilão' ou pedir gráfico de leilão, use `consultar_leilao_cda` IMEDIATAMENTE."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
