@@ -28,7 +28,7 @@ def check_db_counts(api_key: str = Depends(get_api_key)):
     """
     Checks the number of rows in CARProperty and Users.
     """
-    from app.models import CarSessionLocal, CARProperty, SessionLocal, User, ActivityLog
+    from app.models import CarSessionLocal, CARProperty, SessionLocal, User, ActivityLog, CdaEvent, CdaLotResult
     from sqlalchemy import func
     
     res = {}
@@ -53,12 +53,47 @@ def check_db_counts(api_key: str = Depends(get_api_key)):
             "telegram": db.query(User).filter(User.platform == 'telegram').count()
         }
         res["recent_logs"] = db.query(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(10).all()
+        # CDA stats
+        res["cda_events"]     = db.query(CdaEvent).count()
+        res["cda_lot_results"] = db.query(CdaLotResult).count()
     except Exception as e:
         res["user_error"] = str(e)
     finally:
         db.close()
 
     return res
+
+
+@router.post("/ingest/cda")
+async def trigger_cda_backfill(
+    background_tasks: BackgroundTasks,
+    max_pages: int = Query(10, description="Número máximo de páginas de resultados a varrer"),
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Dispara imediatamente o backfill do Correa da Costa em background.
+    Útil para forçar a primeira carga sem esperar o scheduler das 05:30.
+    """
+    from app.scraper_cda import run_cda_backfill
+    from app.cda_analytics import build_cda_scot_comparisons
+
+    def _run():
+        try:
+            print(f"[Admin] CDA backfill iniciado (max_pages={max_pages})...", flush=True)
+            summary = run_cda_backfill(max_pages=max_pages, max_urls=None)
+            print(f"[Admin] CDA backfill concluído: {summary}", flush=True)
+            cmp_summary = build_cda_scot_comparisons()
+            print(f"[Admin] CDA comparisons: {cmp_summary}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[Admin] ERRO no CDA backfill: {traceback.format_exc()}", flush=True)
+
+    background_tasks.add_task(_run)
+    return {
+        "status": "started",
+        "message": f"CDA backfill iniciado em background com max_pages={max_pages}. Acompanhe os logs do Railway.",
+    }
+
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, api_key: str = Query(None)):
