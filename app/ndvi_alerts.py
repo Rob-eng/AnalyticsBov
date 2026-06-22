@@ -13,6 +13,8 @@ import asyncio
 import logging
 from datetime import datetime
 
+from sqlalchemy import text
+
 from app.models import SessionLocal, FavoriteLocation, User, log_activity
 from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_environmental_image
 from app.gee_connector import get_ndvi_image
@@ -97,7 +99,31 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
         print(f"[NDVI ALERT] '{loc.name}': no new image (latest={image_date}, stored={loc.last_ndvi_date}).", flush=True)
         return
 
-    print(f"[NDVI ALERT] NEW image for '{loc.name}': {image_date} (was: {loc.last_ndvi_date})", flush=True)
+    # 3b. CLAIM the new image atomically (UPDATE ... WHERE last_ndvi_date < new_date).
+    # This guards against duplicate sends if more than one process/instance ends up
+    # running the scheduler at the same time (e.g. API + Bot process both polling,
+    # or multiple Railway replicas) — only the process whose UPDATE actually changes
+    # a row "wins" the right to generate and send this image. Anyone else bails out.
+    previous_date = loc.last_ndvi_date
+    claim = session.execute(
+        text(
+            "UPDATE favorite_locations "
+            "SET last_ndvi_date = :new_date "
+            "WHERE id = :id AND (last_ndvi_date IS NULL OR last_ndvi_date < :new_date)"
+        ),
+        {"new_date": image_date, "id": loc.id},
+    )
+    session.commit()
+    if claim.rowcount == 0:
+        print(
+            f"[NDVI ALERT] '{loc.name}': image {image_date} já foi reivindicada por "
+            "outro processo/instância. Pulando para evitar envio duplicado.",
+            flush=True,
+        )
+        return
+    loc.last_ndvi_date = image_date
+
+    print(f"[NDVI ALERT] NEW image for '{loc.name}': {image_date} (was: {previous_date})", flush=True)
 
     # 4. Full analysis + render
     analysis = await loop.run_in_executor(None, get_ndvi_analysis, geometry)
@@ -272,13 +298,23 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
             trigger_type="AUTO_ALERT",
         )
 
-    # 7. Persist new date
+    # 7. Já reivindicamos a data em (3b). Se o envio falhou, devolvemos a data
+    # anterior para que a próxima execução do scheduler tente reenviar.
     if not sent_success:
         print(
-            f"[NDVI ALERT] Not updating last_ndvi_date for '{loc.name}' because delivery failed.",
+            f"[NDVI ALERT] Envio falhou para '{loc.name}'. Revertendo claim para "
+            f"permitir nova tentativa (volta para {previous_date or 'nunca'}).",
             flush=True,
         )
+        session.execute(
+            text(
+                "UPDATE favorite_locations "
+                "SET last_ndvi_date = :previous_date "
+                "WHERE id = :id AND last_ndvi_date = :new_date"
+            ),
+            {"previous_date": previous_date, "new_date": image_date, "id": loc.id},
+        )
+        session.commit()
         return
 
-    loc.last_ndvi_date = image_date
-    session.commit()
+    # Data já persistida atomicamente em (3b); nada mais a fazer aqui.

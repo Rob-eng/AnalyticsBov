@@ -56,11 +56,15 @@ def run_bot_process():
 
         application = create_bot_application()
 
-        # ── SCHEDULER: Ativar tarefas agendadas (cotação semanal + NDVI diário) ──
-        from app.scheduler import setup_scheduler
-        scheduler = setup_scheduler(application)
-        scheduler.start()
-        print("✅ Scheduler started!", flush=True)
+        # ── SCHEDULER: NÃO iniciar aqui! ──────────────────────────────────────
+        # api_main.py (rodando no processo da API, run_api_process) já chama
+        # setup_scheduler() incondicionalmente no evento "startup" do FastAPI.
+        # Se este processo (Bot Polling) também iniciasse seu próprio scheduler,
+        # teríamos DOIS AsyncIOScheduler independentes (um por processo) disparando
+        # os mesmos cron jobs (alerta NDVI 06:00, ingestão CDA 05:30) ao mesmo tempo
+        # — causa confirmada do bug de imagens NDVI duplicadas. O scheduler é
+        # responsabilidade exclusiva do processo da API.
+        print("ℹ️ Scheduler gerenciado pelo processo da API (não duplicar aqui).", flush=True)
 
         # Start Polling
         print("Starting Bot Polling...", flush=True)

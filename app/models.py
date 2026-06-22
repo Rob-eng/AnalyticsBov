@@ -215,8 +215,14 @@ def init_db():
     """Initialize database connections and perform essential migrations."""
     try:
         Base.metadata.create_all(engine)
+        print("✅ [DB] Base.metadata.create_all executado (tabelas verificadas/criadas).", flush=True)
     except Exception as e:
-        print(f"⚠️ Main DB Note: {e}")
+        import traceback
+        # IMPORTANTE: se create_all falhar (ex.: FK/coluna incompatível em qualquer
+        # tabela do Base, incluindo CdaEvent/CdaLotResult), as tabelas que ainda não
+        # existem podem nunca ser criadas — e o erro ficava mascarado como um simples
+        # aviso. Logamos o traceback completo para não perder esse sinal de novo.
+        print(f"⚠️ Main DB Note: {e}\n{traceback.format_exc()}", flush=True)
     
     try:
         with car_engine.connect() as conn:

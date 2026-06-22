@@ -32,7 +32,16 @@ def setup_scheduler(application):
 
     # ── Alerta NDVI diário (06:00 local) ─────────────────────────────────
     async def ndvi_alert_job():
-        await run_ndvi_alert_scan(application)
+        try:
+            await run_ndvi_alert_scan(application)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ NDVI alert scan FAILED: {traceback.format_exc()}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(f"❌ *Falha no scan de alertas NDVI*\n\nErro: `{e}`")
+            except Exception:
+                pass
 
     scheduler.add_job(
         ndvi_alert_job,
@@ -45,9 +54,34 @@ def setup_scheduler(application):
     async def cda_daily_job():
         print("[Scheduler] Running Correa da Costa daily ingestion...", flush=True)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, run_cda_daily_cycle)
+        try:
+            summary = await loop.run_in_executor(None, run_cda_daily_cycle)
+            print(f"[Scheduler] CDA ingestion done: {summary}", flush=True)
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[Scheduler] ❌ CDA ingestion FAILED: {tb}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(
+                    "❌ *Falha na ingestão diária CDA (Correa da Costa)*\n\n"
+                    f"Erro: `{e}`\n\nVeja os logs do Railway para o traceback completo."
+                )
+            except Exception:
+                pass
+            return  # não tenta o passo de comparação se a ingestão falhou
+
         print("[Scheduler] Building CDA vs Scot comparisons...", flush=True)
-        await loop.run_in_executor(None, build_cda_scot_comparisons)
+        try:
+            await loop.run_in_executor(None, build_cda_scot_comparisons)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ CDA comparisons FAILED: {traceback.format_exc()}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(f"⚠️ Ingestão CDA OK, mas falha ao montar comparações Scot: `{e}`")
+            except Exception:
+                pass
 
     scheduler.add_job(
         cda_daily_job,
