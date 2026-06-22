@@ -219,6 +219,21 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
                             ndvi_val=f"{ndvi_val:.2f}"
                         )
                         used_template = True
+                        
+                        if not success:
+                            # 4. Último recurso: Envia APENAS texto (sem imagem)
+                            # Útil quando o template ainda não foi aprovado na Meta
+                            print(f"[NDVI ALERT] ⚠️ Template também falhou. Último recurso: texto puro...", flush=True)
+                            fallback_text = (
+                                f"🛰️ Nova imagem satelital detectada!\n\n"
+                                f"📍 Propriedade: {loc.name}\n"
+                                f"📅 Data da imagem: {date_str}\n"
+                                f"{ndvi_icon} NDVI Médio: {ndvi_val:.2f}\n"
+                                f"☁️ Nuvens no polígono: {cloud_pct:.1f}%\n\n"
+                                f"⚠️ Não foi possível enviar a imagem (template pendente de aprovação Meta). "
+                                f"Envie qualquer mensagem para o bot e tente /ndvi para visualizar."
+                            )
+                            success = send_whatsapp_text(str(chat_id), fallback_text)
                 else:
                     print(f"[NDVI ALERT] ❌ Upload de imagem falhou. Tentando enviar apenas texto...", flush=True)
                     success = send_whatsapp_text(str(chat_id), wa_caption)
@@ -238,14 +253,14 @@ async def _check_and_alert(application, session, loc: FavoriteLocation):
                     trigger_type="AUTO_ALERT"
                 )
             else:
-                print(f"[NDVI ALERT] ❌ Falha no envio para WhatsApp {chat_id} (ambos canais falharam).", flush=True)
+                print(f"[NDVI ALERT] ❌ Falha no envio para WhatsApp {chat_id} (TODOS os canais falharam).", flush=True)
                 log_activity(
                     chat_id=chat_id,
                     action="NDVI_ALERT_SEND",
                     platform="whatsapp",
                     details=f"Propriedade: {loc.name}",
                     status="ERROR",
-                    error_message="Envio livre e template falharam (restrição Meta ou template ausente)",
+                    error_message="Envio livre, template e texto puro falharam — verificar token Meta e templates",
                     trigger_type="AUTO_ALERT"
                 )
                 

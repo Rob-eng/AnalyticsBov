@@ -29,6 +29,21 @@ def _sanitize_string(s: str) -> str:
     return re.sub(r'[A-Za-z0-9+/]{30,}', '[SECRET_TOKEN_REMOVED]', s)
 
 
+_META_ERROR_MAP = {
+    131047: "Janela de 24h expirada (user não interagiu recentemente)",
+    131051: "Tipo de mensagem não suportado",
+    132001: "Template não encontrado (não existe ou nome incorreto)",
+    132005: "Template com parâmetros inválidos (quantidade ou formato errado)",
+    132007: "Template indisponível (rejeitado, pausado ou desabilitado)",
+    132012: "Template com muitos parâmetros",
+    132015: "Template aguardando aprovação",
+    133004: "Servidor da Meta indisponível temporariamente",
+    130429: "Rate limit atingido (muitas mensagens)",
+    131026: "Mensagem não entregue (usuário bloqueou ou número inválido)",
+    131053: "Upload de mídia falhou na Meta",
+}
+
+
 def _send_message(payload):
     """Envia uma mensagem via Graph API."""
     headers = {**HEADERS, "Content-Type": "application/json"}
@@ -37,8 +52,26 @@ def _send_message(payload):
         if response.status_code in (200, 201):
             return True
         else:
+            # Extrair código de erro da Meta para diagnóstico detalhado
+            meta_code = None
+            meta_title = ""
+            try:
+                err_data = response.json().get("error", {})
+                meta_code = err_data.get("code")
+                meta_title = err_data.get("error_data", {}).get("details", "")
+                if not meta_title:
+                    meta_title = err_data.get("message", "")
+            except Exception:
+                pass
+
+            reason = _META_ERROR_MAP.get(meta_code, "Código desconhecido")
             sanitized_txt = _sanitize_string(response.text)
-            print(f"❌ WA send error ({response.status_code}): {sanitized_txt[:300]}", flush=True)
+            print(
+                f"❌ WA send error ({response.status_code}) | "
+                f"Meta code: {meta_code} → {reason} | "
+                f"Detail: {sanitized_txt[:300]}",
+                flush=True
+            )
             return False
     except Exception as e:
         sanitized_err = _sanitize_string(str(e))

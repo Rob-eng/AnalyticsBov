@@ -288,23 +288,30 @@ async def broadcast_report(application, data):
             delivery_error = None
             try:
                 if user_platform == 'whatsapp':
-                    from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_market_template, _upload_media
+                    from app.whatsapp.sender import (
+                        send_whatsapp_text,
+                        send_whatsapp_image_by_id,
+                        send_whatsapp_market_template,
+                        _upload_media,
+                    )
                     from io import BytesIO
                     
-                    # Tenta envio orgânico (funciona se tiver interagido nas últimas 24h)
-                    with open(chart_path, 'rb') as f:
-                        success = send_whatsapp_image(user.chat_id, BytesIO(f.read()), caption)
+                    success = False
+                    used_template = False
                     
-                    print(f"[Broadcast WA] Organic send to {user.chat_id}: {'OK' if success else 'FAILED'}", flush=True)
+                    # 1. Upload ÚNICO da imagem
+                    with open(chart_path, 'rb') as f:
+                        media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
+                    
+                    if media_id:
+                        # 2. Tenta envio livre (funciona se interagiu nas últimas 24h)
+                        print(f"[Broadcast WA] Tentando envio livre para {user.chat_id}...", flush=True)
+                        success = send_whatsapp_image_by_id(user.chat_id, media_id, caption)
+                        print(f"[Broadcast WA] Envio livre para {user.chat_id}: {'OK' if success else 'FALHOU'}", flush=True)
                         
-                    # Fallback para o Template pré-aprovado da Meta se falhar
-                    if not success:
-                        print(f"[WA] Broadcast orgânico falhou para {user.chat_id}. Tentando Template Fallback.", flush=True)
-                        with open(chart_path, 'rb') as f:
-                            media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
-                        print(f"[Broadcast WA] Upload media for template: {'OK media_id=' + str(media_id) if media_id else 'FAILED'}", flush=True)
-                        if media_id:
-                            # Prepara variáveis sem quebras de linha para o template Meta (Opção 1)
+                        # 3. Fallback: Template pré-aprovado (reutiliza o MESMO media_id)
+                        if not success:
+                            print(f"[Broadcast WA] ⚠️ Janela 24h expirada. Tentando Template com media_id existente...", flush=True)
                             date_str = data[0]['date'].strftime('%d/%m/%Y') if data else ""
                             sorted_data = sorted(data, key=lambda x: x['price'], reverse=True)
                             country_map = {item['country']: f"{item['price']:.2f}" for item in sorted_data}
@@ -321,13 +328,17 @@ async def broadcast_report(application, data):
                             ]
                             print(f"[Broadcast WA] Template vars: {vars_list}", flush=True)
                             success = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
-                            print(f"[Broadcast WA] Template send to {user.chat_id}: {'OK' if success else 'FAILED'}", flush=True)
-                        else:
-                            delivery_error = "WA media upload failed for market template"
-
+                            used_template = True
+                            print(f"[Broadcast WA] Template para {user.chat_id}: {'OK' if success else 'FALHOU'}", flush=True)
+                    else:
+                        # Upload falhou — tenta enviar só texto como último recurso
+                        print(f"[Broadcast WA] ❌ Upload de imagem falhou. Enviando só texto...", flush=True)
+                        success = send_whatsapp_text(user.chat_id, caption)
+                    
                     delivery_success = bool(success)
-                    if not delivery_success and not delivery_error:
-                        delivery_error = "WA organic and template delivery failed"
+                    channel_str = "Template" if used_template else "Livre"
+                    if not delivery_success:
+                        delivery_error = f"WA envio falhou (canal: {channel_str})"
 
                     log_activity(
                         user.chat_id,
