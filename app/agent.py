@@ -192,8 +192,8 @@ def get_tools_definition():
             {
                 "type": "function",
                 "function": {
-                    "name": "verificar_planos_assinatura",
-                    "description": "Explica os planos de assinatura (Bronze, Ouro, Diamond) e fornece informações sobre preços e benefícios. Use quando o usuário perguntar por 'preço', 'planos', 'assinar', 'pagar' ou 'quais as vantagens'.",
+                    "name": "consultar_meu_plano",
+                    "description": "Consulta o plano atual do usuário e mostra informações sobre ele. Use quando o usuário perguntar 'qual meu plano', 'meu plano', 'planos', 'assinatura', 'preços', 'assinar', 'upgrade', 'quais as vantagens' ou 'quero mudar de plano'.",
                     "parameters": {
                         "type": "object",
                         "properties": {},
@@ -340,8 +340,27 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             db.close()
             return "Erro: mensagem de feedback está vazia."
 
-        elif name == "verificar_planos_assinatura":
-            return "TRIGGER_FLOW: PREMIUM"
+        elif name == "consultar_meu_plano":
+            # Busca o plano atual do usuário no banco
+            from app.models import SessionLocal, User
+            db = SessionLocal()
+            try:
+                user = db.query(User).filter_by(chat_id=str(user_id)).first()
+                plan_name = (user.plan_type if user and user.plan_type else 'FREE')
+                plan_display = {
+                    'FREE': '🥉 Bronze (Grátis)',
+                    'STARTER': '🥈 Starter',
+                    'PRO': '🥇 Ouro (PRO)',
+                    'ENTERPRISE': '💎 Diamond (Enterprise)',
+                }.get(plan_name, plan_name)
+                return (
+                    f"PLANO_ATUAL: {plan_display}\n"
+                    f"Informe o plano ao Patrão de forma amigável e pergunte "
+                    f"se ele deseja ver as opções de upgrade disponíveis. "
+                    f"Se ele disser SIM, responda EXATAMENTE: TRIGGER_FLOW: PREMIUM"
+                )
+            finally:
+                db.close()
 
         return "Ferramenta desconhecida. Informe ao usuário."
     except Exception as e:
@@ -369,11 +388,11 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "3. Use `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro` para cotações.\n"
             "4. Se o produtor pedir Previsão de Chuva, NDVI ou MDT (Terreno):\n"
             "   - Use as ferramentas correspondentes (`verificar_previsao_chuva` ou `analisar_saude_pasto_ndvi`).\n"
-            "5. Se o produtor perguntar sobre Preços, Planos ou Assinatura:\n"
-            "   - Use `verificar_planos_assinatura` IMEDIATAMENTE.\n"
-            "   - Plano Starter: Mensal ou Anual (Custo-benefício para pequenos produtores).\n"
-            "   - Plano Ouro (PRO): Ilimitado + Alertas de Satélite.\n"
-            "   - Plano Diamond (Enterprise): Para grandes empresas/API.\n"
+            "5. Se o produtor perguntar sobre Preços, Planos, Assinatura ou 'qual meu plano':\n"
+            "   - Use `consultar_meu_plano` IMEDIATAMENTE.\n"
+            "   - Informe o plano atual ao Patrão e pergunte se quer ver opções de upgrade.\n"
+            "   - Só mostre os planos detalhados se o Patrão pedir explicitamente.\n"
+            "   - Se ele pedir para ver, responda EXATAMENTE: TRIGGER_FLOW: PREMIUM\n"
             "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
             "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
             "8. NUNCA invente números.\n"
