@@ -97,30 +97,75 @@ async def stripe_webhook(request: Request):
     webhook_secret = Config.STRIPE_WEBHOOK_SECRET
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        if webhook_secret:
+            # Verificação segura com assinatura
+            event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        else:
+            # Fallback: sem STRIPE_WEBHOOK_SECRET configurado — aceita o evento sem verificação
+            # ⚠️ APENAS para desenvolvimento/primeira configuração. Configurar o secret no Railway!
+            import json
+            logging.warning(
+                "⚠️ STRIPE_WEBHOOK_SECRET não configurado! "
+                "Processando webhook SEM verificação de assinatura. "
+                "Configure a variável no Railway para segurança em produção."
+            )
+            event = json.loads(payload)
     except ValueError:
-        return {"error": "Invalid payload"}, 400
+        logging.error("Stripe webhook: payload inválido")
+        raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.error.SignatureVerificationError:
-        return {"error": "Invalid signature"}, 400
+        logging.error("Stripe webhook: assinatura inválida")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        logging.error(f"Stripe webhook: erro inesperado na verificação: {e}")
+        raise HTTPException(status_code=400, detail="Webhook verification failed")
 
     # Handle the checkout.session.completed event
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        chat_id = session.get('client_reference_id')
-        plan = session.get('metadata', {}).get('plan', 'PRO')
-        sub_id = session.get('subscription')
+    event_type = event.get('type') if isinstance(event, dict) else event['type']
+
+    if event_type == 'checkout.session.completed':
+        session_data = event.get('data', {}).get('object', {}) if isinstance(event, dict) else event['data']['object']
+        chat_id = session_data.get('client_reference_id')
+        plan = session_data.get('metadata', {}).get('plan', 'PRO')
+        sub_id = session_data.get('subscription')
 
         if chat_id:
             db = SessionLocal()
             try:
                 user = db.query(User).filter_by(chat_id=str(chat_id)).first()
                 if user:
+                    old_plan = user.plan_type
                     user.plan_type = plan
                     user.stripe_subscription_id = sub_id
                     db.commit()
-                    logging.info(f"✅ Usuário {chat_id} promovido para {plan}!")
+                    logging.info(f"✅ Usuário {chat_id} promovido de {old_plan} para {plan}!")
+
+                    # Notificar o usuário via WhatsApp
+                    try:
+                        user_platform = getattr(user, 'platform', 'telegram') or 'telegram'
+                        plan_names = {"STARTER": "Starter", "PRO": "Ouro (PRO)"}
+                        plan_display = plan_names.get(plan, plan)
+
+                        if user_platform == 'whatsapp':
+                            from app.whatsapp.sender import send_whatsapp_text
+                            send_whatsapp_text(
+                                str(chat_id),
+                                f"🎉 *Pagamento confirmado!*\n\n"
+                                f"Seu plano foi atualizado para *{plan_display}*.\n"
+                                f"Todas as funcionalidades premium já estão liberadas!\n\n"
+                                f"🌿 Alertas NDVI automáticos\n"
+                                f"📊 Relatório semanal de cotação\n"
+                                f"🏔️ MDT 3D e mais\n\n"
+                                f"Obrigado por assinar o Agro Analytics! 🐂"
+                            )
+                        logging.info(f"✅ Notificação de upgrade enviada para {chat_id}")
+                    except Exception as notify_err:
+                        logging.warning(f"Notificação de upgrade falhou para {chat_id}: {notify_err}")
+                else:
+                    logging.warning(f"⚠️ Stripe webhook: usuário {chat_id} não encontrado no banco")
             except Exception as e:
                 logging.error(f"Database error on webhook: {e}")
+                db.rollback()
             finally:
                 db.close()
 

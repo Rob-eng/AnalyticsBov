@@ -189,3 +189,43 @@ async def user_details(request: Request, chat_id: str, api_key: str = Query(None
         })
     finally:
         db.close()
+
+
+@router.post("/user/{chat_id}/plan")
+async def update_user_plan(
+    chat_id: str,
+    plan: str = Query(..., description="Novo plano: FREE, STARTER, PRO"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Atualiza manualmente o plano de um usuário.
+    Útil quando o webhook do Stripe falha mas o pagamento foi processado.
+    Exemplo: POST /admin/user/556784013193/plan?plan=PRO
+    """
+    valid_plans = ("FREE", "STARTER", "PRO", "ENTERPRISE")
+    plan = plan.upper()
+    if plan not in valid_plans:
+        return {"error": f"Plano inválido. Use: {valid_plans}"}
+
+    from app.models import SessionLocal, User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.chat_id == str(chat_id)).first()
+        if not user:
+            return {"error": f"Usuário {chat_id} não encontrado"}
+
+        old_plan = user.plan_type
+        user.plan_type = plan
+        db.commit()
+        return {
+            "status": "success",
+            "chat_id": chat_id,
+            "old_plan": old_plan,
+            "new_plan": plan,
+            "message": f"Plano atualizado de {old_plan} para {plan}",
+        }
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
