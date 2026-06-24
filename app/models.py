@@ -385,23 +385,59 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
             )
 
             if lots:
-                # Agrupa por raça e calcula médias
+                # Agrupa por raça e calcula médias, totais de cabeças e volume
                 from collections import defaultdict
-                race_data = defaultdict(lambda: {'prices': [], 'lots': 0})
+                import re as _re
+                race_data = defaultdict(lambda: {'prices': [], 'lots': 0, 'heads': 0, 'volume': 0.0})
+                total_heads = 0
+                total_volume = 0.0
                 for lot in lots:
                     key = (lot.race_raw or 'Não informado').strip()
                     if lot.price_per_arroba_brl:
                         race_data[key]['prices'].append(lot.price_per_arroba_brl)
                     race_data[key]['lots'] += 1
+                    if lot.qtde_animals:
+                        race_data[key]['heads'] += lot.qtde_animals
+                        total_heads += lot.qtde_animals
+                    if lot.closed_price_brl:
+                        race_data[key]['volume'] += lot.closed_price_brl
+                        total_volume += lot.closed_price_brl
+
+                # Busca dados Scot para a data do evento (±3 dias) para enriquecer rows
+                from datetime import timedelta as _td
+                comparisons = (
+                    session.query(CdaMarketComparison)
+                    .filter(
+                        CdaMarketComparison.reference_date >= event_date - _td(days=3),
+                        CdaMarketComparison.reference_date <= event_date + _td(days=3),
+                    )
+                    .all()
+                )
+                def _nl(v):
+                    if not v: return None
+                    t = _re.sub(r"\s+", " ", str(v)).strip().lower()
+                    for c, r in [("ç","c"),("ã","a"),("á","a"),("â","a"),("é","e"),
+                                 ("ê","e"),("í","i"),("ó","o"),("ô","o"),("õ","o"),("ú","u")]:
+                        t = t.replace(c, r)
+                    return t or None
+                scot_map = {}
+                for c in comparisons:
+                    rk = _nl(c.race_norm)
+                    if rk and c.scot_price_usd and rk not in scot_map:
+                        scot_map[rk] = {'scot_price_usd': c.scot_price_usd, 'ratio': c.cda_to_scot_ratio}
 
                 rows = []
                 for race, data in race_data.items():
                     if data['prices']:
                         avg_price = sum(data['prices']) / len(data['prices'])
+                        scot_info = scot_map.get(_nl(race), {})
                         rows.append({
                             'race': race,
                             'avg_price_arroba': avg_price,
                             'lots_count': data['lots'],
+                            'heads_count': data['heads'],
+                            'scot_price_usd': scot_info.get('scot_price_usd'),
+                            'ratio': scot_info.get('ratio'),
                         })
 
                 rows.sort(key=lambda x: x['avg_price_arroba'], reverse=True)
@@ -411,6 +447,10 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
                     'event_name': last_event.event_name or 'Leilão CDA',
                     'event_date': event_date,
                     'event_location': last_event.event_location or '',
+                    'event_url': last_event.source_url,
+                    'total_heads': total_heads if total_heads > 0 else None,
+                    'total_volume_brl': total_volume if total_volume > 0 else None,
+                    'has_recent_data': (datetime.utcnow() - event_date).days <= 3,
                     'rows': rows,
                     'source': 'event',
                 }
@@ -483,9 +523,18 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
     date_str = event_date.strftime('%d/%m/%Y') if event_date else 'data não informada'
     loc_str  = f" — {location}" if location else ''
 
+    total_heads  = summary.get('total_heads')
+    total_volume = summary.get('total_volume_brl')
+    volume_parts = []
+    if total_heads:
+        volume_parts.append(f"🐄 {int(total_heads):,} cabeças".replace(",", "."))
+    if total_volume:
+        volume_parts.append(f"💰 R$ {total_volume:,.0f}".replace(",", "."))
+    volume_line = ("\n" + " | ".join(volume_parts)) if volume_parts else ""
+
     header = (
         f"🐂 {bold(event_name)}{loc_str}\n"
-        f"📅 Data: {date_str}\n"
+        f"📅 Data: {date_str}{volume_line}\n"
         f"{'─' * 28}\n"
     )
 
@@ -512,6 +561,19 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
                 line += f" (US$ {scot:.2f}/cab.)"
         lines.append(line)
 
+    # Resumo CDA vs Mercado Spot se houver pelo menos uma linha com ratio
+    ratios = [r['ratio'] for r in summary['rows'] if r.get('ratio')]
+    spot_summary = ""
+    if ratios:
+        avg_ratio = sum(ratios) / len(ratios)
+        pct = avg_ratio * 100
+        emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
+        spot_summary = (
+            f"\n{'─' * 28}\n"
+            f"{emoji} {bold('Leilão vs Mercado Spot')}: {pct:.1f}% do benchmark Scot Brasil\n"
+            f"({'acima' if pct >= 100 else 'abaixo'} da referência de exportação)"
+        )
+
     footer = (
         f"\n{'─' * 28}\n"
         f"_Fonte: Correa da Costa Agropecuária_\n"
@@ -524,5 +586,5 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
             f"Agro Analytics Bot"
         )
 
-    return header + '\n'.join(lines) + footer
+    return header + '\n'.join(lines) + spot_summary + footer
 

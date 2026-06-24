@@ -408,12 +408,26 @@ async def _handle_cda_chart(phone, loop):
         )
         return
 
-    # 1. Envia o gráfico com caption-legenda compacta
+    # Aviso se dados estiverem desatualizados (> 3 dias sem novo leilão)
+    if summary.get('source') != 'empty' and not summary.get('has_recent_data') and summary.get('event_date'):
+        days_old = (datetime.utcnow() - summary['event_date']).days
+        send_whatsapp_text(
+            phone,
+            f"⚠️ _Dados do último leilão têm {days_old} dia(s). "
+            f"O scraping automático ocorre às 05h30. Mostrando os dados mais recentes disponíveis._"
+        )
+
+    # 1. Envia o gráfico com caption incluindo a data e URL do último evento
+    event_url   = summary.get('event_url', '')
+    event_date  = summary.get('event_date')
+    date_label  = event_date.strftime('%d/%m/%Y') if event_date else ''
+    url_line    = f"\n🔗 {event_url}" if event_url else ''
     legend_caption = (
-        "📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n\n"
-        "• Linhas = preço médio R$/@ por raça\n"
-        "• Tracejado azul = Scot Brasil (US$/cab.)\n"
-        "• Barras = lotes negociados/semana"
+        f"📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n"
+        f"Último leilão: {date_label}{url_line}\n\n"
+        f"• Linhas = preço médio R$/@ por raça\n"
+        f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+        f"• Barras = lotes negociados/semana"
     )
     with open(chart_path, "rb") as f:
         img_bytes = f.read()
