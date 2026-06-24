@@ -7,6 +7,192 @@ from app.auth import get_api_key
 
 router = APIRouter(prefix="/admin", tags=["Admin Ingestion"])
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Health & Monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/health/features")
+def get_feature_health(
+    hours: int = Query(24, description="Janela de tempo em horas para calcular erros"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Retorna o status operacional de cada funcionalidade do sistema
+    baseado nos registros da tabela ActivityLog.
+    """
+    from app.models import SessionLocal, ActivityLog
+    from sqlalchemy import func
+
+    # Mapa: nome_feature → lista de action values no ActivityLog
+    FEATURES = {
+        "NDVI":      ["NDVI", "NDVI_ALERT_SEND"],
+        "Clima":     ["CLIMA", "HISTORICO"],
+        "MDT":       ["MDT"],
+        "CDA":       ["CDA", "CDA_SEARCH", "LEILAO"],
+        "CAR":       ["CAR_SEARCH", "ZIP_UPLOAD"],
+        "WhatsApp":  [],   # filtrado por platform
+        "Telegram":  [],   # filtrado por platform
+    }
+
+    cutoff_24h = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_7d  = datetime.utcnow() - timedelta(days=7)
+
+    db = SessionLocal()
+    result = {}
+    try:
+        for feature, actions in FEATURES.items():
+            # Queries especiais para plataformas
+            if feature == "WhatsApp":
+                base_q = db.query(ActivityLog).filter(ActivityLog.platform == "whatsapp")
+            elif feature == "Telegram":
+                base_q = db.query(ActivityLog).filter(ActivityLog.platform == "telegram")
+            else:
+                if not actions:
+                    continue
+                base_q = db.query(ActivityLog).filter(ActivityLog.action.in_(actions))
+
+            # Último sucesso
+            last_ok = (
+                base_q.filter(ActivityLog.status == "SUCCESS")
+                .order_by(ActivityLog.created_at.desc())
+                .first()
+            )
+
+            # Erros recentes
+            errors_24h = base_q.filter(
+                ActivityLog.status == "ERROR",
+                ActivityLog.created_at >= cutoff_24h,
+            ).count()
+
+            errors_7d = base_q.filter(
+                ActivityLog.status == "ERROR",
+                ActivityLog.created_at >= cutoff_7d,
+            ).count()
+
+            # Total de ações nos últimos 7 dias (para taxa de sucesso)
+            total_7d = base_q.filter(ActivityLog.created_at >= cutoff_7d).count()
+
+            # Última mensagem de erro
+            last_err = (
+                base_q.filter(
+                    ActivityLog.status == "ERROR",
+                    ActivityLog.error_message.isnot(None),
+                )
+                .order_by(ActivityLog.created_at.desc())
+                .first()
+            )
+
+            # Status: ok / warn / error / unknown
+            if last_ok is None:
+                status = "unknown"
+            elif errors_24h == 0:
+                status = "ok"
+            elif errors_24h <= 2:
+                status = "warn"
+            else:
+                status = "error"
+
+            success_rate = None
+            if total_7d > 0:
+                success_rate = round((total_7d - errors_7d) / total_7d * 100, 1)
+
+            result[feature] = {
+                "status": status,
+                "last_success": last_ok.created_at.isoformat() if last_ok else None,
+                "errors_24h": errors_24h,
+                "errors_7d": errors_7d,
+                "total_7d": total_7d,
+                "success_rate_7d": success_rate,
+                "last_error_msg": (last_err.error_message[:200] if last_err and last_err.error_message else None),
+                "last_error_at": (last_err.created_at.isoformat() if last_err else None),
+            }
+
+    finally:
+        db.close()
+
+    # Status geral do sistema
+    statuses = [v["status"] for v in result.values()]
+    if "error" in statuses:
+        overall = "degraded"
+    elif "warn" in statuses:
+        overall = "warn"
+    elif all(s in ("ok", "unknown") for s in statuses):
+        overall = "ok"
+    else:
+        overall = "ok"
+
+    return {
+        "overall": overall,
+        "checked_at": datetime.utcnow().isoformat(),
+        "window_hours": hours,
+        "features": result,
+    }
+
+
+@router.get("/cda/status")
+def get_cda_status(api_key: str = Depends(get_api_key)):
+    """Retorna o estado atual da captura de dados do Leilão CDA."""
+    from app.models import SessionLocal, CdaEvent, CdaLotResult, CdaMarketComparison
+    from sqlalchemy import func
+
+    db = SessionLocal()
+    try:
+        total_events = db.query(CdaEvent).count()
+        total_lots   = db.query(CdaLotResult).count()
+        total_comps  = db.query(CdaMarketComparison).count()
+
+        # Último evento scraped
+        last_event = (
+            db.query(CdaEvent)
+            .filter(CdaEvent.event_date.isnot(None))
+            .order_by(CdaEvent.event_date.desc())
+            .first()
+        )
+
+        # Lots com qtde_animals preenchido (campo novo)
+        lots_with_qty = db.query(CdaLotResult).filter(
+            CdaLotResult.qtde_animals.isnot(None)
+        ).count()
+
+        # Lots por scrape_mode
+        mode_counts = (
+            db.query(CdaLotResult.scrape_mode, func.count(CdaLotResult.id))
+            .group_by(CdaLotResult.scrape_mode)
+            .all()
+        )
+
+        # Lots das últimas 24h
+        recent_cutoff = datetime.utcnow() - timedelta(hours=24)
+        recent_lots = db.query(CdaLotResult).filter(
+            CdaLotResult.collected_at >= recent_cutoff
+        ).count()
+
+        has_recent_data = last_event is not None and (
+            last_event.event_date >= datetime.utcnow() - timedelta(days=3)
+        ) if last_event else False
+
+        return {
+            "status": "ok" if has_recent_data else "stale",
+            "has_recent_data": has_recent_data,
+            "total_events": total_events,
+            "total_lots": total_lots,
+            "total_market_comparisons": total_comps,
+            "lots_with_qty_animals": lots_with_qty,
+            "lots_by_scrape_mode": {m: c for m, c in mode_counts},
+            "recent_lots_24h": recent_lots,
+            "latest_event": {
+                "name": last_event.event_name if last_event else None,
+                "date": last_event.event_date.strftime("%d/%m/%Y") if last_event and last_event.event_date else None,
+                "location": last_event.event_location if last_event else None,
+                "url": last_event.source_url if last_event else None,
+            } if last_event else None,
+            "checked_at": datetime.utcnow().isoformat(),
+        }
+    finally:
+        db.close()
+
+
 @router.post("/ingest/mt")
 async def trigger_mt_ingestion(background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
     """

@@ -64,6 +64,24 @@ def _get_scot_prices_map(session, country_candidates, start_date=None, end_date=
     return result
 
 
+def _nearest_scot_price(scot_prices: dict, ref_day, max_delta_days: int = 3):
+    """Busca o preço Scot no dia mais próximo de ref_day (até max_delta_days de diferença)."""
+    if not ref_day or not scot_prices:
+        return None
+    # Tenta exato primeiro
+    if ref_day in scot_prices:
+        return scot_prices[ref_day]
+    # Busca pelo dia mais próximo dentro da janela
+    best_price = None
+    best_delta = max_delta_days + 1
+    for day, price in scot_prices.items():
+        delta = abs((day - ref_day).days)
+        if delta <= max_delta_days and delta < best_delta and price is not None:
+            best_delta = delta
+            best_price = price
+    return best_price
+
+
 def build_cda_scot_comparisons(
     scot_country_candidates=("brasil", "brazil"),
     lookback_days=3650,
@@ -89,6 +107,11 @@ def build_cda_scot_comparisons(
             .join(CdaEvent, CdaEvent.id == CdaLotResult.event_id)
             .filter(CdaEvent.event_date.isnot(None))
             .filter(CdaEvent.event_date >= cutoff)
+            # Filtra apenas lotes individuais para evitar colisão semântica de era_raw
+            .filter(
+                (CdaLotResult.scrape_mode == "individual") |
+                (CdaLotResult.scrape_mode.is_(None))
+            )
             .group_by(
                 func.date_trunc("day", CdaEvent.event_date),
                 CdaLotResult.race_raw,
@@ -109,7 +132,8 @@ def build_cda_scot_comparisons(
             race_norm = _norm_label(row.race_raw)
             sex_norm = _norm_label(row.sex_raw)
             era_norm = _norm_label(row.era_raw)
-            scot_price = scot_prices.get(ref_day)
+            # Usa data mais próxima em vez de exata (corrige fins de semana/gaps)
+            scot_price = _nearest_scot_price(scot_prices, ref_day, max_delta_days=3)
             avg_arroba = float(row.avg_arroba) if row.avg_arroba is not None else None
             avg_closed = float(row.avg_closed) if row.avg_closed is not None else None
             lots_count = int(row.lots_count or 0)

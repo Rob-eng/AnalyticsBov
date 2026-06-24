@@ -72,6 +72,8 @@ class CdaLotResult(Base):
     era_raw = Column(String, nullable=True, index=True)
     weight_kg = Column(Float, nullable=True)
     arrobas = Column(Float, nullable=True)
+    qtde_animals = Column(Integer, nullable=True)       # cabeças vendidas no lote
+    scrape_mode = Column(String, default='individual')  # 'individual' ou 'medias'
     closed_price_brl = Column(Float, nullable=True)
     price_per_arroba_brl = Column(Float, nullable=True)
     currency = Column(String, default='BRL', nullable=False)
@@ -242,6 +244,8 @@ def init_db():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_expires_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
+            conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
+            conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))
             
             # Promoção automática do Administrador para PRO
             admin_id = str(Config.ADMIN_CHAT_ID)

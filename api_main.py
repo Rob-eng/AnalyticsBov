@@ -67,6 +67,19 @@ def read_root():
     except Exception:
         return f"<h1>AnalyticsBov</h1><p>Plataforma de inteligência Agro rodando online.</p>"
 
+@app.get("/health")
+def health_check():
+    """
+    Endpoint público de health check — sem autenticação.
+    Usado pelo Railway, load balancers e monitoramento externo.
+    """
+    from datetime import datetime, timezone
+    return {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "service": "AnalyticsBov API",
+    }
+
 @app.get("/property/at")
 def get_property_at(lat: float = Query(..., description="Latitude"), 
                     lon: float = Query(..., description="Longitude"),

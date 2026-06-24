@@ -274,6 +274,7 @@ def _parse_lot_rows(soup) -> list:
             "weight_kg":            peso_kg,
             "arrobas":              arrobas,
             "qtde_animals":         int(qtde) if qtde else None,
+            "scrape_mode":          "individual",
             "closed_price_brl":     closed_price,
             "price_per_arroba_brl": arroba_price,
         })
@@ -398,9 +399,11 @@ def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
                 lot_ref=payload.get("lot_ref"),
                 race_raw=payload.get("race_raw"),
                 sex_raw=payload.get("sex_raw"),
-                era_raw=payload.get("era_raw"),          # R$/kg vivo
+                era_raw=payload.get("era_raw"),
                 weight_kg=payload.get("weight_kg"),
                 arrobas=payload.get("arrobas"),
+                qtde_animals=payload.get("qtde_animals"),
+                scrape_mode=payload.get("scrape_mode", "individual"),
                 closed_price_brl=payload.get("closed_price_brl"),
                 price_per_arroba_brl=payload.get("price_per_arroba_brl"),
                 currency="BRL",
@@ -495,15 +498,25 @@ def _parse_medias_table(soup) -> list:
             arrobas      = round(peso_f / 15.0, 2) if peso_f else None
             arroba_price = round(valor_f / arrobas, 2) if valor_f and arrobas else None
 
+            # Inferir sex_raw a partir da classificação (ex: NOVILHA→F, BOI/TOURO→M)
+            sex_inferred = None
+            if race:
+                race_up = race.upper()
+                if any(x in race_up for x in ["NOVILHA", "VACA", "BEZERRA", "TERNEIRA"]):
+                    sex_inferred = "F"
+                elif any(x in race_up for x in ["BOI", "TOURO", "NOVILHO", "BEZERRO", "TERNEIRO"]):
+                    sex_inferred = "M"
+
             rows.append({
                 "lot_ref":              None,
                 "race_raw":             race,
-                "sex_raw":              None,
-                "era_raw":              age,              # ex: "08 A 10 MESES"
+                "sex_raw":              sex_inferred,    # inferido da classificação
+                "era_raw":              age,             # ex: "08 A 10 MESES"
                 "weight_kg":            peso_f,
                 "arrobas":              arrobas,
                 "qtde_animals":         None,
-                "closed_price_brl":     valor_f,         # valor médio do lote
+                "scrape_mode":          "medias",
+                "closed_price_brl":     valor_f,
                 "price_per_arroba_brl": arroba_price,
             })
 
