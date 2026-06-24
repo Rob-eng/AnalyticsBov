@@ -319,14 +319,21 @@
                             <div style="font-weight:600">{{ u.username or 'Sem Nome' }}</div>
                             <div style="font-size:0.8rem; color:#64748b">{{ u.chat_id }}</div>
                         </td>
-                        <td><span class="badge badge-{{ 'wa' if u.platform == 'whatsapp' else 'tg' }}">{{
-                                u.platform.upper() }}</span></td>
-                        <td><span class="badge badge-{{ 'pro' if u.plan_type != 'FREE' else 'free' }}">{{ u.plan_type
-                                }}</span></td>
-                        <td>
+                        <td><span class="badge badge-{{ 'wa' if u.platform == 'whatsapp' else 'tg' }}">{{ (u.platform or 'tg').upper() }}</span></td>
+                        <td><span class="badge badge-{{ 'pro' if u.plan_type not in ('FREE', None) else 'free' }}">{{ u.plan_type or 'FREE' }}</span></td>
+                        <td style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
                             <a href="/admin/user/{{ u.chat_id }}?api_key={{ api_key }}"
-                                style="background:rgba(99, 102, 241, 0.2); border:1px solid var(--primary); color:white; padding:6px 12px; border-radius:8px; cursor:pointer; text-decoration:none; font-size:0.8rem">Ver
-                                Histórico</a>
+                                style="background:rgba(99,102,241,0.2);border:1px solid var(--primary);color:white;padding:6px 12px;border-radius:8px;cursor:pointer;text-decoration:none;font-size:0.8rem">
+                                👤 Perfil
+                            </a>
+                            <select onchange="quickChangePlan('{{ u.chat_id }}', this)"
+                                style="background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.15);color:#94a3b8;padding:5px 8px;border-radius:8px;font-size:0.8rem;cursor:pointer;max-width:130px">
+                                <option value="">⚡ Plano...</option>
+                                <option value="FREE">🥉 FREE</option>
+                                <option value="STARTER">🥈 Starter</option>
+                                <option value="PRO">🥇 PRO</option>
+                                <option value="ENTERPRISE">💎 Enterprise</option>
+                            </select>
                         </td>
                     </tr>
                     {% endfor %}
@@ -376,7 +383,46 @@
                 plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc' } } }
             }
         });
+
+        // ── Quick Plan Change ────────────────────────────────────────────────
+        async function quickChangePlan(chatId, selectEl) {
+            const plan = selectEl.value;
+            if (!plan) return;
+            if (!confirm(`Alterar plano do usuário ${chatId} para ${plan}?`)) {
+                selectEl.value = "";
+                return;
+            }
+            try {
+                const url = new URL(`/admin/user/${chatId}/plan`, location.origin);
+                url.searchParams.set("api_key", "{{ api_key }}");
+                url.searchParams.set("plan", plan);
+                const res  = await fetch(url.toString(), { method: "POST" });
+                const data = await res.json();
+                if (data.status === "success") {
+                    dashToast("✅ " + data.message);
+                } else {
+                    dashToast("❌ " + (data.error || "Erro desconhecido"), "error");
+                }
+            } catch(e) {
+                dashToast("❌ Falha na requisição: " + e.message, "error");
+            }
+            selectEl.value = "";
+        }
+
+        function dashToast(msg, type="success") {
+            const el = document.getElementById("dash-toast");
+            el.textContent = msg;
+            el.style.background = type==="error" ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)";
+            el.style.borderColor = type==="error" ? "#ef4444" : "#22c55e";
+            el.style.color       = type==="error" ? "#ef4444" : "#22c55e";
+            el.style.opacity = "1"; el.style.transform = "translateY(0)";
+            clearTimeout(window._dt);
+            window._dt = setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(10px)"; }, 3500);
+        }
     </script>
+
+    <!-- Dashboard Toast -->
+    <div id="dash-toast" style="position:fixed;bottom:2rem;right:2rem;padding:0.9rem 1.5rem;border-radius:1rem;font-weight:600;font-size:0.9rem;z-index:9999;opacity:0;transform:translateY(10px);transition:all 0.3s ease;max-width:360px;border:1px solid transparent;pointer-events:none;font-family:'Outfit',sans-serif"></div>
 </body>
 
 </html>

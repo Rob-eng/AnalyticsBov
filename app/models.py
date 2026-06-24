@@ -20,6 +20,8 @@ class User(Base):
     platform = Column(String, default='telegram')  # 'telegram' ou 'whatsapp'
     plan_type = Column(String, default='FREE')     # 'FREE', 'STARTER', 'PRO', 'ENTERPRISE'
     stripe_subscription_id = Column(String, nullable=True)
+    trial_expires_at = Column(DateTime, nullable=True)  # Data de expiração do trial/promo grátis
+
     
     locations = relationship("FavoriteLocation", backref="user", cascade="all, delete-orphan")
 
@@ -238,6 +240,7 @@ def init_db():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS platform VARCHAR DEFAULT 'telegram';"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_type VARCHAR DEFAULT 'FREE';"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_expires_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             
             # Promoção automática do Administrador para PRO

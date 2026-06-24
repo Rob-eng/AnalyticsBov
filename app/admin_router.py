@@ -229,3 +229,176 @@ async def update_user_plan(
         return {"error": str(e)}
     finally:
         db.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trial / Promo Grátis
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/user/{chat_id}/trial")
+async def give_user_trial(
+    chat_id: str,
+    months: int = Query(1, ge=1, le=24, description="Quantidade de meses grátis (1-24)"),
+    plan: str = Query("PRO", description="Plano do trial: STARTER, PRO"),
+    api_key: str = Depends(get_api_key),
+):
+    """Dá X meses de trial/promo grátis para um usuário."""
+    from app.models import SessionLocal, User
+    from datetime import datetime, timedelta
+
+    valid_plans = ("STARTER", "PRO", "ENTERPRISE")
+    plan = plan.upper()
+    if plan not in valid_plans:
+        return {"error": f"Plano inválido para trial. Use: {valid_plans}"}
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.chat_id == str(chat_id)).first()
+        if not user:
+            return {"error": f"Usuário {chat_id} não encontrado"}
+
+        old_plan = user.plan_type
+        expires_at = datetime.utcnow() + timedelta(days=30 * months)
+        user.plan_type = plan
+        user.trial_expires_at = expires_at
+        db.commit()
+        return {
+            "status": "success",
+            "chat_id": chat_id,
+            "old_plan": old_plan,
+            "trial_plan": plan,
+            "trial_months": months,
+            "trial_expires_at": expires_at.strftime("%d/%m/%Y"),
+            "message": f"{months} mês(es) de {plan} grátis até {expires_at.strftime('%d/%m/%Y')}",
+        }
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gestão de Propriedades
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/user/{chat_id}/property")
+async def add_user_property(
+    chat_id: str,
+    name: str = Query(..., description="Nome da fazenda"),
+    lat: float = Query(..., description="Latitude"),
+    lon: float = Query(..., description="Longitude"),
+    ndvi_alerts: bool = Query(True, description="Ativar alertas NDVI?"),
+    api_key: str = Depends(get_api_key),
+):
+    """Cadastra uma propriedade para um usuário diretamente pelo painel admin."""
+    from app.models import SessionLocal, User, FavoriteLocation
+    from datetime import datetime
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.chat_id == str(chat_id)).first()
+        if not user:
+            return {"error": f"Usuário {chat_id} não encontrado"}
+
+        prop = FavoriteLocation(
+            user_id=str(chat_id),
+            name=name,
+            latitude=lat,
+            longitude=lon,
+            ndvi_alerts_enabled=ndvi_alerts,
+            created_at=datetime.utcnow(),
+        )
+        db.add(prop)
+        db.commit()
+        db.refresh(prop)
+        return {
+            "status": "success",
+            "property_id": prop.id,
+            "name": prop.name,
+            "lat": prop.latitude,
+            "lon": prop.longitude,
+            "ndvi_alerts": prop.ndvi_alerts_enabled,
+            "message": f"Propriedade '{name}' cadastrada com sucesso!",
+        }
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+@router.delete("/user/{chat_id}/property/{prop_id}")
+async def delete_user_property(
+    chat_id: str,
+    prop_id: int,
+    api_key: str = Depends(get_api_key),
+):
+    """Remove uma propriedade de um usuário."""
+    from app.models import SessionLocal, FavoriteLocation
+
+    db = SessionLocal()
+    try:
+        prop = db.query(FavoriteLocation).filter(
+            FavoriteLocation.id == prop_id,
+            FavoriteLocation.user_id == str(chat_id),
+        ).first()
+        if not prop:
+            return {"error": f"Propriedade {prop_id} não encontrada para o usuário {chat_id}"}
+
+        prop_name = prop.name
+        db.delete(prop)
+        db.commit()
+        return {"status": "success", "message": f"Propriedade '{prop_name}' removida."}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mensagem Direta ao Usuário
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/user/{chat_id}/message")
+async def send_message_to_user(
+    chat_id: str,
+    message: str = Query(..., description="Texto da mensagem a enviar"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Envia uma mensagem direta para o usuário via WhatsApp ou Telegram,
+    dependendo da plataforma cadastrada.
+    """
+    from app.models import SessionLocal, User
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.chat_id == str(chat_id)).first()
+        if not user:
+            return {"error": f"Usuário {chat_id} não encontrado"}
+        platform = (user.platform or "telegram")
+    finally:
+        db.close()
+
+    try:
+        if platform == "whatsapp":
+            from app.whatsapp.sender import send_whatsapp_text
+            success = send_whatsapp_text(str(chat_id), message)
+            if success:
+                return {"status": "success", "platform": "whatsapp", "message": "Mensagem enviada!"}
+            else:
+                return {"error": "Falha no envio WhatsApp (verifique logs do Railway)"}
+        else:
+            import requests as _req
+            from app.config import Config
+            url = f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}/sendMessage"
+            resp = _req.post(url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+            }, timeout=10)
+            if resp.status_code == 200:
+                return {"status": "success", "platform": "telegram", "message": "Mensagem enviada!"}
+            else:
+                return {"error": f"Telegram error {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}

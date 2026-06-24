@@ -4,17 +4,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Perfil do Usuário | AnalyticsBov</title>
+    <title>Perfil do Usuário | AnalyticsBov Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --primary: #6366f1;
             --secondary: #0ea5e9;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
             --bg: #0f172a;
             --card-bg: rgba(30, 41, 59, 0.7);
             --text: #f8fafc;
+            --muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
         }
-
+        * { box-sizing: border-box; }
         body {
             font-family: 'Outfit', sans-serif;
             background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
@@ -22,206 +27,366 @@
             margin: 0;
             min-height: 100vh;
         }
-
         header {
-            padding: 1.5rem 2rem;
+            padding: 1.2rem 2rem;
             backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-
-        .container {
-            padding: 2rem;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .back-btn {
-            color: #94a3b8;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.9rem;
-            margin-bottom: 1rem;
-        }
-
+        .container { padding: 2rem; max-width: 1100px; margin: 0 auto; }
+        .back-btn { color: var(--muted); text-decoration: none; font-size: 0.9rem; margin-bottom: 1.5rem; display: inline-block; transition: color 0.2s; }
+        .back-btn:hover { color: var(--text); }
         .user-header {
             background: var(--card-bg);
-            padding: 2rem;
+            padding: 1.8rem 2rem;
             border-radius: 1.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
         }
-
-        .user-info h1 {
-            margin: 0;
-            font-size: 2rem;
-        }
-
-        .user-info p {
-            color: #94a3b8;
-            margin: 5px 0 0 0;
-        }
-
-        .badge {
-            padding: 0.5rem 1rem;
-            border-radius: 2rem;
+        .user-avatar { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; flex-shrink: 0; }
+        .avatar-wa { background: rgba(34,197,94,0.2); border: 2px solid #22c55e; }
+        .avatar-tg { background: rgba(59,130,246,0.2); border: 2px solid #3b82f6; }
+        .user-meta { flex: 1; min-width: 200px; }
+        .user-meta h1 { margin: 0 0 4px 0; font-size: 1.6rem; }
+        .user-meta p { color: var(--muted); margin: 2px 0; font-size: 0.9rem; }
+        .badge { padding: 0.4rem 1rem; border-radius: 2rem; font-size: 0.85rem; font-weight: 700; display: inline-block; }
+        .badge-pro   { background: linear-gradient(135deg,#a855f7,#6366f1); color: white; }
+        .badge-starter { background: linear-gradient(135deg,#0ea5e9,#22c55e); color: white; }
+        .badge-free  { background: #334155; color: #94a3b8; }
+        .badge-enterprise { background: linear-gradient(135deg,#f59e0b,#ef4444); color: white; }
+        .badge-wa    { background: #22c55e; color: white; }
+        .badge-tg    { background: #3b82f6; color: white; }
+        .badge-trial { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid #f59e0b; }
+        .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.2rem; margin-bottom: 1.5rem; }
+        .action-card { background: var(--card-bg); border-radius: 1.2rem; border: 1px solid var(--border); padding: 1.5rem; }
+        .action-card h3 { margin: 0 0 1rem 0; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
+        .form-row { display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 80px; }
+        label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        input, select, textarea {
+            background: rgba(15,23,42,0.6);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 0.6rem;
+            color: var(--text);
+            padding: 0.5rem 0.75rem;
+            font-family: 'Outfit', sans-serif;
             font-size: 0.9rem;
-            font-weight: 700;
-        }
-
-        .badge-pro {
-            background: #a855f7;
-            color: white;
-        }
-
-        .badge-free {
-            background: #64748b;
-            color: white;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-        }
-
-        .card {
-            background: var(--card-bg);
-            padding: 1.5rem;
-            border-radius: 1.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .log-item {
-            padding: 0.8rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .log-item:last-child {
-            border: none;
-        }
-
-        .trigger-tag {
-            font-size: 0.7rem;
-            padding: 2px 6px;
-            border-radius: 4px;
-            text-transform: uppercase;
-            font-weight: 700;
-            margin-right: 5px;
-        }
-
-        table {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
+            transition: border-color 0.2s;
         }
-
-        th {
-            text-align: left;
-            color: #94a3b8;
-            padding: 0.5rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        td {
-            padding: 0.8rem 0.5rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); }
+        select option { background: #1e293b; }
+        textarea { min-height: 80px; resize: vertical; }
+        .btn { padding: 0.55rem 1.2rem; border-radius: 0.6rem; border: none; cursor: pointer; font-family: 'Outfit', sans-serif; font-size: 0.9rem; font-weight: 600; transition: all 0.2s; white-space: nowrap; }
+        .btn:hover { transform: translateY(-1px); opacity: 0.92; }
+        .btn:active { transform: translateY(0); }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: #1e293b; }
+        .btn-danger  { background: var(--danger); color: white; }
+        .btn-ghost   { background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text); }
+        .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.78rem; border-radius: 0.4rem; }
+        #toast { position: fixed; bottom: 2rem; right: 2rem; padding: 0.9rem 1.5rem; border-radius: 1rem; font-weight: 600; font-size: 0.9rem; z-index: 9999; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; max-width: 360px; pointer-events: none; }
+        #toast.show { opacity: 1; transform: translateY(0); }
+        #toast.success { background: rgba(34,197,94,0.15); border: 1px solid #22c55e; color: #22c55e; }
+        #toast.error   { background: rgba(239,68,68,0.15);  border: 1px solid #ef4444; color: #ef4444; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-bottom: 1.5rem; }
+        @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+        .card { background: var(--card-bg); padding: 1.5rem; border-radius: 1.2rem; border: 1px solid var(--border); }
+        .card h2 { margin: 0 0 1rem 0; font-size: 1rem; }
+        .log-list { max-height: 420px; overflow-y: auto; padding-right: 4px; }
+        .log-item { padding: 0.7rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.85rem; }
+        .log-item:last-child { border: none; }
+        .log-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.75rem; margin-bottom: 3px; }
+        .tag { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: 700; }
+        .tag-auto { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .tag-man  { background: rgba(99,102,241,0.2); color: #6366f1; }
+        table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+        th { text-align: left; color: var(--muted); padding: 0.5rem 0.4rem; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        td { padding: 0.7rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.85rem; }
+        .ndvi-on  { color: var(--success); font-weight: 700; }
+        .ndvi-off { color: var(--danger);  font-weight: 700; }
+        #add-prop-form { display: none; margin-top: 1rem; padding: 1rem; background: rgba(15,23,42,0.5); border-radius: 0.8rem; border: 1px dashed rgba(99,102,241,0.3); }
+        #add-prop-form.visible { display: block; }
+        .prop-form-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.5rem; align-items: end; }
+        @media (max-width: 600px) { .prop-form-row { grid-template-columns: 1fr 1fr; } }
+        .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 4px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 
 <body>
     <header>
-        <a href="/admin/dashboard?api_key={{ api_key }}"
-            style="color:white; text-decoration:none; font-size: 1.5rem">🏠</a>
-        <h1 style="margin:0; font-size: 1.2rem">Perfil do Patrão</h1>
+        <a href="/admin/dashboard?api_key={{ api_key }}" style="color:white;text-decoration:none;font-size:1.4rem">🏠</a>
+        <h1 style="margin:0;font-size:1.1rem;color:var(--muted)">Perfil do Patrão</h1>
     </header>
 
+    <div id="toast"></div>
+
     <div class="container">
-        <a href="/admin/dashboard?api_key={{ api_key }}" class="back-btn">← Voltar para o Dashboard</a>
+        <a href="/admin/dashboard?api_key={{ api_key }}" class="back-btn">← Voltar ao Dashboard</a>
 
+        <!-- USER HEADER -->
         <div class="user-header">
-            <div class="user-info">
-                <h1>{{ user.username or 'Sem Nome' }}</h1>
-                <p>📍 WhatsApp: {{ user.chat_id }}</p>
-                <p>📅 Desde: {{ user.created_at.strftime('%d/%m/%Y') }}</p>
-            </div>
-            <div class="badge badge-{{ 'pro' if user.plan_type != 'FREE' else 'free' }}">
-                {{ user.plan_type }}
-            </div>
-        </div>
-
-        <div class="grid">
-            <!-- HISTORICO -->
-            <div class="card">
-                <h2>Histórico de Ações</h2>
-                <div style="max-height: 500px; overflow-y: auto; padding-right: 10px">
-                    {% for log in logs %}
-                    <div class="log-item">
-                        <div
-                            style="display:flex; justify-content:space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 3px">
-                            <span>{{ log.created_at.strftime('%d/%m/%Y %H:%M') }}</span>
-                            <span class="trigger-tag"
-                                style="background: {{ 'rgba(34, 197, 94, 0.2)' if log.trigger_type == 'AUTO_ALERT' else 'rgba(99, 102, 241, 0.2)' }}; color: {{ '#22c55e' if log.trigger_type == 'AUTO_ALERT' else '#6366f1' }}">
-                                {{ 'Auto' if log.trigger_type == 'AUTO_ALERT' else 'Man' }}
-                            </span>
-                        </div>
-                        <div style="font-weight: 600; color: {{ '#ef4444' if log.status == 'ERROR' else '#f8fafc' }}">
-                            {{ log.action }}
-                        </div>
-                        <div style="font-size: 0.85rem; color: #64748b">{{ log.details or '-' }}</div>
-                        {% if log.status == 'ERROR' %}
-                        <div style="font-size: 0.75rem; color: #ef4444; margin-top: 3px">⚠️ {{ log.error_message }}
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                    {% if not logs %}
-                    <p style="color:#64748b">Nenhuma ação registrada ainda.</p>
+            <div style="display:flex;align-items:center;gap:1rem;flex:1">
+                <div class="user-avatar avatar-{{ 'wa' if user.platform == 'whatsapp' else 'tg' }}">
+                    {{ '📱' if user.platform == 'whatsapp' else '✈️' }}
+                </div>
+                <div class="user-meta">
+                    <h1>{{ user.username or 'Sem Nome' }}</h1>
+                    <p>{{ '📱 WhatsApp' if user.platform == 'whatsapp' else '✈️ Telegram' }}: {{ user.chat_id }}</p>
+                    <p>📅 Desde: {{ user.created_at.strftime('%d/%m/%Y') }}</p>
+                    {% if user.trial_expires_at %}
+                    <p><span class="badge badge-trial">🎁 Trial até {{ user.trial_expires_at.strftime('%d/%m/%Y') }}</span></p>
                     {% endif %}
                 </div>
             </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.5rem">
+                <span class="badge badge-{{ 'pro' if user.plan_type == 'PRO' else ('starter' if user.plan_type == 'STARTER' else ('enterprise' if user.plan_type == 'ENTERPRISE' else 'free')) }}" id="plan-badge">
+                    {% if user.plan_type == 'PRO' %}🥇 PRO{% elif user.plan_type == 'STARTER' %}🥈 STARTER{% elif user.plan_type == 'ENTERPRISE' %}💎 ENTERPRISE{% else %}🥉 FREE{% endif %}
+                </span>
+                <span class="badge badge-{{ 'wa' if user.platform == 'whatsapp' else 'tg' }}">
+                    {{ (user.platform or 'telegram').upper() }}
+                </span>
+            </div>
+        </div>
 
-            <!-- PROPRIEDADES -->
+        <!-- ACTION PANELS -->
+        <div class="actions-grid">
+            <!-- 1. Alterar Plano -->
+            <div class="action-card">
+                <h3>🔄 Alterar Plano</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Novo Plano</label>
+                        <select id="sel-plan">
+                            <option value="FREE"       {% if user.plan_type == 'FREE' %}selected{% endif %}>🥉 Bronze (FREE)</option>
+                            <option value="STARTER"    {% if user.plan_type == 'STARTER' %}selected{% endif %}>🥈 Starter</option>
+                            <option value="PRO"        {% if user.plan_type == 'PRO' %}selected{% endif %}>🥇 Ouro (PRO)</option>
+                            <option value="ENTERPRISE" {% if user.plan_type == 'ENTERPRISE' %}selected{% endif %}>💎 Enterprise</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="changePlan()">Salvar</button>
+                </div>
+            </div>
+
+            <!-- 2. Trial Grátis -->
+            <div class="action-card">
+                <h3>🎁 Dar Trial / Promo</h3>
+                <div class="form-row">
+                    <div class="form-group" style="max-width:90px">
+                        <label>Meses</label>
+                        <input type="number" id="trial-months" value="1" min="1" max="24">
+                    </div>
+                    <div class="form-group">
+                        <label>Plano</label>
+                        <select id="trial-plan">
+                            <option value="STARTER">🥈 Starter</option>
+                            <option value="PRO" selected>🥇 PRO</option>
+                            <option value="ENTERPRISE">💎 Enterprise</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-warning" onclick="giveTrial()">Ativar</button>
+                </div>
+            </div>
+
+            <!-- 3. Enviar Mensagem (full width) -->
+            <div class="action-card" style="grid-column: 1 / -1">
+                <h3>
+                    💬 Enviar Mensagem Direta
+                    <span class="badge badge-{{ 'wa' if user.platform == 'whatsapp' else 'tg' }}" style="font-size:0.65rem;padding:0.2rem 0.6rem">
+                        {{ (user.platform or 'telegram').upper() }}
+                    </span>
+                </h3>
+                <textarea id="msg-text" placeholder="Digite a mensagem para o patrão... (suporta *negrito* e _itálico_ para Telegram)"></textarea>
+                <div style="margin-top:0.6rem;display:flex;gap:0.6rem;justify-content:flex-end;align-items:center">
+                    <span style="font-size:0.8rem;color:var(--muted)">
+                        {{ '⚠️ Requer janela de 24h aberta' if user.platform == 'whatsapp' else '✈️ Funciona sempre' }}
+                    </span>
+                    <button class="btn btn-success" id="send-btn" onclick="sendMessage()">📤 Enviar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- DATA SECTIONS -->
+        <div class="grid-2">
+            <!-- Histórico -->
             <div class="card">
-                <h2>Fazendas Cadastradas</h2>
+                <h2>📋 Histórico de Ações</h2>
+                <div class="log-list">
+                    {% for log in logs %}
+                    <div class="log-item">
+                        <div class="log-meta">
+                            <span>{{ log.created_at.strftime('%d/%m/%Y %H:%M') }}</span>
+                            <span class="tag {{ 'tag-auto' if log.trigger_type == 'AUTO_ALERT' else 'tag-man' }}">
+                                {{ 'Auto' if log.trigger_type == 'AUTO_ALERT' else 'Manual' }}
+                            </span>
+                        </div>
+                        <div style="font-weight:600;color:{{ '#ef4444' if log.status == 'ERROR' else '#f8fafc' }}">{{ log.action }}</div>
+                        <div style="color:var(--muted)">{{ log.details or '—' }}</div>
+                        {% if log.status == 'ERROR' %}
+                        <div style="font-size:0.75rem;color:#ef4444;margin-top:3px;background:rgba(239,68,68,0.08);padding:4px 6px;border-radius:4px">⚠️ {{ log.error_message }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if not logs %}<p style="color:var(--muted)">Nenhuma ação registrada ainda.</p>{% endif %}
+                </div>
+            </div>
+
+            <!-- Propriedades -->
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                    <h2 style="margin:0">🌾 Fazendas Cadastradas</h2>
+                    <button class="btn btn-ghost btn-sm" onclick="toggleAddPropForm()">➕ Cadastrar</button>
+                </div>
+
+                <div id="add-prop-form">
+                    <div class="prop-form-row">
+                        <div class="form-group">
+                            <label>Nome da Fazenda</label>
+                            <input type="text" id="prop-name" placeholder="Faz. Santa Fé">
+                        </div>
+                        <div class="form-group">
+                            <label>Latitude</label>
+                            <input type="number" id="prop-lat" placeholder="-20.1418" step="any">
+                        </div>
+                        <div class="form-group">
+                            <label>Longitude</label>
+                            <input type="number" id="prop-lon" placeholder="-55.2042" step="any">
+                        </div>
+                        <button class="btn btn-success" onclick="addProperty()" style="align-self:flex-end">Salvar</button>
+                    </div>
+                    <div style="margin-top:0.6rem;display:flex;align-items:center;gap:0.5rem">
+                        <input type="checkbox" id="prop-ndvi" checked style="width:auto">
+                        <label for="prop-ndvi" style="text-transform:none;font-size:0.85rem">Ativar alertas NDVI automáticos</label>
+                    </div>
+                </div>
+
                 <table>
                     <thead>
                         <tr>
-                            <th>NOME</th>
-                            <th>COORDENADAS</th>
-                            <th>ALERTAS</th>
+                            <th>Nome</th>
+                            <th>Coordenadas</th>
+                            <th>NDVI</th>
+                            <th></th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="props-tbody">
                         {% for loc in locations %}
-                        <tr>
-                            <td style="font-weight: 600">{{ loc.name }}</td>
-                            <td style="font-size: 0.8rem; color: #94a3b8">
-                                {{ loc.latitude|round(4) }}, {{ loc.longitude|round(4) }}
-                            </td>
-                            <td>
-                                <span style="color: {{ '#22c55e' if loc.ndvi_alerts_enabled else '#ef4444' }}">
-                                    {{ 'ON' if loc.ndvi_alerts_enabled else 'OFF' }}
-                                </span>
-                            </td>
+                        <tr id="prop-row-{{ loc.id }}">
+                            <td style="font-weight:600">{{ loc.name }}</td>
+                            <td style="font-size:0.8rem;color:var(--muted)">{{ loc.latitude|round(4) }}, {{ loc.longitude|round(4) }}</td>
+                            <td><span class="{{ 'ndvi-on' if loc.ndvi_alerts_enabled else 'ndvi-off' }}">{{ 'ON' if loc.ndvi_alerts_enabled else 'OFF' }}</span></td>
+                            <td><button class="btn btn-danger btn-sm" onclick="deleteProp({{ loc.id }}, '{{ loc.name }}')">🗑️</button></td>
                         </tr>
                         {% endfor %}
+                        {% if not locations %}
+                        <tr id="no-props-row"><td colspan="4" style="color:var(--muted);text-align:center;padding:1rem">Nenhuma fazenda cadastrada.</td></tr>
+                        {% endif %}
                     </tbody>
                 </table>
-                {% if not locations %}
-                <p style="color:#64748b; margin-top: 1rem">O usuário ainda não salvou nenhuma propriedade.</p>
-                {% endif %}
             </div>
         </div>
     </div>
-</body>
 
+    <script>
+        const CHAT_ID  = "{{ user.chat_id }}";
+        const API_KEY  = "{{ api_key }}";
+        const BASE_URL = "/admin/user/" + CHAT_ID;
+
+        function toast(msg, type="success") {
+            const el = document.getElementById("toast");
+            el.textContent = (type==="success"?"✅ ":"❌ ") + msg;
+            el.className = "show " + type;
+            clearTimeout(window._t);
+            window._t = setTimeout(()=>{ el.className=""; }, 3500);
+        }
+
+        async function api(method, path, params={}) {
+            const url = new URL(BASE_URL+path, location.origin);
+            url.searchParams.set("api_key", API_KEY);
+            Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
+            const res = await fetch(url.toString(), {method});
+            return res.json();
+        }
+
+        async function changePlan() {
+            const plan = document.getElementById("sel-plan").value;
+            const data = await api("POST", "/plan", {plan});
+            if (data.status==="success") { toast(data.message); updatePlanBadge(plan); }
+            else toast(data.error||"Erro desconhecido","error");
+        }
+
+        function updatePlanBadge(plan) {
+            const badge = document.getElementById("plan-badge");
+            const labels = {FREE:"🥉 FREE",STARTER:"🥈 STARTER",PRO:"🥇 PRO",ENTERPRISE:"💎 ENTERPRISE"};
+            const classes = {FREE:"badge-free",STARTER:"badge-starter",PRO:"badge-pro",ENTERPRISE:"badge-enterprise"};
+            badge.textContent = labels[plan]||plan;
+            badge.className = "badge "+(classes[plan]||"badge-free");
+        }
+
+        async function giveTrial() {
+            const months = document.getElementById("trial-months").value;
+            const plan   = document.getElementById("trial-plan").value;
+            const data   = await api("POST", "/trial", {months, plan});
+            if (data.status==="success") { toast(data.message); updatePlanBadge(plan); }
+            else toast(data.error||"Erro ao ativar trial","error");
+        }
+
+        async function sendMessage() {
+            const message = document.getElementById("msg-text").value.trim();
+            if (!message) { toast("Digite uma mensagem antes de enviar.","error"); return; }
+            const btn = document.getElementById("send-btn");
+            btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Enviando...';
+            const data = await api("POST", "/message", {message});
+            btn.disabled=false; btn.innerHTML="📤 Enviar";
+            if (data.status==="success") { toast("Mensagem enviada via "+data.platform+"!"); document.getElementById("msg-text").value=""; }
+            else toast(data.error||"Falha no envio","error");
+        }
+
+        function toggleAddPropForm() {
+            document.getElementById("add-prop-form").classList.toggle("visible");
+        }
+
+        async function addProperty() {
+            const name = document.getElementById("prop-name").value.trim();
+            const lat  = document.getElementById("prop-lat").value;
+            const lon  = document.getElementById("prop-lon").value;
+            const ndvi = document.getElementById("prop-ndvi").checked;
+            if (!name||!lat||!lon) { toast("Preencha nome, latitude e longitude.","error"); return; }
+            const data = await api("POST","/property",{name,lat,lon,ndvi_alerts:ndvi});
+            if (data.status==="success") {
+                toast(data.message);
+                document.getElementById("no-props-row")?.remove();
+                const tr = document.createElement("tr");
+                tr.id = "prop-row-"+data.property_id;
+                tr.innerHTML = `<td style="font-weight:600">${data.name}</td><td style="font-size:0.8rem;color:var(--muted)">${parseFloat(data.lat).toFixed(4)}, ${parseFloat(data.lon).toFixed(4)}</td><td><span class="${data.ndvi_alerts?'ndvi-on':'ndvi-off'}">${data.ndvi_alerts?'ON':'OFF'}</span></td><td><button class="btn btn-danger btn-sm" onclick="deleteProp(${data.property_id},'${data.name}')">🗑️</button></td>`;
+                document.getElementById("props-tbody").appendChild(tr);
+                document.getElementById("prop-name").value="";
+                document.getElementById("prop-lat").value="";
+                document.getElementById("prop-lon").value="";
+                document.getElementById("add-prop-form").classList.remove("visible");
+            } else toast(data.error||"Erro ao cadastrar","error");
+        }
+
+        async function deleteProp(propId, name) {
+            if (!confirm(`Remover "${name}"?\n\nEsta ação não pode ser desfeita.`)) return;
+            const url = new URL(BASE_URL+"/property/"+propId, location.origin);
+            url.searchParams.set("api_key", API_KEY);
+            const data = await (await fetch(url.toString(),{method:"DELETE"})).json();
+            if (data.status==="success") {
+                toast(data.message);
+                const row = document.getElementById("prop-row-"+propId);
+                if (row) { row.style.transition="opacity 0.3s"; row.style.opacity="0"; setTimeout(()=>row.remove(),300); }
+            } else toast(data.error||"Erro ao remover","error");
+        }
+    </script>
+</body>
 </html>
