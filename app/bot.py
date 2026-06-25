@@ -443,10 +443,9 @@ async def current_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /leilao — envia o gráfico + resumo textual dos últimos preços da CDA."""
+    """Comando /leilao — envia gráfico de evolução + card de preços CDA vs Scot."""
     _log_tg_activity(update, "CDA_CHART")
 
-    # Período via argumento: /leilao 180  (padrão 365 dias)
     days = 365
     if context.args:
         try:
@@ -458,12 +457,12 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📈 Buscando dados do Leilão CDA (últimos {days} dias)... Aguarde."
     )
     try:
-        from app.charts import generate_cda_price_chart
+        from app.charts import generate_cda_price_chart, generate_cda_summary_card
         from app.models import get_cda_latest_summary, format_cda_summary_text
+        from io import BytesIO
 
         loop = asyncio.get_running_loop()
 
-        # Gera gráfico e busca resumo em paralelo
         chart_path, summary = await asyncio.gather(
             loop.run_in_executor(None, lambda: generate_cda_price_chart(days=days)),
             loop.run_in_executor(None, get_cda_latest_summary),
@@ -476,24 +475,46 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Caption do gráfico: legenda compacta
+        # Aviso de dados desatualizados
+        if not summary.get('has_recent_data') and summary.get('event_date'):
+            days_old = (datetime.utcnow() - summary['event_date']).days
+            await update.message.reply_text(
+                f"⚠️ _Dados do último leilão têm {days_old} dia(s). "
+                f"O scraping automático ocorre às 05h30._",
+                parse_mode='Markdown'
+            )
+
+        # 1. Gráfico de evolução
+        event_date = summary.get('event_date')
+        event_url  = summary.get('event_url', '')
+        date_label = event_date.strftime('%d/%m/%Y') if event_date else ''
+        url_line   = f"\n🔗 {event_url}" if event_url else ''
         legend_caption = (
             f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
+            f"Último leilão: {date_label}{url_line}\n\n"
             f"• Linhas = preço médio R$/@ por raça\n"
             f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
             f"• Barras = lotes negociados/semana"
         )
-
-        # Envia o gráfico
         await update.message.reply_photo(
             photo=open(chart_path, 'rb'),
             caption=legend_caption,
             parse_mode='Markdown'
         )
 
-        # Envia o resumo textual dos últimos valores como mensagem separada
+        # 2. Card de preços + resumo textual como caption
+        card_bytes = await loop.run_in_executor(
+            None, lambda: generate_cda_summary_card(summary)
+        )
         summary_text = format_cda_summary_text(summary, for_whatsapp=False)
-        await update.message.reply_text(summary_text, parse_mode='Markdown')
+        if card_bytes:
+            await update.message.reply_photo(
+                photo=BytesIO(card_bytes),
+                caption=summary_text,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(summary_text, parse_mode='Markdown')
 
     except Exception as e:
         import traceback
@@ -1439,6 +1460,18 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         # ── INTERCEPTOR DE FLUXOS AUTOMÁTICOS ──
         if "TRIGGER_FLOW:" in resposta_txt:
+            # Fluxos sem coordenadas
+            if "TRIGGER_FLOW: LEILAO" in resposta_txt:
+                await cda_chart(update, context)
+                return ConversationHandler.END
+            elif "TRIGGER_FLOW: COTACAO" in resposta_txt:
+                await current_analysis(update, context)
+                return ConversationHandler.END
+            elif "TRIGGER_FLOW: MERCADO_FUTURO" in resposta_txt:
+                await future_market(update, context)
+                return ConversationHandler.END
+
+            # Fluxos com coordenadas (NDVI, CLIMA, MDT, HISTORICO)
             import re
             match = re.search(r"TRIGGER_FLOW:\s*(\w+)\s*\|\s*([\d\.-]+)\s*\|\s*([\d\.-]+)\s*\|\s*([^|*\n]+)", resposta_txt)
             if match:

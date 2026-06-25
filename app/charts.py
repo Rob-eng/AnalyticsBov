@@ -619,6 +619,145 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     return buf.read()
 
 
+def generate_cda_summary_card(summary: dict):
+    """
+    Gera um card visual (PNG) com a tabela de preços do último leilão CDA
+    e a comparação com o benchmark Scot.
+    Returns: bytes PNG ou None se sem dados.
+    """
+    from io import BytesIO
+    from datetime import datetime as _dt
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as _plt
+
+    rows = summary.get('rows', [])
+    if not rows:
+        return None
+
+    event_name   = (summary.get('event_name') or 'Leilão CDA')[:55]
+    event_date   = summary.get('event_date')
+    location     = (summary.get('event_location') or '')[:45]
+    total_heads  = summary.get('total_heads')
+    total_volume = summary.get('total_volume_brl')
+    date_str     = event_date.strftime('%d/%m/%Y') if event_date else '--'
+
+    BG      = '#0D1117'
+    HDR_BG  = '#21262D'
+    ROW_A   = '#161B22'
+    ROW_B   = '#1C2128'
+    BORDER  = '#30363D'
+    TEXT    = '#E6EDF3'
+    SUBTEXT = '#8B949E'
+    GREEN   = '#3FB950'
+    YELLOW  = '#D29922'
+    RED     = '#F85149'
+    ACCENT  = '#58A6FF'
+
+    n_rows   = min(len(rows), 7)
+    has_scot = any(r.get('scot_price_usd') for r in rows[:n_rows])
+
+    if has_scot:
+        col_labels = ['Categoria', 'R$/arroba', 'Lotes', 'Scot (US$/cab)', 'vs. Spot']
+    else:
+        col_labels = ['Categoria', 'R$/arroba', 'Lotes', 'vs. Spot']
+    ncols = len(col_labels)
+
+    table_data = []
+    for row in rows[:n_rows]:
+        race  = (row.get('race') or 'Outros').title()[:22]
+        price = f"R$ {row['avg_price_arroba']:,.0f}".replace(",", ".")
+        lots  = str(row.get('lots_count', 0))
+        scot  = f"US$ {row['scot_price_usd']:.0f}" if row.get('scot_price_usd') else "-"
+        ratio = row.get('ratio')
+        vs    = f"{ratio * 100:.1f}%" if ratio else "-"
+        if has_scot:
+            table_data.append([race, price, lots, scot, vs])
+        else:
+            table_data.append([race, price, lots, vs])
+
+    stats_parts = []
+    if total_heads:
+        stats_parts.append(f"{int(total_heads):,} cabecas".replace(",", "."))
+    if total_volume:
+        stats_parts.append(f"R$ {total_volume:,.0f} em vendas".replace(",", "."))
+
+    fig_h = 2.6 + n_rows * 0.58
+    fig, ax = _plt.subplots(figsize=(10, fig_h), facecolor=BG)
+    ax.set_facecolor(BG)
+    ax.axis('off')
+
+    # Reserva topo para o cabeçalho
+    header_lines = 2 + (1 if stats_parts else 0)
+    header_frac  = max(0.12, (header_lines * 0.38) / fig_h)
+    fig.subplots_adjust(top=1.0 - header_frac - 0.01, bottom=0.07,
+                        left=0.01, right=0.99)
+
+    # Cabeçalho (fig coords)
+    y = 0.97
+    fig.text(0.5, y, event_name, ha='center', va='top',
+             color=TEXT, fontsize=14, fontweight='bold')
+    y -= max(0.055, 0.32 / fig_h)
+
+    subtitle = date_str + (f'  •  {location}' if location else '')
+    fig.text(0.5, y, subtitle, ha='center', va='top', color=SUBTEXT, fontsize=9.5)
+
+    if stats_parts:
+        y -= max(0.045, 0.26 / fig_h)
+        fig.text(0.5, y, '   |   '.join(stats_parts),
+                 ha='center', va='top', color=ACCENT, fontsize=9.5, fontweight='bold')
+
+    # Tabela (preenche o axes)
+    tbl = ax.table(
+        cellText=table_data,
+        colLabels=col_labels,
+        cellLoc='center',
+        loc='center',
+        bbox=[0.0, 0.0, 1.0, 1.0]
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(10.5)
+
+    vs_col = ncols - 1
+    for (ri, ci), cell in tbl.get_celld().items():
+        cell.set_linewidth(0.4)
+        cell.set_edgecolor(BORDER)
+        if ri == 0:
+            cell.set_facecolor(HDR_BG)
+            cell.get_text().set_color(TEXT)
+            cell.get_text().set_fontweight('bold')
+            cell.get_text().set_fontsize(9.5)
+        else:
+            cell.set_facecolor(ROW_B if ri % 2 == 0 else ROW_A)
+            tv = cell.get_text().get_text()
+            if ci == vs_col and tv not in ('-', ''):
+                try:
+                    pv = float(tv.replace('%', ''))
+                    c = GREEN if pv >= 95 else (YELLOW if pv >= 80 else RED)
+                    cell.get_text().set_color(c)
+                    cell.get_text().set_fontweight('bold')
+                except Exception:
+                    cell.get_text().set_color(SUBTEXT)
+            elif ci == 1:
+                cell.get_text().set_color(TEXT)
+                cell.get_text().set_fontweight('bold')
+            elif ci == 0:
+                cell.get_text().set_color(TEXT)
+            else:
+                cell.get_text().set_color(SUBTEXT)
+
+    # Rodapé
+    fig.text(0.5, 0.012,
+             f"Correa da Costa Agropecuaria  |  {_dt.now().strftime('%d/%m/%Y')}  |  Agro Analytics Bot",
+             ha='center', va='bottom', color=SUBTEXT, fontsize=7.5, style='italic')
+
+    buf = BytesIO()
+    _plt.savefig(buf, format='png', dpi=140, facecolor=BG, bbox_inches='tight')
+    _plt.close()
+    buf.seek(0)
+    return buf.read()
+
+
 def generate_cda_price_chart(days=365):
     """
     Gera um gráfico premium de evolução de preços do Leilão Correa da Costa.

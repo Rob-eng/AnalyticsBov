@@ -434,10 +434,17 @@ async def _handle_cda_chart(phone, loop):
     send_whatsapp_image(phone, img_bytes, legend_caption)
     print("[WA TRIGGER] Gráfico CDA enviado com sucesso!", flush=True)
 
-    # 2. Envia o resumo textual dos últimos preços como mensagem separada
+    # 2. Card de preços com resumo textual como caption
+    from app.charts import generate_cda_summary_card
     summary_text = format_cda_summary_text(summary, for_whatsapp=True)
-    send_whatsapp_text(phone, summary_text)
-    print("[WA TRIGGER] Resumo textual CDA enviado!", flush=True)
+    card_bytes = await loop.run_in_executor(
+        None, lambda: generate_cda_summary_card(summary)
+    )
+    if card_bytes:
+        send_whatsapp_image(phone, card_bytes, summary_text)
+    else:
+        send_whatsapp_text(phone, summary_text)
+    print("[WA TRIGGER] Card CDA enviado!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):
     """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""
