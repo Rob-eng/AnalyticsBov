@@ -354,7 +354,7 @@ def get_cda_comparisons(start_date=None, end_date=None, limit=500):
         session.close()
 
 
-def get_cda_latest_summary(top_n_races: int = 8) -> dict:
+def get_cda_latest_summary(top_n_races: int = 12) -> dict:
     """
     Retorna um dicionário com:
       - 'text': texto formatado com os últimos preços por raça
@@ -425,12 +425,15 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
                     if price:
                         race_data[key]['prices'].append(price)
                     race_data[key]['lots'] += 1
-                    if lot.qtde_animals:
-                        race_data[key]['heads'] += lot.qtde_animals
-                        total_heads += lot.qtde_animals
+                    qty = lot.qtde_animals or 0
+                    if qty:
+                        race_data[key]['heads'] += qty
+                        total_heads += qty
                     if lot.closed_price_brl:
-                        race_data[key]['volume'] += lot.closed_price_brl
-                        total_volume += lot.closed_price_brl
+                        # volume = preço por cabeça × quantidade (não apenas por lote)
+                        lot_value = lot.closed_price_brl * (qty if qty else 1)
+                        race_data[key]['volume'] += lot_value
+                        total_volume += lot_value
 
                 # Busca dados Scot para a data do evento (±3 dias) para enriquecer rows
                 from datetime import timedelta as _td
@@ -469,8 +472,9 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
                             'ratio': scot_info.get('ratio'),
                         })
 
-                rows.sort(key=lambda x: x['avg_price_arroba'], reverse=True)
-                rows = rows[:top_n_races]
+                # Ordena por lotes (volume de negócios), não só por preço
+                rows.sort(key=lambda x: (x['lots_count'], x['avg_price_arroba']), reverse=True)
+                rows = rows[:top_n_races]  # top_n_races = máximo de categorias no card
 
                 return {
                     'event_name': last_event.event_name or 'Leilão CDA',
@@ -558,7 +562,9 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
     if total_heads:
         volume_parts.append(f"🐄 {int(total_heads):,} cabeças".replace(",", "."))
     if total_volume:
-        volume_parts.append(f"💰 R$ {total_volume:,.0f}".replace(",", "."))
+        # volume em PT-BR sem centavos (ex: R$ 1.842.600)
+        vol_str = f"{int(total_volume):,}".replace(",", ".")
+        volume_parts.append(f"💰 R$ {vol_str}")
     volume_line = ("\n" + " | ".join(volume_parts)) if volume_parts else ""
 
     header = (
@@ -567,8 +573,14 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
         f"{'─' * 28}\n"
     )
 
-    # Ícones para ranking
-    medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
+    def _brl(v, decimals=2):
+        """Formata número em padrão PT-BR: 1.234,56"""
+        s = f"{v:,.{decimals}f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+    # Ícones para ranking (até 12 posições)
+    medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣',
+              '9️⃣', '🔟', '1️⃣1️⃣', '1️⃣2️⃣']
 
     lines = []
     for i, row in enumerate(summary['rows']):
@@ -576,18 +588,24 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
         race   = (row.get('race') or 'Outros').title()
         price  = row.get('avg_price_arroba', 0)
         lots   = row.get('lots_count', 0)
+        heads  = row.get('heads_count', 0)
         ratio  = row.get('ratio')
         scot   = row.get('scot_price_usd')
 
-        line = f"{medal} {bold(race)}: R$ {price:,.2f}/@"
+        line = f"{medal} {bold(race)}: R$ {_brl(price)}/@"
+        detail_parts = []
         if lots:
-            line += f"  ({lots} lotes)"
+            detail_parts.append(f"{lots} lotes")
+        if heads:
+            detail_parts.append(f"{heads} cab.")
+        if detail_parts:
+            line += f"  ({', '.join(detail_parts)})"
         if ratio:
             pct = ratio * 100
             emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
             line += f"\n   {emoji} {pct:.1f}% do benchmark Scot"
             if scot:
-                line += f" (US$ {scot:.2f}/cab.)"
+                line += f" (US$ {_brl(scot)}/cab.)"
         lines.append(line)
 
     # Resumo CDA vs Mercado Spot se houver pelo menos uma linha com ratio
