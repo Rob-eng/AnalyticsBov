@@ -386,65 +386,71 @@ async def _handle_mercado_futuro(phone, loop):
 
 
 async def _handle_cda_chart(phone, loop):
-    """Pipeline Leilão CDA → envia gráfico + resumo textual de preços via WhatsApp."""
+    """Pipeline Leilão CDA → envia gráfico + card de preços vs Scot via WhatsApp."""
     from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_text
-    from app.charts import generate_cda_price_chart
+    from app.charts import generate_cda_price_chart, generate_cda_summary_card
     from app.models import get_cda_latest_summary, format_cda_summary_text
 
     send_whatsapp_text(phone, "📈 Buscando dados do Leilão Correa da Costa... Aguarde.")
 
-    # Gera gráfico e busca resumo em paralelo
     import asyncio as _aio
     chart_path, summary = await _aio.gather(
         loop.run_in_executor(None, lambda: generate_cda_price_chart(days=365)),
         loop.run_in_executor(None, get_cda_latest_summary),
     )
 
-    if not chart_path:
+    has_summary = bool(summary and summary.get('rows'))
+
+    # Sem nenhum dado em nenhuma das tabelas
+    if not chart_path and not has_summary:
         send_whatsapp_text(
             phone,
             "⚠️ Sem dados do Leilão CDA disponíveis ainda.\n"
-            "Os dados são coletados automaticamente às 05h30 todos os dias."
+            "Os dados são coletados automaticamente às 05h30 todos os dias.\n\n"
+            "Para carregar agora, peça ao administrador: /admin/ingest/cda"
         )
         return
 
-    # Aviso se dados estiverem desatualizados (> 3 dias sem novo leilão)
-    if summary.get('source') != 'empty' and not summary.get('has_recent_data') and summary.get('event_date'):
+    # Aviso de dados desatualizados (> 3 dias)
+    if has_summary and not summary.get('has_recent_data') and summary.get('event_date'):
         days_old = (datetime.utcnow() - summary['event_date']).days
         send_whatsapp_text(
             phone,
-            f"⚠️ _Dados do último leilão têm {days_old} dia(s). "
-            f"O scraping automático ocorre às 05h30. Mostrando os dados mais recentes disponíveis._"
+            f"⚠️ Dados do último leilão têm {days_old} dia(s). "
+            f"Mostrando os mais recentes disponíveis."
         )
 
-    # 1. Envia o gráfico com caption incluindo a data e URL do último evento
-    event_url   = summary.get('event_url', '')
-    event_date  = summary.get('event_date')
-    date_label  = event_date.strftime('%d/%m/%Y') if event_date else ''
-    url_line    = f"\n🔗 {event_url}" if event_url else ''
-    legend_caption = (
-        f"📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n"
-        f"Último leilão: {date_label}{url_line}\n\n"
-        f"• Linhas = preço médio R$/@ por raça\n"
-        f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
-        f"• Barras = lotes negociados/semana"
-    )
-    with open(chart_path, "rb") as f:
-        img_bytes = f.read()
-    send_whatsapp_image(phone, img_bytes, legend_caption)
-    print("[WA TRIGGER] Gráfico CDA enviado com sucesso!", flush=True)
-
-    # 2. Card de preços com resumo textual como caption
-    from app.charts import generate_cda_summary_card
-    summary_text = format_cda_summary_text(summary, for_whatsapp=True)
-    card_bytes = await loop.run_in_executor(
-        None, lambda: generate_cda_summary_card(summary)
-    )
-    if card_bytes:
-        send_whatsapp_image(phone, card_bytes, summary_text)
+    # 1. Gráfico de evolução (se disponível)
+    if chart_path:
+        event_url  = summary.get('event_url', '') if has_summary else ''
+        event_date = summary.get('event_date') if has_summary else None
+        date_label = event_date.strftime('%d/%m/%Y') if event_date else ''
+        url_line   = f"\n🔗 {event_url}" if event_url else ''
+        legend_caption = (
+            f"📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n"
+            f"Último leilão: {date_label}{url_line}\n\n"
+            f"• Linhas = preço médio R$/@ por raça\n"
+            f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+            f"• Barras = lotes negociados/semana"
+        )
+        with open(chart_path, "rb") as f:
+            img_bytes = f.read()
+        send_whatsapp_image(phone, img_bytes, legend_caption)
+        print("[WA TRIGGER] Gráfico CDA enviado com sucesso!", flush=True)
     else:
-        send_whatsapp_text(phone, summary_text)
-    print("[WA TRIGGER] Card CDA enviado!", flush=True)
+        send_whatsapp_text(phone, "ℹ️ Gráfico histórico ainda sem dados — mostrando preços do último leilão disponível.")
+
+    # 2. Card de preços + resumo como caption (se há dados de lotes)
+    if has_summary:
+        summary_text = format_cda_summary_text(summary, for_whatsapp=True)
+        card_bytes = await loop.run_in_executor(
+            None, lambda: generate_cda_summary_card(summary)
+        )
+        if card_bytes:
+            send_whatsapp_image(phone, card_bytes, summary_text)
+        else:
+            send_whatsapp_text(phone, summary_text)
+        print("[WA TRIGGER] Card CDA enviado!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):
     """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""

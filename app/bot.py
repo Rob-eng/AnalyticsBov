@@ -12,6 +12,7 @@ from app.environmental import fetch_car_perimeter, get_ndvi_analysis, generate_e
 
 
 import asyncio
+import os
 from datetime import datetime
 
 
@@ -468,53 +469,64 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             loop.run_in_executor(None, get_cda_latest_summary),
         )
 
-        if not chart_path:
+        has_summary = bool(summary and summary.get('rows'))
+
+        if not chart_path and not has_summary:
             await update.message.reply_text(
-                "⚠️ Sem dados suficientes da Correa da Costa para gerar o gráfico.\n"
-                "Os dados são coletados automaticamente às 05h30 todos os dias."
+                "⚠️ Sem dados do Leilão CDA disponíveis ainda.\n"
+                "Os dados são coletados automaticamente às 05h30 todos os dias.\n\n"
+                "Para carregar agora (admin): `/ingestcda`",
+                parse_mode='Markdown'
             )
             return
 
         # Aviso de dados desatualizados
-        if not summary.get('has_recent_data') and summary.get('event_date'):
+        if has_summary and not summary.get('has_recent_data') and summary.get('event_date'):
             days_old = (datetime.utcnow() - summary['event_date']).days
             await update.message.reply_text(
                 f"⚠️ _Dados do último leilão têm {days_old} dia(s). "
-                f"O scraping automático ocorre às 05h30._",
+                f"Mostrando os mais recentes disponíveis._",
                 parse_mode='Markdown'
             )
 
-        # 1. Gráfico de evolução
-        event_date = summary.get('event_date')
-        event_url  = summary.get('event_url', '')
-        date_label = event_date.strftime('%d/%m/%Y') if event_date else ''
-        url_line   = f"\n🔗 {event_url}" if event_url else ''
-        legend_caption = (
-            f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
-            f"Último leilão: {date_label}{url_line}\n\n"
-            f"• Linhas = preço médio R$/@ por raça\n"
-            f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
-            f"• Barras = lotes negociados/semana"
-        )
-        await update.message.reply_photo(
-            photo=open(chart_path, 'rb'),
-            caption=legend_caption,
-            parse_mode='Markdown'
-        )
-
-        # 2. Card de preços + resumo textual como caption
-        card_bytes = await loop.run_in_executor(
-            None, lambda: generate_cda_summary_card(summary)
-        )
-        summary_text = format_cda_summary_text(summary, for_whatsapp=False)
-        if card_bytes:
+        # 1. Gráfico de evolução (se disponível)
+        if chart_path:
+            event_date = summary.get('event_date') if has_summary else None
+            event_url  = summary.get('event_url', '') if has_summary else ''
+            date_label = event_date.strftime('%d/%m/%Y') if event_date else ''
+            url_line   = f"\n🔗 {event_url}" if event_url else ''
+            legend_caption = (
+                f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
+                f"Último leilão: {date_label}{url_line}\n\n"
+                f"• Linhas = preço médio R$/@ por raça\n"
+                f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+                f"• Barras = lotes negociados/semana"
+            )
             await update.message.reply_photo(
-                photo=BytesIO(card_bytes),
-                caption=summary_text,
+                photo=open(chart_path, 'rb'),
+                caption=legend_caption,
                 parse_mode='Markdown'
             )
         else:
-            await update.message.reply_text(summary_text, parse_mode='Markdown')
+            await update.message.reply_text(
+                "ℹ️ _Gráfico histórico ainda sem dados — mostrando preços do último leilão disponível._",
+                parse_mode='Markdown'
+            )
+
+        # 2. Card de preços + resumo como caption (se há dados de lotes)
+        if has_summary:
+            card_bytes = await loop.run_in_executor(
+                None, lambda: generate_cda_summary_card(summary)
+            )
+            summary_text = format_cda_summary_text(summary, for_whatsapp=False)
+            if card_bytes:
+                await update.message.reply_photo(
+                    photo=BytesIO(card_bytes),
+                    caption=summary_text,
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(summary_text, parse_mode='Markdown')
 
     except Exception as e:
         import traceback
@@ -1845,6 +1857,7 @@ async def receive_location_coords(update: Update, context: ContextTypes.DEFAULT_
         
         # 🛰️ Tenta localizar o CAR no momento do cadastro para garantir o perímetro
         print(f"[REG] Validando perímetro para {lat}, {lon}...", flush=True)
+        loop = asyncio.get_running_loop()
         geometry, car_status, cod_imovel = await loop.run_in_executor(
             None, fetch_car_perimeter, lat, lon
         )
