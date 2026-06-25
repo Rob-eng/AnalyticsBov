@@ -54,8 +54,11 @@ def _to_float(value):
     txt = _clean_text(value)
     if not txt:
         return None
-    txt = re.sub(r"[Rr]\$|US\$|@|kg", "", txt)
-    txt = txt.replace(".", "").replace(",", ".")
+    txt = re.sub(r"[Rr]\$|US\$|@|kg", "", txt).strip()
+    # PT-BR format uses "." as thousands sep and "," as decimal: "3.050,00"
+    # If no comma present, the "." is the decimal separator (US format): "423.00"
+    if "," in txt:
+        txt = txt.replace(".", "").replace(",", ".")
     txt = re.sub(r"[^0-9.\-]", "", txt)
     if not txt:
         return None
@@ -253,10 +256,11 @@ def _parse_lot_rows(soup) -> list:
         elif peso_kg:
             arrobas = round(peso_kg / 15.0, 2)
 
-        # Preço por arroba
+        # Preço por arroba: badge mostra preço POR CABEÇA, dividir por arrobas/cabeça
         arroba_price = None
-        if closed_price and arrobas and arrobas > 0:
-            arroba_price = round(closed_price / arrobas, 2)
+        if closed_price and peso_kg and peso_kg > 0:
+            arrobas_por_cabeca = peso_kg / 15.0
+            arroba_price = round(closed_price / arrobas_por_cabeca, 2)
 
         # Preço R$/kg vivo (col 7) — armazenamos em era_raw como metadado
         preco_kg_vivo = None

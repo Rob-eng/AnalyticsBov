@@ -368,15 +368,22 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
     session = SessionLocal()
     try:
         # ── Estratégia 1: usar o último evento real de cda_events ──────────
+        # Preferência: eventos com event_date; fallback: qualquer evento por collected_at
         last_event = (
             session.query(CdaEvent)
             .filter(CdaEvent.event_date.isnot(None))
             .order_by(CdaEvent.event_date.desc())
             .first()
         )
+        if not last_event:
+            last_event = (
+                session.query(CdaEvent)
+                .order_by(CdaEvent.collected_at.desc())
+                .first()
+            )
 
-        if last_event and last_event.event_date:
-            event_date = last_event.event_date
+        if last_event:
+            event_date = last_event.event_date or last_event.collected_at
             # Pega todos os lotes deste evento
             lots = (
                 session.query(CdaLotResult)
@@ -391,10 +398,32 @@ def get_cda_latest_summary(top_n_races: int = 8) -> dict:
                 race_data = defaultdict(lambda: {'prices': [], 'lots': 0, 'heads': 0, 'volume': 0.0})
                 total_heads = 0
                 total_volume = 0.0
+                def _recover_arroba_price(lot) -> float | None:
+                    """Retorna R$/@ válido — usa era_raw (R$/kg × 15) se price_per_arroba parece incorreto."""
+                    p = lot.price_per_arroba_brl
+                    if p and p >= 50:
+                        return p
+                    # Fallback: era_raw armazena R$/kg vivo
+                    if lot.era_raw:
+                        try:
+                            kg_txt = _re.sub(r"[^0-9,.]", "", lot.era_raw).replace(",", ".")
+                            kg_price = float(kg_txt)
+                            if 3.0 < kg_price < 100.0:  # faixa plausível R$/kg
+                                return round(kg_price * 15, 2)
+                        except (ValueError, TypeError):
+                            pass
+                    return None
+
+                seen_hashes: set = set()
                 for lot in lots:
                     key = (lot.race_raw or 'Não informado').strip()
-                    if lot.price_per_arroba_brl:
-                        race_data[key]['prices'].append(lot.price_per_arroba_brl)
+                    price = _recover_arroba_price(lot)
+                    # Deduplica lotes com mesmo hash (dados antigos + novos do mesmo lote)
+                    if lot.hash_key in seen_hashes:
+                        continue
+                    seen_hashes.add(lot.hash_key)
+                    if price:
+                        race_data[key]['prices'].append(price)
                     race_data[key]['lots'] += 1
                     if lot.qtde_animals:
                         race_data[key]['heads'] += lot.qtde_animals
