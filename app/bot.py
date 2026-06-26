@@ -489,23 +489,26 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
 
-        # 1. Card de preços + texto do evento
+        # 1. Card de preços — texto do evento como caption (garante ordem)
         if has_summary:
             card_bytes = await loop.run_in_executor(
                 None, lambda: generate_cda_summary_card(summary)
             )
+            event_text = format_cda_summary_text(summary, for_whatsapp=False)
             if card_bytes:
-                await update.message.reply_photo(photo=BytesIO(card_bytes))
-            await update.message.reply_text(
-                format_cda_summary_text(summary, for_whatsapp=False),
-                parse_mode='Markdown'
-            )
+                await update.message.reply_photo(
+                    photo=BytesIO(card_bytes),
+                    caption=event_text,
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(event_text, parse_mode='Markdown')
 
-        # 2. Gráfico histórico + legenda
+        # 2. Gráfico histórico — legenda como caption (garante ordem)
         if chart_path:
-            await update.message.reply_photo(photo=open(chart_path, 'rb'))
-            await update.message.reply_text(
-                format_cda_chart_legend(summary if has_summary else None),
+            await update.message.reply_photo(
+                photo=open(chart_path, 'rb'),
+                caption=format_cda_chart_legend(summary if has_summary else None),
                 parse_mode='Markdown'
             )
         elif not has_summary:

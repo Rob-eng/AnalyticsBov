@@ -418,22 +418,24 @@ async def _handle_cda_chart(phone, loop):
             f"Mostrando os mais recentes disponíveis."
         )
 
-    # 1. Card de preços + texto do evento
+    # 1. Card de preços — texto do evento como caption (garante ordem)
     if has_summary:
         card_bytes = await loop.run_in_executor(
             None, lambda: generate_cda_summary_card(summary)
         )
+        event_text = format_cda_summary_text(summary, for_whatsapp=True)
         if card_bytes:
-            send_whatsapp_image(phone, card_bytes, "")
-        send_whatsapp_text(phone, format_cda_summary_text(summary, for_whatsapp=True))
+            send_whatsapp_image(phone, card_bytes, event_text)
+        else:
+            send_whatsapp_text(phone, event_text)
         print("[WA TRIGGER] Card CDA enviado!", flush=True)
 
-    # 2. Gráfico histórico + legenda
+    # 2. Gráfico histórico — legenda como caption (garante ordem)
     if chart_path:
         with open(chart_path, "rb") as f:
             img_bytes = f.read()
-        send_whatsapp_image(phone, img_bytes, "")
-        send_whatsapp_text(phone, format_cda_chart_legend(summary if has_summary else None))
+        legend = format_cda_chart_legend(summary if has_summary else None)
+        send_whatsapp_image(phone, img_bytes, legend)
         print("[WA TRIGGER] Gráfico CDA enviado!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):
