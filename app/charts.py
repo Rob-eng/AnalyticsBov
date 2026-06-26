@@ -645,17 +645,17 @@ def generate_cda_summary_card(summary: dict):
     total_volume = summary.get('total_volume_brl')
     date_str     = event_date.strftime('%d/%m/%Y') if event_date else '--'
 
-    BG      = '#0D1117'
-    HDR_BG  = '#21262D'
-    ROW_A   = '#161B22'
-    ROW_B   = '#1C2128'
-    BORDER  = '#30363D'
-    TEXT    = '#E6EDF3'
-    SUBTEXT = '#8B949E'
-    GREEN   = '#3FB950'
-    YELLOW  = '#D29922'
-    RED     = '#F85149'
-    ACCENT  = '#58A6FF'
+    BG      = '#FFFFFF'
+    HDR_BG  = '#EFF2F5'
+    ROW_A   = '#FFFFFF'
+    ROW_B   = '#F6F8FA'
+    BORDER  = '#D0D7DE'
+    TEXT    = '#1C2A3A'
+    SUBTEXT = '#57606A'
+    GREEN   = '#1A7F37'
+    YELLOW  = '#B07C00'
+    RED     = '#CF222E'
+    ACCENT  = '#0969DA'
 
     n_rows   = min(len(rows), 12)
     has_scot = any(r.get('scot_price_usd') for r in rows[:n_rows])
@@ -694,11 +694,11 @@ def generate_cda_summary_card(summary: dict):
     stats_parts = []
     if total_heads and total_volume:
         media = total_volume / total_heads
-        stats_parts.append(f"R$ {_br(media, 0)}/animal")
+        stats_parts.append(f"R\\$ {_br(media, 0)}/animal")
     if total_heads:
-        stats_parts.append(f"{int(total_heads):,} cabecas".replace(",", "."))
+        stats_parts.append(f"{int(total_heads):,} cabeças".replace(",", "."))
     if total_volume:
-        stats_parts.append(f"R$ {total_volume:,.0f} em vendas".replace(",", "."))
+        stats_parts.append(f"R\\$ {int(total_volume):,} em vendas".replace(",", "."))
 
     fig_h = 2.6 + n_rows * 0.58
     fig, ax = _plt.subplots(figsize=(10, fig_h), facecolor=BG)
@@ -770,7 +770,8 @@ def generate_cda_summary_card(summary: dict):
              ha='center', va='bottom', color=SUBTEXT, fontsize=7.5, style='italic')
 
     buf = BytesIO()
-    _plt.savefig(buf, format='png', dpi=140, facecolor=BG, bbox_inches='tight')
+    _plt.savefig(buf, format='png', dpi=140, facecolor=BG, bbox_inches='tight',
+                 edgecolor='none')
     _plt.close()
     buf.seek(0)
     return buf.read()
@@ -866,20 +867,20 @@ def generate_cda_price_chart(days=365):
         return sub
 
     # ── 3. Paleta e tema ─────────────────────────────────────────────────────
-    BG        = '#0D1117'
-    PANEL_BG  = '#161B22'
-    GRID      = '#21262D'
-    TEXT      = '#E6EDF3'
-    SUBTEXT   = '#8B949E'
-    ACCENT    = '#58A6FF'
-    VOLUME    = '#1F6FEB'
+    BG        = '#FFFFFF'
+    PANEL_BG  = '#FAFBFC'
+    GRID      = '#D8DEE4'
+    TEXT      = '#1C2A3A'
+    SUBTEXT   = '#57606A'
+    ACCENT    = '#0969DA'
+    VOLUME    = '#0550AE'
 
     RACE_PALETTE = [
-        '#F78166',  # coral
-        '#3FB950',  # green
-        '#D2A8FF',  # purple
-        '#FFA657',  # orange
-        '#79C0FF',  # light-blue
+        '#CF222E',  # vermelho
+        '#116329',  # verde escuro
+        '#7A43B6',  # roxo
+        '#B45309',  # âmbar
+        '#0550AE',  # azul escuro
     ]
 
     # ── 4. Figura com 2 painéis ──────────────────────────────────────────────
@@ -911,7 +912,7 @@ def generate_cda_price_chart(days=365):
         last = sub_smooth.dropna().iloc[-1] if not sub_smooth.dropna().empty else None
         if last is not None:
             ax_price.scatter(last['date'], last['price_kg'],
-                             color=color, s=55, zorder=8, edgecolors='white', linewidth=0.8)
+                             color=color, s=55, zorder=8, edgecolors=BG, linewidth=0.8)
             ax_price.annotate(
                 f"R$ {last['price_kg']:,.2f}/kg",
                 xy=(last['date'], last['price_kg']),
@@ -931,6 +932,7 @@ def generate_cda_price_chart(days=365):
     if not df_scot.empty:
         ax2 = ax_price.twinx()
         ax2.set_facecolor(PANEL_BG)
+        ax2.spines[:].set_color(GRID)
         scot_smooth = df_scot.set_index('date')['price_usd'].rolling(4, min_periods=1).mean()
         ax2.plot(
             scot_smooth.index, scot_smooth.values,
@@ -938,9 +940,8 @@ def generate_cda_price_chart(days=365):
         )
         scot_max = scot_smooth.max() * 1.15
         ax2.set_ylim(bottom=0, top=scot_max)
-        ax2.set_ylabel('Cotação Scot Brasil (US$/cabeça)', color=ACCENT, fontsize=10, labelpad=10)
+        ax2.set_ylabel('Cotação Scot Brasil (US$/@)', color=ACCENT, fontsize=10, labelpad=10)
         ax2.tick_params(colors=ACCENT, labelsize=9)
-        ax2.spines[:].set_color(GRID)
         ax2.yaxis.label.set_color(ACCENT)
         ax2.tick_params(axis='y', colors=ACCENT)
         legend_handles.append(
@@ -954,7 +955,7 @@ def generate_cda_price_chart(days=365):
     ax_price.legend(
         handles=legend_handles,
         loc='upper left',
-        frameon=True, facecolor='#161B22', edgecolor=GRID,
+        frameon=True, facecolor=PANEL_BG, edgecolor=GRID,
         labelcolor=TEXT, fontsize=10,
     )
 
@@ -976,7 +977,7 @@ def generate_cda_price_chart(days=365):
     # ── 8. Título e rodapé ──────────────────────────────────────────────────
     period_label = f'Últimos {days} dias' if days < 3650 else 'Histórico completo'
     fig.suptitle(
-        f'📈 Evolução de Preços — Leilão Correa da Costa (CDA)\n{period_label}',
+        f'Evolução de Preços — Leilão Correa da Costa (CDA)\n{period_label}',
         fontsize=17, fontweight='bold', color=TEXT,
         y=0.97
     )
@@ -1001,7 +1002,7 @@ def generate_cda_price_chart(days=365):
 
     import time
     output_path = f'/tmp/cda_price_chart_{int(time.time())}.png'
-    plt.savefig(output_path, dpi=150, facecolor=BG, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, facecolor=BG, edgecolor='none', bbox_inches='tight')
     plt.close()
     return output_path
 
