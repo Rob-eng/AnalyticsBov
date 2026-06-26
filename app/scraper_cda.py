@@ -268,8 +268,8 @@ def _parse_lot_rows(soup) -> list:
         if len(tds) > 7:
             preco_kg_vivo = _clean_text(tds[7].get_text(" ", strip=True))
             price_kg = _to_float(preco_kg_vivo)
-            if price_kg and not (2.0 < price_kg < 100.0):
-                price_kg = None  # fora da faixa plausível R$/kg
+            if price_kg and not (5.0 < price_kg < 100.0):
+                price_kg = None  # fora da faixa plausível R$/kg vivo (5-100 R$/kg)
 
         if not any([raca, closed_price, price_kg]):
             continue

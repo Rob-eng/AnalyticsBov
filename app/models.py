@@ -102,8 +102,9 @@ class CdaMarketComparison(Base):
     lots_count = Column(Integer, nullable=False, default=0)
 
     scot_country = Column(String, nullable=True, index=True)
-    scot_price_usd = Column(Float, nullable=True)
-    cda_to_scot_ratio = Column(Float, nullable=True)
+    scot_price_usd = Column(Float, nullable=True)   # US$/@ carcaça
+    usd_brl_rate = Column(Float, nullable=True)     # câmbio na data
+    cda_to_scot_ratio = Column(Float, nullable=True) # CDA R$/@ ÷ Scot R$/@ (adimensional)
 
     hash_key = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -250,6 +251,7 @@ def init_db():
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS price_per_kg_brl FLOAT;"))
             conn.execute(text("ALTER TABLE cda_market_comparisons ADD COLUMN IF NOT EXISTS avg_cda_price_per_kg_brl FLOAT;"))
+            conn.execute(text("ALTER TABLE cda_market_comparisons ADD COLUMN IF NOT EXISTS usd_brl_rate FLOAT;"))
             # Backfill price_per_kg_brl de era_raw ("R$ 9,10" → 9.10) para dados existentes
             conn.execute(text("""
                 UPDATE cda_lot_results
@@ -261,6 +263,13 @@ def init_db():
                 )::FLOAT
                 WHERE era_raw ~ 'R\\$\\s*[0-9]+,[0-9]+'
                   AND (price_per_kg_brl IS NULL OR price_per_kg_brl < 1.0)
+            """))
+            # Limpa valores fora da faixa realista 5-100 R$/kg (reprodutores, muares, etc.)
+            conn.execute(text("""
+                UPDATE cda_lot_results
+                SET price_per_kg_brl = NULL
+                WHERE price_per_kg_brl IS NOT NULL
+                  AND (price_per_kg_brl <= 5.0 OR price_per_kg_brl >= 100.0)
             """))
             
             # Promoção automática do Administrador para PRO
@@ -426,12 +435,14 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
                             if "," in kg_txt:
                                 kg_txt = kg_txt.replace(".", "").replace(",", ".")
                             v = float(kg_txt)
-                            if 2.0 < v < 100.0:
+                            if 5.0 < v < 100.0:
                                 return round(v, 2)
                         except (ValueError, TypeError):
                             pass
                     if lot.closed_price_brl and lot.weight_kg and lot.weight_kg > 0:
-                        return round(lot.closed_price_brl / lot.weight_kg, 2)
+                        v = lot.closed_price_brl / lot.weight_kg
+                        if 5.0 < v < 100.0:
+                            return round(v, 2)
                     return None
 
                 seen_hashes: set = set()
@@ -557,10 +568,10 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
 
 
 def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
-    """
-    Formata o dicionário retornado por get_cda_latest_summary() como texto rico.
-    for_whatsapp=True → usa *negrito* do WA em vez de Markdown do Telegram.
-    """
+    """Formata o dicionário retornado por get_cda_latest_summary() como texto rico."""
+    from app.exchange_rate import get_usd_brl_rate
+    usd_brl = get_usd_brl_rate()
+
     if not summary or not summary.get('rows'):
         return (
             "⚠️ Ainda não há dados do Leilão Correa da Costa disponíveis.\n"
@@ -606,11 +617,10 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
     for i, row in enumerate(summary['rows']):
         medal    = medals[i] if i < len(medals) else '▪️'
         race     = (row.get('race') or 'Outros').title()
-        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 15)
+        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 30)
         lots     = row.get('lots_count', 0)
         heads    = row.get('heads_count', 0)
-        ratio    = row.get('ratio')
-        scot     = row.get('scot_price_usd')
+        scot_usd = row.get('scot_price_usd')
         line = f"{medal} {bold(race)}: R$ {_brl(price_kg, 2)}/kg"
         detail_parts = []
         if lots:
@@ -619,25 +629,25 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
             detail_parts.append(f"{heads} cab.")
         if detail_parts:
             line += f"  ({', '.join(detail_parts)})"
-        if ratio:
-            pct = ratio * 100
-            emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
-            line += f"\n   {emoji} {pct:.1f}% do benchmark Scot"
-            if scot:
-                line += f" (US$ {_brl(scot, 0)}/cab.)"
+        # Ratio correto: CDA R$/@ ÷ Scot R$/@ (ambos em base carcaça)
+        if price_kg and scot_usd and usd_brl:
+            cda_arroba = price_kg * 30          # R$/@ base carcaça
+            scot_arroba_brl = scot_usd * usd_brl  # R$/@ base carcaça
+            pct = (cda_arroba / scot_arroba_brl) * 100
+            emoji = '🟢' if pct >= 100 else '🟡' if pct >= 90 else '🔴'
+            line += f"\n   {emoji} {pct:.1f}% do Scot (US$ {_brl(scot_usd, 0)}/@)"
         lines.append(line)
 
-    # Resumo CDA vs Mercado Spot se houver pelo menos uma linha com ratio
-    ratios = [r['ratio'] for r in summary['rows'] if r.get('ratio')]
+    # Rodapé com câmbio e referência Scot
+    scot_refs = [r['scot_price_usd'] for r in summary['rows'] if r.get('scot_price_usd')]
     spot_summary = ""
-    if ratios:
-        avg_ratio = sum(ratios) / len(ratios)
-        pct = avg_ratio * 100
-        emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
+    if scot_refs and usd_brl:
+        scot_val = scot_refs[0]
+        scot_brl = scot_val * usd_brl
         spot_summary = (
             f"\n{'─' * 28}\n"
-            f"{emoji} {bold('Leilão vs Mercado Spot')}: {pct:.1f}% do benchmark Scot Brasil\n"
-            f"({'acima' if pct >= 100 else 'abaixo'} da referência de exportação)"
+            f"📊 {bold('Scot Brasil')}: US$ {_brl(scot_val, 0)}/@ = R$ {_brl(scot_brl, 0)}/@ "
+            f"(câmbio R$ {_brl(usd_brl, 2)})"
         )
 
     footer = (

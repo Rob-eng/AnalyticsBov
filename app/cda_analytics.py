@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import func
 
+from app.exchange_rate import get_usd_brl_rate
 from app.models import (
     SessionLocal,
     CdaEvent,
@@ -90,6 +91,9 @@ def build_cda_scot_comparisons(
     inserted = 0
     updated = 0
 
+    # Câmbio USD→BRL no momento da comparação (cacheado 6h)
+    usd_brl = get_usd_brl_rate()
+
     try:
         now = datetime.utcnow()
         cutoff = now - timedelta(days=lookback_days)
@@ -114,7 +118,8 @@ def build_cda_scot_comparisons(
                 func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) >= cutoff
             )
             .filter(CdaLotResult.price_per_kg_brl.isnot(None))
-            .filter(CdaLotResult.price_per_kg_brl > 1.0)
+            .filter(CdaLotResult.price_per_kg_brl > 5.0)
+            .filter(CdaLotResult.price_per_kg_brl < 100.0)
             .filter(
                 (CdaLotResult.scrape_mode == "individual") |
                 (CdaLotResult.scrape_mode.is_(None))
@@ -141,15 +146,17 @@ def build_cda_scot_comparisons(
             avg_closed   = float(row.avg_closed)   if row.avg_closed   is not None else None
             lots_count   = int(row.lots_count or 0)
 
-            # R$/@ mantido para retrocompat — usa ×15 (animais jovens; suficiente p/ série histórica)
-            avg_arroba = round(avg_price_kg * 15, 2) if avg_price_kg else None
+            # R$/@ base carcaça: R$/kg vivo × 30 (rendimento ~50%, 1@ carcaça = 30kg vivo)
+            avg_arroba = round(avg_price_kg * 30, 2) if avg_price_kg else None
 
             scot_price = _nearest_scot_price(scot_prices, ref_day, max_delta_days=3)
 
-            # Ratio: compara R$/@ com Scot USD/cab — mantido para séries históricas
+            # Ratio: CDA R$/@ ÷ Scot R$/@ — adimensional, comparável
+            # Scot está em US$/@ (carcaça); convertemos com câmbio do dia
             ratio = None
-            if avg_arroba and scot_price:
-                ratio = avg_arroba / scot_price
+            if avg_arroba and scot_price and usd_brl:
+                scot_brl = scot_price * usd_brl  # R$/@ carcaça
+                ratio = round(avg_arroba / scot_brl, 4)
 
             payload = {
                 "reference_date": ref_day.isoformat() if ref_day else None,
@@ -161,11 +168,12 @@ def build_cda_scot_comparisons(
 
             existing = session.query(CdaMarketComparison).filter_by(hash_key=hash_key).first()
             if existing:
-                existing.avg_cda_price_per_kg_brl    = avg_price_kg
-                existing.avg_cda_price_per_arroba_brl = avg_arroba
-                existing.avg_cda_closed_price_brl     = avg_closed
-                existing.lots_count    = lots_count
+                existing.avg_cda_price_per_kg_brl     = avg_price_kg
+                existing.avg_cda_price_per_arroba_brl  = avg_arroba
+                existing.avg_cda_closed_price_brl      = avg_closed
+                existing.lots_count        = lots_count
                 existing.scot_price_usd    = scot_price
+                existing.usd_brl_rate      = usd_brl
                 existing.cda_to_scot_ratio = ratio
                 existing.updated_at        = now
                 updated += 1
@@ -182,6 +190,7 @@ def build_cda_scot_comparisons(
                         lots_count=lots_count,
                         scot_country="Brasil",
                         scot_price_usd=scot_price,
+                        usd_brl_rate=usd_brl,
                         cda_to_scot_ratio=ratio,
                         hash_key=hash_key,
                         created_at=now,
