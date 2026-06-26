@@ -459,7 +459,7 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     try:
         from app.charts import generate_cda_price_chart, generate_cda_summary_card
-        from app.models import get_cda_latest_summary, format_cda_summary_text
+        from app.models import get_cda_latest_summary, format_cda_summary_text, format_cda_chart_legend
         from io import BytesIO
 
         loop = asyncio.get_running_loop()
@@ -489,40 +489,30 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
 
-        # 1. Gráfico de evolução (se disponível)
-        if chart_path:
-            event_date = summary.get('event_date') if has_summary else None
-            event_url  = summary.get('event_url', '') if has_summary else ''
-            date_label = event_date.strftime('%d/%m/%Y') if event_date else ''
-            url_line   = f"\n🔗 {event_url}" if event_url else ''
-            legend_caption = (
-                f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
-                f"Último leilão: {date_label}{url_line}\n\n"
-                f"• Linhas = preço médio R$/kg vivo por categoria\n"
-                f"• Tracejado azul = Scot Brasil (US$/cab., eixo direito)\n"
-                f"• Barras = lotes negociados/semana"
-            )
-            await update.message.reply_photo(
-                photo=open(chart_path, 'rb'),
-                caption=legend_caption,
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(
-                "ℹ️ _Gráfico histórico ainda sem dados — mostrando preços do último leilão disponível._",
-                parse_mode='Markdown'
-            )
-
-        # 2. Card de preços — foto sem caption longa (Telegram limita a 1024 chars)
+        # 1. Card de preços + texto do evento
         if has_summary:
             card_bytes = await loop.run_in_executor(
                 None, lambda: generate_cda_summary_card(summary)
             )
-            summary_text = format_cda_summary_text(summary, for_whatsapp=False)
             if card_bytes:
                 await update.message.reply_photo(photo=BytesIO(card_bytes))
-            # Texto sempre enviado separado (sem risco de estouro de caption)
-            await update.message.reply_text(summary_text, parse_mode='Markdown')
+            await update.message.reply_text(
+                format_cda_summary_text(summary, for_whatsapp=False),
+                parse_mode='Markdown'
+            )
+
+        # 2. Gráfico histórico + legenda
+        if chart_path:
+            await update.message.reply_photo(photo=open(chart_path, 'rb'))
+            await update.message.reply_text(
+                format_cda_chart_legend(summary if has_summary else None),
+                parse_mode='Markdown'
+            )
+        elif not has_summary:
+            await update.message.reply_text(
+                "ℹ️ _Gráfico histórico ainda sem dados._",
+                parse_mode='Markdown'
+            )
 
     except Exception as e:
         import traceback

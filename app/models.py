@@ -568,99 +568,69 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
 
 
 def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
-    """Formata o dicionário retornado por get_cda_latest_summary() como texto rico."""
-    from app.exchange_rate import get_usd_brl_rate
-    usd_brl = get_usd_brl_rate()
-
+    """Texto do evento: nome, data, stats e link — enviado após o card de preços."""
     if not summary or not summary.get('rows'):
         return (
             "⚠️ Ainda não há dados do Leilão Correa da Costa disponíveis.\n"
             "Os dados são coletados automaticamente às 05h30 todos os dias."
         )
 
-    bold = lambda s: f"*{s}*" if for_whatsapp else f"*{s}*"
+    def _brl(v, dec=0):
+        s = f"{v:,.{dec}f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-    event_name = summary.get('event_name') or 'Leilão CDA'
-    event_date = summary.get('event_date')
-    location   = summary.get('event_location') or ''
+    bold = lambda s: f"*{s}*"
+
+    event_name   = summary.get('event_name') or 'Leilão CDA'
+    event_date   = summary.get('event_date')
+    location     = summary.get('event_location') or ''
+    event_url    = summary.get('event_url') or ''
+    total_heads  = summary.get('total_heads')
+    total_volume = summary.get('total_volume_brl')
 
     date_str = event_date.strftime('%d/%m/%Y') if event_date else 'data não informada'
     loc_str  = f" — {location}" if location else ''
 
-    total_heads  = summary.get('total_heads')
-    total_volume = summary.get('total_volume_brl')
-    volume_parts = []
+    # Linha de stats: média/animal | cabeças | volume total
+    stats_parts = []
+    if total_heads and total_volume:
+        media = total_volume / total_heads
+        stats_parts.append(f"R$ {_brl(media, 0)}/animal")
     if total_heads:
-        volume_parts.append(f"🐄 {int(total_heads):,} cabeças".replace(",", "."))
+        stats_parts.append(f"🐄 {int(total_heads):,} cabeças".replace(",", "."))
     if total_volume:
-        # volume em PT-BR sem centavos (ex: R$ 1.842.600)
-        vol_str = f"{int(total_volume):,}".replace(",", ".")
-        volume_parts.append(f"💰 R$ {vol_str}")
-    volume_line = ("\n" + " | ".join(volume_parts)) if volume_parts else ""
+        stats_parts.append(f"💰 R$ {_brl(total_volume, 0)}")
+    stats_line = (" | ".join(stats_parts) + "\n") if stats_parts else ""
 
-    header = (
-        f"🐂 {bold(event_name)}{loc_str}\n"
-        f"📅 Data: {date_str}{volume_line}\n"
-        f"{'─' * 28}\n"
-    )
-
-    def _brl(v, decimals=2):
-        """Formata número em padrão PT-BR: 1.234,56"""
-        s = f"{v:,.{decimals}f}"
-        return s.replace(",", "X").replace(".", ",").replace("X", ".")
-
-    # Ícones para ranking (até 12 posições)
-    medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣',
-              '9️⃣', '🔟', '1️⃣1️⃣', '1️⃣2️⃣']
-
-    lines = []
-    for i, row in enumerate(summary['rows']):
-        medal    = medals[i] if i < len(medals) else '▪️'
-        race     = (row.get('race') or 'Outros').title()
-        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 30)
-        lots     = row.get('lots_count', 0)
-        heads    = row.get('heads_count', 0)
-        scot_usd = row.get('scot_price_usd')
-        line = f"{medal} {bold(race)}: R$ {_brl(price_kg, 2)}/kg"
-        detail_parts = []
-        if lots:
-            detail_parts.append(f"{lots} lotes")
-        if heads:
-            detail_parts.append(f"{heads} cab.")
-        if detail_parts:
-            line += f"  ({', '.join(detail_parts)})"
-        # Ratio correto: CDA R$/@ ÷ Scot R$/@ (ambos em base carcaça)
-        if price_kg and scot_usd and usd_brl:
-            cda_arroba = price_kg * 30          # R$/@ base carcaça
-            scot_arroba_brl = scot_usd * usd_brl  # R$/@ base carcaça
-            pct = (cda_arroba / scot_arroba_brl) * 100
-            emoji = '🟢' if pct >= 100 else '🟡' if pct >= 90 else '🔴'
-            line += f"\n   {emoji} {pct:.1f}% do Scot (US$ {_brl(scot_usd, 0)}/@)"
-        lines.append(line)
-
-    # Rodapé com câmbio e referência Scot
-    scot_refs = [r['scot_price_usd'] for r in summary['rows'] if r.get('scot_price_usd')]
-    spot_summary = ""
-    if scot_refs and usd_brl:
-        scot_val = scot_refs[0]
-        scot_brl = scot_val * usd_brl
-        spot_summary = (
-            f"\n{'─' * 28}\n"
-            f"📊 {bold('Scot Brasil')}: US$ {_brl(scot_val, 0)}/@ = R$ {_brl(scot_brl, 0)}/@ "
-            f"(câmbio R$ {_brl(usd_brl, 2)})"
-        )
-
-    footer = (
-        f"\n{'─' * 28}\n"
-        f"_Fonte: Correa da Costa Agropecuária_\n"
-        f"_Gráfico: Agro Analytics Bot_"
-    )
     if for_whatsapp:
         footer = (
-            f"\n{'─' * 28}\n"
-            f"Fonte: Correa da Costa Agropecuária\n"
-            f"Agro Analytics Bot"
+            f"\nFonte: Correa da Costa Agropecuária\n"
+            + (f"{event_url}\n" if event_url else "")
+            + "Agro Analytics Bot"
+        )
+    else:
+        footer = (
+            f"\n_Fonte: Correa da Costa Agropecuária_\n"
+            + (f"{event_url}\n" if event_url else "")
+            + "_Agro Analytics Bot_"
         )
 
-    return header + '\n'.join(lines) + spot_summary + footer
+    return (
+        f"🐂 {bold(event_name)}{loc_str}\n"
+        f"📅 Data: {date_str}\n"
+        f"{stats_line}"
+        f"{footer}"
+    )
+
+
+def format_cda_chart_legend(summary: dict) -> str:
+    """Legenda do gráfico histórico — enviada após a imagem do gráfico."""
+    event_date = summary.get('event_date') if summary else None
+    date_str = event_date.strftime('%d/%m/%Y') if event_date else '—'
+    return (
+        f"📈 Último leilão: {date_str}\n\n"
+        f"• Linhas = preço médio R$/kg vivo por categoria\n"
+        f"• Tracejado azul = Scot Brasil (US$/cab., eixo direito)\n"
+        f"• Barras = lotes negociados/semana"
+    )
 
