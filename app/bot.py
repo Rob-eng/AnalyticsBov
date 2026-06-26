@@ -498,8 +498,8 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             legend_caption = (
                 f"📈 *Leilão Correa da Costa — Evolução {days}d*\n"
                 f"Último leilão: {date_label}{url_line}\n\n"
-                f"• Linhas = preço médio R$/@ por raça\n"
-                f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+                f"• Linhas = preço médio R$/kg vivo por categoria\n"
+                f"• Tracejado azul = Scot Brasil (US$/cab., eixo direito)\n"
                 f"• Barras = lotes negociados/semana"
             )
             await update.message.reply_photo(
@@ -513,20 +513,16 @@ async def cda_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
 
-        # 2. Card de preços + resumo como caption (se há dados de lotes)
+        # 2. Card de preços — foto sem caption longa (Telegram limita a 1024 chars)
         if has_summary:
             card_bytes = await loop.run_in_executor(
                 None, lambda: generate_cda_summary_card(summary)
             )
             summary_text = format_cda_summary_text(summary, for_whatsapp=False)
             if card_bytes:
-                await update.message.reply_photo(
-                    photo=BytesIO(card_bytes),
-                    caption=summary_text,
-                    parse_mode='Markdown'
-                )
-            else:
-                await update.message.reply_text(summary_text, parse_mode='Markdown')
+                await update.message.reply_photo(photo=BytesIO(card_bytes))
+            # Texto sempre enviado separado (sem risco de estouro de caption)
+            await update.message.reply_text(summary_text, parse_mode='Markdown')
 
     except Exception as e:
         import traceback

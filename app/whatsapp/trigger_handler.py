@@ -429,8 +429,8 @@ async def _handle_cda_chart(phone, loop):
         legend_caption = (
             f"📈 Leilão Correa da Costa — Evolução de Preços (365 dias)\n"
             f"Último leilão: {date_label}{url_line}\n\n"
-            f"• Linhas = preço médio R$/@ por raça\n"
-            f"• Tracejado azul = Scot Brasil (US$/cab.)\n"
+            f"• Linhas = preço médio R$/kg vivo por categoria\n"
+            f"• Tracejado azul = Scot Brasil (US$/cab., eixo direito)\n"
             f"• Barras = lotes negociados/semana"
         )
         with open(chart_path, "rb") as f:
@@ -440,16 +440,15 @@ async def _handle_cda_chart(phone, loop):
     else:
         send_whatsapp_text(phone, "ℹ️ Gráfico histórico ainda sem dados — mostrando preços do último leilão disponível.")
 
-    # 2. Card de preços + resumo como caption (se há dados de lotes)
+    # 2. Card de preços — imagem sem caption + texto separado (evita estouro de 1024 chars)
     if has_summary:
         summary_text = format_cda_summary_text(summary, for_whatsapp=True)
         card_bytes = await loop.run_in_executor(
             None, lambda: generate_cda_summary_card(summary)
         )
         if card_bytes:
-            send_whatsapp_image(phone, card_bytes, summary_text)
-        else:
-            send_whatsapp_text(phone, summary_text)
+            send_whatsapp_image(phone, card_bytes, "")  # sem caption no card
+        send_whatsapp_text(phone, summary_text)          # texto sempre separado
         print("[WA TRIGGER] Card CDA enviado!", flush=True)
 
 async def _send_car_zip_guide(phone, cod_imovel):

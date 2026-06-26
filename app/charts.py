@@ -915,7 +915,7 @@ def generate_cda_price_chart(days=365):
         label = race.title() if race else 'Outros'
         legend_handles.append(Line2D([0], [0], color=color, linewidth=2.2, label=label))
 
-    # Eixo secundário: Scot USD
+    # Eixo secundário: Scot USD — ylim começa em 0 para não distorcer a posição vertical
     if not df_scot.empty:
         ax2 = ax_price.twinx()
         ax2.set_facecolor(PANEL_BG)
@@ -924,6 +924,8 @@ def generate_cda_price_chart(days=365):
             scot_smooth.index, scot_smooth.values,
             color=ACCENT, linewidth=1.6, linestyle='--', alpha=0.7, zorder=4
         )
+        scot_max = scot_smooth.max() * 1.15
+        ax2.set_ylim(bottom=0, top=scot_max)
         ax2.set_ylabel('Cotação Scot Brasil (US$/cabeça)', color=ACCENT, fontsize=10, labelpad=10)
         ax2.tick_params(colors=ACCENT, labelsize=9)
         ax2.spines[:].set_color(GRID)
