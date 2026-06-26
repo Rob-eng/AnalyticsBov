@@ -95,7 +95,8 @@ class CdaMarketComparison(Base):
     sex_norm = Column(String, nullable=True, index=True)
     era_norm = Column(String, nullable=True, index=True)
 
-    avg_cda_price_per_arroba_brl = Column(Float, nullable=True)
+    avg_cda_price_per_kg_brl = Column(Float, nullable=True)    # R$/kg vivo (métrica principal)
+    avg_cda_price_per_arroba_brl = Column(Float, nullable=True) # mantido para compat.
     avg_cda_closed_price_brl = Column(Float, nullable=True)
     lots_count = Column(Integer, nullable=False, default=0)
 
@@ -246,6 +247,7 @@ def init_db():
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))
+            conn.execute(text("ALTER TABLE cda_market_comparisons ADD COLUMN IF NOT EXISTS avg_cda_price_per_kg_brl FLOAT;"))
             
             # Promoção automática do Administrador para PRO
             admin_id = str(Config.ADMIN_CHAT_ID)

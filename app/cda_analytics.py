@@ -94,29 +94,34 @@ def build_cda_scot_comparisons(
         now = datetime.utcnow()
         cutoff = now - timedelta(days=lookback_days)
 
+        # Usa coalesce(event_date, collected_at) para não perder eventos sem data no slug
+        ref_day_expr = func.date_trunc(
+            "day",
+            func.coalesce(CdaEvent.event_date, CdaEvent.collected_at)
+        )
+
         grouped = (
             session.query(
-                func.date_trunc("day", CdaEvent.event_date).label("reference_day"),
+                ref_day_expr.label("reference_day"),
                 CdaLotResult.race_raw,
                 CdaLotResult.sex_raw,
-                CdaLotResult.era_raw,
-                func.avg(CdaLotResult.price_per_arroba_brl).label("avg_arroba"),
+                # era_raw armazena R$/kg vivo (string "R$ 14,80") — usado abaixo
                 func.avg(CdaLotResult.closed_price_brl).label("avg_closed"),
+                func.avg(CdaLotResult.weight_kg).label("avg_weight_kg"),
                 func.count(CdaLotResult.id).label("lots_count"),
             )
             .join(CdaEvent, CdaEvent.id == CdaLotResult.event_id)
-            .filter(CdaEvent.event_date.isnot(None))
-            .filter(CdaEvent.event_date >= cutoff)
-            # Filtra apenas lotes individuais para evitar colisão semântica de era_raw
+            .filter(
+                func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) >= cutoff
+            )
             .filter(
                 (CdaLotResult.scrape_mode == "individual") |
                 (CdaLotResult.scrape_mode.is_(None))
             )
             .group_by(
-                func.date_trunc("day", CdaEvent.event_date),
+                ref_day_expr,
                 CdaLotResult.race_raw,
                 CdaLotResult.sex_raw,
-                CdaLotResult.era_raw,
             )
             .all()
         )
@@ -128,16 +133,24 @@ def build_cda_scot_comparisons(
         )
 
         for row in grouped:
-            ref_day = _as_day(row.reference_day)
-            race_norm = _norm_label(row.race_raw)
-            sex_norm = _norm_label(row.sex_raw)
-            era_norm = _norm_label(row.era_raw)
-            # Usa data mais próxima em vez de exata (corrige fins de semana/gaps)
-            scot_price = _nearest_scot_price(scot_prices, ref_day, max_delta_days=3)
-            avg_arroba = float(row.avg_arroba) if row.avg_arroba is not None else None
-            avg_closed = float(row.avg_closed) if row.avg_closed is not None else None
+            ref_day    = _as_day(row.reference_day)
+            race_norm  = _norm_label(row.race_raw)
+            sex_norm   = _norm_label(row.sex_raw)
+            avg_closed = float(row.avg_closed)   if row.avg_closed   is not None else None
+            avg_wkg    = float(row.avg_weight_kg) if row.avg_weight_kg is not None else None
             lots_count = int(row.lots_count or 0)
 
+            # R$/kg vivo = preço por cabeça / peso médio por cabeça (em kg)
+            avg_price_kg = None
+            if avg_closed and avg_wkg and avg_wkg > 0:
+                avg_price_kg = round(avg_closed / avg_wkg, 2)
+
+            # Mantém R$/@ para retrocompat (R$/kg × 15 para animais jovens)
+            avg_arroba = round(avg_price_kg * 15, 2) if avg_price_kg else None
+
+            scot_price = _nearest_scot_price(scot_prices, ref_day, max_delta_days=3)
+
+            # Ratio: compara R$/@ com Scot USD/cab — mantido para séries históricas
             ratio = None
             if avg_arroba and scot_price:
                 ratio = avg_arroba / scot_price
@@ -146,20 +159,19 @@ def build_cda_scot_comparisons(
                 "reference_date": ref_day.isoformat() if ref_day else None,
                 "race_norm": race_norm,
                 "sex_norm": sex_norm,
-                "era_norm": era_norm,
                 "scot_country": "Brasil",
             }
             hash_key = _hash_payload(payload)
 
             existing = session.query(CdaMarketComparison).filter_by(hash_key=hash_key).first()
             if existing:
+                existing.avg_cda_price_per_kg_brl    = avg_price_kg
                 existing.avg_cda_price_per_arroba_brl = avg_arroba
-                existing.avg_cda_closed_price_brl = avg_closed
-                existing.lots_count = lots_count
-                existing.scot_country = "Brasil"
-                existing.scot_price_usd = scot_price
+                existing.avg_cda_closed_price_brl     = avg_closed
+                existing.lots_count    = lots_count
+                existing.scot_price_usd    = scot_price
                 existing.cda_to_scot_ratio = ratio
-                existing.updated_at = now
+                existing.updated_at        = now
                 updated += 1
             else:
                 session.add(
@@ -167,7 +179,8 @@ def build_cda_scot_comparisons(
                         reference_date=ref_day,
                         race_norm=race_norm,
                         sex_norm=sex_norm,
-                        era_norm=era_norm,
+                        era_norm=None,
+                        avg_cda_price_per_kg_brl=avg_price_kg,
                         avg_cda_price_per_arroba_brl=avg_arroba,
                         avg_cda_closed_price_brl=avg_closed,
                         lots_count=lots_count,

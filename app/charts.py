@@ -670,7 +670,7 @@ def generate_cda_summary_card(summary: dict):
     table_data = []
     for row in rows[:n_rows]:
         race     = (row.get('race') or 'Outros').title()[:22]
-        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 15)
+        price_kg = row.get('avg_price_kg') or (row.get('avg_price_kg', 0) / 15)
         price    = f"R$ {_br(price_kg)}"
         lots     = str(row.get('lots_count', 0))
         heads    = str(row.get('heads_count') or '-')
@@ -817,11 +817,14 @@ def generate_cda_price_chart(days=365):
     df = pd.DataFrame([{
         'date': r.reference_date,
         'race': r.race_norm or 'Outros',
-        'price_arroba': r.avg_cda_price_per_arroba_brl,
+        # R$/kg como métrica primária; fallback p/ legados com só R$/@
+        'price_kg': r.avg_cda_price_per_kg_brl or (
+            (r.avg_cda_price_per_arroba_brl / 15) if r.avg_cda_price_per_arroba_brl else None
+        ),
         'lots': r.lots_count or 0,
     } for r in rows])
     df['date'] = pd.to_datetime(df['date'])
-    df = df.dropna(subset=['price_arroba'])
+    df = df.dropna(subset=['price_kg'])
 
     df_scot = pd.DataFrame([{
         'date': r.date,
@@ -846,8 +849,8 @@ def generate_cda_price_chart(days=365):
 
     # Suavização: média móvel de 4 semanas por raça
     def smooth_series(sub):
-        sub = sub.set_index('date').resample('W')['price_arroba'].mean().reset_index()
-        sub['price_arroba'] = sub['price_arroba'].rolling(4, min_periods=1).mean()
+        sub = sub.set_index('date').resample('W')['price_kg'].mean().reset_index()
+        sub['price_kg'] = sub['price_kg'].rolling(4, min_periods=1).mean()
         return sub
 
     # ── 3. Paleta e tema ─────────────────────────────────────────────────────
@@ -886,27 +889,27 @@ def generate_cda_price_chart(days=365):
     for i, race in enumerate(top_races):
         color = RACE_PALETTE[i % len(RACE_PALETTE)]
         sub = df_top[df_top['race'] == race]
-        sub_smooth = smooth_series(sub[['date', 'price_arroba']].copy())
+        sub_smooth = smooth_series(sub[['date', 'price_kg']].copy())
 
         ax_price.plot(
-            sub_smooth['date'], sub_smooth['price_arroba'],
+            sub_smooth['date'], sub_smooth['price_kg'],
             color=color, linewidth=2.4, alpha=0.92, zorder=5
         )
         # Marcador no último valor
         last = sub_smooth.dropna().iloc[-1] if not sub_smooth.dropna().empty else None
         if last is not None:
-            ax_price.scatter(last['date'], last['price_arroba'],
+            ax_price.scatter(last['date'], last['price_kg'],
                              color=color, s=55, zorder=8, edgecolors='white', linewidth=0.8)
             ax_price.annotate(
-                f"R$ {last['price_arroba']:,.0f}",
-                xy=(last['date'], last['price_arroba']),
+                f"R$ {last['price_kg']:,.2f}/kg",
+                xy=(last['date'], last['price_kg']),
                 xytext=(8, 0), textcoords='offset points',
                 fontsize=9, color=color, va='center', fontweight='bold'
             )
 
         # Área sombreada suave
         ax_price.fill_between(
-            sub_smooth['date'], sub_smooth['price_arroba'],
+            sub_smooth['date'], sub_smooth['price_kg'],
             alpha=0.06, color=color, zorder=2
         )
         label = race.title() if race else 'Outros'
@@ -930,8 +933,8 @@ def generate_cda_price_chart(days=365):
             Line2D([0], [0], color=ACCENT, linewidth=1.6, linestyle='--', label='Scot Brasil (US$)')
         )
 
-    ax_price.set_ylabel('Preço Médio R$/@ (Leilão CDA)', color=TEXT, fontsize=11, labelpad=12)
-    ax_price.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'R$ {x:,.0f}'))
+    ax_price.set_ylabel('Preço Médio R$/kg vivo (Leilão CDA)', color=TEXT, fontsize=11, labelpad=12)
+    ax_price.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'R$ {x:,.2f}'))
     ax_price.tick_params(axis='x', labelbottom=False)
 
     ax_price.legend(
