@@ -395,42 +395,44 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
                 # Agrupa por raça e calcula médias, totais de cabeças e volume
                 from collections import defaultdict
                 import re as _re
-                race_data = defaultdict(lambda: {'prices': [], 'lots': 0, 'heads': 0, 'volume': 0.0})
+                # R$/kg é a métrica primária — direto do scraper (era_raw = tds[7] "R$/kg vivo")
+                # Para @ quando necessário: animais de abate (VACA, TOUROS) = peso/30 (rend. carcaça ~50%)
+                #                          animais jovens = peso/15 (peso vivo)
+                race_data = defaultdict(lambda: {'kg_prices': [], 'lots': 0, 'heads': 0, 'volume': 0.0})
                 total_heads = 0
                 total_volume = 0.0
-                def _recover_arroba_price(lot) -> float | None:
-                    """Retorna R$/@ válido — usa era_raw (R$/kg × 15) se price_per_arroba parece incorreto."""
-                    p = lot.price_per_arroba_brl
-                    if p and p >= 50:
-                        return p
-                    # Fallback: era_raw armazena R$/kg vivo
+
+                def _parse_kg_price(lot) -> float | None:
+                    """R$/kg vivo — usa era_raw (col R$/kg do site) ou calcula de closed/weight."""
                     if lot.era_raw:
                         try:
-                            kg_txt = _re.sub(r"[^0-9,.]", "", lot.era_raw).replace(",", ".")
-                            kg_price = float(kg_txt)
-                            if 3.0 < kg_price < 100.0:  # faixa plausível R$/kg
-                                return round(kg_price * 15, 2)
+                            kg_txt = _re.sub(r"[^0-9,.]", "", lot.era_raw)
+                            if "," in kg_txt:
+                                kg_txt = kg_txt.replace(".", "").replace(",", ".")
+                            v = float(kg_txt)
+                            if 2.0 < v < 100.0:
+                                return round(v, 2)
                         except (ValueError, TypeError):
                             pass
+                    if lot.closed_price_brl and lot.weight_kg and lot.weight_kg > 0:
+                        return round(lot.closed_price_brl / lot.weight_kg, 2)
                     return None
 
                 seen_hashes: set = set()
                 for lot in lots:
                     key = (lot.race_raw or 'Não informado').strip()
-                    price = _recover_arroba_price(lot)
-                    # Deduplica lotes com mesmo hash (dados antigos + novos do mesmo lote)
                     if lot.hash_key in seen_hashes:
                         continue
                     seen_hashes.add(lot.hash_key)
-                    if price:
-                        race_data[key]['prices'].append(price)
+                    kg_price = _parse_kg_price(lot)
+                    if kg_price:
+                        race_data[key]['kg_prices'].append(kg_price)
                     race_data[key]['lots'] += 1
                     qty = lot.qtde_animals or 0
                     if qty:
                         race_data[key]['heads'] += qty
                         total_heads += qty
                     if lot.closed_price_brl:
-                        # volume = preço por cabeça × quantidade (não apenas por lote)
                         lot_value = lot.closed_price_brl * (qty if qty else 1)
                         race_data[key]['volume'] += lot_value
                         total_volume += lot_value
@@ -460,21 +462,23 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
 
                 rows = []
                 for race, data in race_data.items():
-                    if data['prices']:
-                        avg_price = sum(data['prices']) / len(data['prices'])
-                        scot_info = scot_map.get(_nl(race), {})
-                        rows.append({
-                            'race': race,
-                            'avg_price_arroba': avg_price,
-                            'lots_count': data['lots'],
-                            'heads_count': data['heads'],
-                            'scot_price_usd': scot_info.get('scot_price_usd'),
-                            'ratio': scot_info.get('ratio'),
-                        })
+                    kp = data['kg_prices']
+                    if not kp:
+                        continue
+                    avg_kg = sum(kp) / len(kp)
+                    scot_info = scot_map.get(_nl(race), {})
+                    rows.append({
+                        'race': race,
+                        'avg_price_kg': avg_kg,
+                        'lots_count': data['lots'],
+                        'heads_count': data['heads'],
+                        'scot_price_usd': scot_info.get('scot_price_usd'),
+                        'ratio': scot_info.get('ratio'),
+                    })
 
-                # Ordena por lotes (volume de negócios), não só por preço
-                rows.sort(key=lambda x: (x['lots_count'], x['avg_price_arroba']), reverse=True)
-                rows = rows[:top_n_races]  # top_n_races = máximo de categorias no card
+                # Ordena por lotes desc → dentro do mesmo nº de lotes, por preço/kg
+                rows.sort(key=lambda x: (x['lots_count'], x['avg_price_kg']), reverse=True)
+                rows = rows[:top_n_races]
 
                 return {
                     'event_name': last_event.event_name or 'Leilão CDA',
@@ -584,15 +588,14 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
 
     lines = []
     for i, row in enumerate(summary['rows']):
-        medal  = medals[i] if i < len(medals) else '▪️'
-        race   = (row.get('race') or 'Outros').title()
-        price  = row.get('avg_price_arroba', 0)
-        lots   = row.get('lots_count', 0)
-        heads  = row.get('heads_count', 0)
-        ratio  = row.get('ratio')
-        scot   = row.get('scot_price_usd')
-
-        line = f"{medal} {bold(race)}: R$ {_brl(price)}/@"
+        medal    = medals[i] if i < len(medals) else '▪️'
+        race     = (row.get('race') or 'Outros').title()
+        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 15)
+        lots     = row.get('lots_count', 0)
+        heads    = row.get('heads_count', 0)
+        ratio    = row.get('ratio')
+        scot     = row.get('scot_price_usd')
+        line = f"{medal} {bold(race)}: R$ {_brl(price_kg, 2)}/kg"
         detail_parts = []
         if lots:
             detail_parts.append(f"{lots} lotes")
@@ -605,7 +608,7 @@ def format_cda_summary_text(summary: dict, for_whatsapp: bool = False) -> str:
             emoji = '🟢' if pct >= 95 else '🟡' if pct >= 85 else '🔴'
             line += f"\n   {emoji} {pct:.1f}% do benchmark Scot"
             if scot:
-                line += f" (US$ {_brl(scot)}/cab.)"
+                line += f" (US$ {_brl(scot, 0)}/cab.)"
         lines.append(line)
 
     # Resumo CDA vs Mercado Spot se houver pelo menos uma linha com ratio

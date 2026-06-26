@@ -654,27 +654,33 @@ def generate_cda_summary_card(summary: dict):
     RED     = '#F85149'
     ACCENT  = '#58A6FF'
 
-    n_rows   = min(len(rows), 7)
+    n_rows   = min(len(rows), 12)
     has_scot = any(r.get('scot_price_usd') for r in rows[:n_rows])
 
     if has_scot:
-        col_labels = ['Categoria', 'R$/arroba', 'Lotes', 'Scot (US$/cab)', 'vs. Spot']
+        col_labels = ['Categoria', 'R$/kg', 'Cab.', 'Scot US$/cab', 'vs. Spot']
     else:
-        col_labels = ['Categoria', 'R$/arroba', 'Lotes', 'vs. Spot']
+        col_labels = ['Categoria', 'R$/kg', 'Lotes', 'Cab.']
     ncols = len(col_labels)
+
+    def _br(v, dec=2):
+        s = f"{v:,.{dec}f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
     table_data = []
     for row in rows[:n_rows]:
-        race  = (row.get('race') or 'Outros').title()[:22]
-        price = f"R$ {row['avg_price_arroba']:,.0f}".replace(",", ".")
-        lots  = str(row.get('lots_count', 0))
-        scot  = f"US$ {row['scot_price_usd']:.0f}" if row.get('scot_price_usd') else "-"
-        ratio = row.get('ratio')
-        vs    = f"{ratio * 100:.1f}%" if ratio else "-"
+        race     = (row.get('race') or 'Outros').title()[:22]
+        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 15)
+        price    = f"R$ {_br(price_kg)}"
+        lots     = str(row.get('lots_count', 0))
+        heads    = str(row.get('heads_count') or '-')
+        scot     = f"US$ {row['scot_price_usd']:.0f}" if row.get('scot_price_usd') else "-"
+        ratio    = row.get('ratio')
+        vs       = f"{ratio * 100:.1f}%" if ratio else "-"
         if has_scot:
-            table_data.append([race, price, lots, scot, vs])
+            table_data.append([race, price, heads, scot, vs])
         else:
-            table_data.append([race, price, lots, vs])
+            table_data.append([race, price, lots, heads])
 
     stats_parts = []
     if total_heads:
