@@ -262,24 +262,29 @@ def _parse_lot_rows(soup) -> list:
             arrobas_por_cabeca = peso_kg / 15.0
             arroba_price = round(closed_price / arrobas_por_cabeca, 2)
 
-        # Preço R$/kg vivo (col 7) — armazenamos em era_raw como metadado
+        # Preço R$/kg vivo (col 7) — armazenamos em era_raw E price_per_kg_brl
         preco_kg_vivo = None
+        price_kg = None
         if len(tds) > 7:
             preco_kg_vivo = _clean_text(tds[7].get_text(" ", strip=True))
+            price_kg = _to_float(preco_kg_vivo)
+            if price_kg and not (2.0 < price_kg < 100.0):
+                price_kg = None  # fora da faixa plausível R$/kg
 
-        if not any([raca, closed_price, arroba_price]):
+        if not any([raca, closed_price, price_kg]):
             continue
 
         rows.append({
             "lot_ref":              lot_ref,
             "race_raw":             raca,
             "sex_raw":              sexo,
-            "era_raw":              preco_kg_vivo,   # reutilizamos era_raw para R$/kg vivo
+            "era_raw":              preco_kg_vivo,
             "weight_kg":            peso_kg,
             "arrobas":              arrobas,
             "qtde_animals":         int(qtde) if qtde else None,
             "scrape_mode":          "individual",
             "closed_price_brl":     closed_price,
+            "price_per_kg_brl":     price_kg,
             "price_per_arroba_brl": arroba_price,
         })
 
@@ -409,6 +414,7 @@ def persist_cda_results(source_url: str, parsed_rows: list) -> dict:
                 qtde_animals=payload.get("qtde_animals"),
                 scrape_mode=payload.get("scrape_mode", "individual"),
                 closed_price_brl=payload.get("closed_price_brl"),
+                price_per_kg_brl=payload.get("price_per_kg_brl"),
                 price_per_arroba_brl=payload.get("price_per_arroba_brl"),
                 currency="BRL",
                 row_raw=payload.get("row_raw"),

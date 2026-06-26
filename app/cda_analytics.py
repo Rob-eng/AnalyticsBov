@@ -105,15 +105,16 @@ def build_cda_scot_comparisons(
                 ref_day_expr.label("reference_day"),
                 CdaLotResult.race_raw,
                 CdaLotResult.sex_raw,
-                # era_raw armazena R$/kg vivo (string "R$ 14,80") — usado abaixo
+                func.avg(CdaLotResult.price_per_kg_brl).label("avg_price_kg"),
                 func.avg(CdaLotResult.closed_price_brl).label("avg_closed"),
-                func.avg(CdaLotResult.weight_kg).label("avg_weight_kg"),
                 func.count(CdaLotResult.id).label("lots_count"),
             )
             .join(CdaEvent, CdaEvent.id == CdaLotResult.event_id)
             .filter(
                 func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) >= cutoff
             )
+            .filter(CdaLotResult.price_per_kg_brl.isnot(None))
+            .filter(CdaLotResult.price_per_kg_brl > 1.0)
             .filter(
                 (CdaLotResult.scrape_mode == "individual") |
                 (CdaLotResult.scrape_mode.is_(None))
@@ -133,19 +134,14 @@ def build_cda_scot_comparisons(
         )
 
         for row in grouped:
-            ref_day    = _as_day(row.reference_day)
-            race_norm  = _norm_label(row.race_raw)
-            sex_norm   = _norm_label(row.sex_raw)
-            avg_closed = float(row.avg_closed)   if row.avg_closed   is not None else None
-            avg_wkg    = float(row.avg_weight_kg) if row.avg_weight_kg is not None else None
-            lots_count = int(row.lots_count or 0)
+            ref_day      = _as_day(row.reference_day)
+            race_norm    = _norm_label(row.race_raw)
+            sex_norm     = _norm_label(row.sex_raw)
+            avg_price_kg = float(row.avg_price_kg) if row.avg_price_kg is not None else None
+            avg_closed   = float(row.avg_closed)   if row.avg_closed   is not None else None
+            lots_count   = int(row.lots_count or 0)
 
-            # R$/kg vivo = preço por cabeça / peso médio por cabeça (em kg)
-            avg_price_kg = None
-            if avg_closed and avg_wkg and avg_wkg > 0:
-                avg_price_kg = round(avg_closed / avg_wkg, 2)
-
-            # Mantém R$/@ para retrocompat (R$/kg × 15 para animais jovens)
+            # R$/@ mantido para retrocompat — usa ×15 (animais jovens; suficiente p/ série histórica)
             avg_arroba = round(avg_price_kg * 15, 2) if avg_price_kg else None
 
             scot_price = _nearest_scot_price(scot_prices, ref_day, max_delta_days=3)

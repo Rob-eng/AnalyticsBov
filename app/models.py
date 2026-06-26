@@ -75,6 +75,7 @@ class CdaLotResult(Base):
     qtde_animals = Column(Integer, nullable=True)       # cabeças vendidas no lote
     scrape_mode = Column(String, default='individual')  # 'individual' ou 'medias'
     closed_price_brl = Column(Float, nullable=True)
+    price_per_kg_brl = Column(Float, nullable=True)         # R$/kg vivo (era_raw parsed)
     price_per_arroba_brl = Column(Float, nullable=True)
     currency = Column(String, default='BRL', nullable=False)
 
@@ -247,7 +248,20 @@ def init_db():
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))
+            conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS price_per_kg_brl FLOAT;"))
             conn.execute(text("ALTER TABLE cda_market_comparisons ADD COLUMN IF NOT EXISTS avg_cda_price_per_kg_brl FLOAT;"))
+            # Backfill price_per_kg_brl de era_raw ("R$ 9,10" → 9.10) para dados existentes
+            conn.execute(text("""
+                UPDATE cda_lot_results
+                SET price_per_kg_brl = NULLIF(
+                    REGEXP_REPLACE(
+                        REPLACE(REPLACE(REPLACE(era_raw, 'R$', ''), ' ', ''), '.', ''),
+                        ',', '.', 'g'
+                    ), ''
+                )::FLOAT
+                WHERE era_raw ~ 'R\\$\\s*[0-9]+,[0-9]+'
+                  AND (price_per_kg_brl IS NULL OR price_per_kg_brl < 1.0)
+            """))
             
             # Promoção automática do Administrador para PRO
             admin_id = str(Config.ADMIN_CHAT_ID)
