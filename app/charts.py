@@ -630,10 +630,13 @@ def generate_cda_summary_card(summary: dict):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as _plt
+    from app.exchange_rate import get_usd_brl_rate
 
     rows = summary.get('rows', [])
     if not rows:
         return None
+
+    usd_brl = get_usd_brl_rate()
 
     event_name   = (summary.get('event_name') or 'Leilão CDA')[:55]
     event_date   = summary.get('event_date')
@@ -658,7 +661,7 @@ def generate_cda_summary_card(summary: dict):
     has_scot = any(r.get('scot_price_usd') for r in rows[:n_rows])
 
     if has_scot:
-        col_labels = ['Categoria', 'R$/kg', 'Cab.', 'Scot US$/cab', 'vs. Spot']
+        col_labels = ['Categoria', 'R$/kg', 'Cab.', 'Scot US$/@', 'vs. Scot']
     else:
         col_labels = ['Categoria', 'R$/kg', 'Lotes', 'Cab.']
     ncols = len(col_labels)
@@ -670,19 +673,28 @@ def generate_cda_summary_card(summary: dict):
     table_data = []
     for row in rows[:n_rows]:
         race     = (row.get('race') or 'Outros').title()[:22]
-        price_kg = row.get('avg_price_kg') or (row.get('avg_price_kg', 0) / 15)
+        price_kg = row.get('avg_price_kg') or (row.get('avg_price_arroba', 0) / 30)
         price    = f"R$ {_br(price_kg)}"
         lots     = str(row.get('lots_count', 0))
         heads    = str(row.get('heads_count') or '-')
-        scot     = f"US$ {row['scot_price_usd']:.0f}" if row.get('scot_price_usd') else "-"
-        ratio    = row.get('ratio')
-        vs       = f"{ratio * 100:.1f}%" if ratio else "-"
+        scot_usd = row.get('scot_price_usd')
+        scot     = f"US$ {scot_usd:.0f}" if scot_usd else "-"
+        # Ratio correto: CDA R$/@ ÷ Scot R$/@ (ambos base carcaça, câmbio ao vivo)
+        vs = "-"
+        if price_kg and scot_usd and usd_brl:
+            cda_arroba = price_kg * 30
+            scot_arroba_brl = scot_usd * usd_brl
+            pct = (cda_arroba / scot_arroba_brl) * 100
+            vs = f"{pct:.1f}%"
         if has_scot:
             table_data.append([race, price, heads, scot, vs])
         else:
             table_data.append([race, price, lots, heads])
 
     stats_parts = []
+    if total_heads and total_volume:
+        media = total_volume / total_heads
+        stats_parts.append(f"R$ {_br(media, 0)}/animal")
     if total_heads:
         stats_parts.append(f"{int(total_heads):,} cabecas".replace(",", "."))
     if total_volume:
@@ -739,7 +751,7 @@ def generate_cda_summary_card(summary: dict):
             if ci == vs_col and tv not in ('-', ''):
                 try:
                     pv = float(tv.replace('%', ''))
-                    c = GREEN if pv >= 95 else (YELLOW if pv >= 80 else RED)
+                    c = GREEN if pv >= 100 else (YELLOW if pv >= 90 else RED)
                     cell.get_text().set_color(c)
                     cell.get_text().set_fontweight('bold')
                 except Exception:
