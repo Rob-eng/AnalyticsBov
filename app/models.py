@@ -393,7 +393,6 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
     session = SessionLocal()
     try:
         # ── Estratégia 1: usar o último evento real de cda_events ──────────
-        # Preferência: eventos com event_date; fallback: qualquer evento por collected_at
         last_event = (
             session.query(CdaEvent)
             .filter(CdaEvent.event_date.isnot(None))
@@ -409,12 +408,32 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
 
         if last_event:
             event_date = last_event.event_date or last_event.collected_at
-            # Pega todos os lotes deste evento
-            lots = (
-                session.query(CdaLotResult)
-                .filter(CdaLotResult.event_id == last_event.id)
+            # Agrega TODOS os eventos do mesmo dia (ex: leilão principal + reprodutores)
+            from datetime import timedelta as _td0
+            day_start = event_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end   = day_start + _td0(days=1)
+            same_day_events = (
+                session.query(CdaEvent)
+                .filter(
+                    func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) >= day_start,
+                    func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) <  day_end,
+                )
                 .all()
             )
+            event_ids = [e.id for e in same_day_events]
+
+            # Lotes de todos os eventos do dia
+            lots = (
+                session.query(CdaLotResult)
+                .filter(CdaLotResult.event_id.in_(event_ids))
+                .all()
+            )
+
+            # Metadado: evento com mais lotes = leilão principal (não o de reprodutores)
+            _lot_count = {}
+            for _l in lots:
+                _lot_count[_l.event_id] = _lot_count.get(_l.event_id, 0) + 1
+            last_event = max(same_day_events, key=lambda e: _lot_count.get(e.id, 0))
 
             if lots:
                 # Agrupa por raça e calcula médias, totais de cabeças e volume
