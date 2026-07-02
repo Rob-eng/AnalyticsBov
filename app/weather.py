@@ -65,18 +65,29 @@ def extract_coords_from_url(text):
             return float(match.group(1)), float(match.group(2))
 
     
-    # 2. Check for shortened maps.app.goo.gl URL
+    # 2. Shortened maps.app.goo.gl — must use GET with browser UA; HEAD doesn't
+    #    follow the full redirect chain. Final URL may be a Plus Code search with
+    #    coords only embedded in the pb= param of the HTML body as %213d<lat>%212d<lon>.
     if "maps.app.goo.gl" in text or "goo.gl/maps" in text:
         url_match = re.search(r"(https?://[^\s,]+)", text)
         if url_match:
+            raw_url = url_match.group(1).split("?")[0]  # strip ?g_st=ic tracking params
+            _UA = {"User-Agent": "Mozilla/5.0 (compatible; BoiNoMundo/1.0)"}
             try:
-                # Follow redirect
-                response = requests.head(url_match.group(1), allow_redirects=True, timeout=5)
-                # Check resolved URL
-                return extract_coords_from_url(response.url)
-            except:
+                resp = requests.get(raw_url, allow_redirects=True, timeout=8, headers=_UA)
+                # Try @lat,lon or q=lat,lon in the resolved URL first
+                coords = extract_coords_from_url(resp.url)
+                if coords:
+                    return coords
+                # Google pb= encoding: %213d<lat> and %212d<lon>
+                body = resp.text[:8000]
+                m_lat = re.search(r"%213d(-?\d+\.\d+)", body)
+                m_lon = re.search(r"%212d(-?\d+\.\d+)", body)
+                if m_lat and m_lon:
+                    return round(float(m_lat.group(1)), 6), round(float(m_lon.group(1)), 6)
+            except Exception:
                 pass
-                
+
     return None
 
 def geocode_location(query):
