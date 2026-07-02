@@ -43,14 +43,31 @@ def probe_database():
 
 def probe_exchange_rate():
     def _():
-        resp = _req.get(
-            "https://economia.awesomeapi.com.br/last/USD-BRL",
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        rate = float(resp.json()["USDBRL"]["bid"])
-        return {"status": "ok", "message": f"USD/BRL = R$ {rate:.2f}"}
+        # Try AwesomeAPI; on 429 (rate-limited) fall back to BCB PTAX
+        try:
+            resp = _req.get(
+                "https://economia.awesomeapi.com.br/last/USD-BRL",
+                timeout=_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                rate = float(resp.json()["USDBRL"]["bid"])
+                return {"status": "ok", "message": f"AwesomeAPI: USD/BRL = R$ {rate:.2f}"}
+            if resp.status_code == 429:
+                raise _RateLimited()
+            resp.raise_for_status()
+        except (_RateLimited, Exception):
+            from app.exchange_rate import _fetch_bcb
+            rate = _fetch_bcb()
+            if rate:
+                return {"status": "warn", "message": f"AwesomeAPI limitada (429) → BCB PTAX: R$ {rate:.2f}"}
+            cached = __import__("app.exchange_rate", fromlist=["_CACHE"])._CACHE.get("rate")
+            if cached:
+                return {"status": "warn", "message": f"Usando cache anterior: R$ {cached:.2f}"}
+            return {"status": "error", "message": "AwesomeAPI 429 e BCB PTAX indisponível"}
     return _run(_)
+
+class _RateLimited(Exception):
+    pass
 
 
 def probe_openmeteo():
@@ -108,10 +125,11 @@ def probe_cda_freshness():
 
 def probe_whatsapp():
     def _():
-        token    = os.getenv("WHATSAPP_TOKEN", "")
-        phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+        # Env vars reais usados em app/saas/plans.py
+        token    = os.getenv("META_ACCESS_TOKEN", "")
+        phone_id = os.getenv("META_PHONE_ID", "")
         if not token or not phone_id:
-            return {"status": "warn", "message": "WHATSAPP_TOKEN ou PHONE_NUMBER_ID ausentes"}
+            return {"status": "warn", "message": "META_ACCESS_TOKEN ou META_PHONE_ID ausentes"}
         resp = _req.get(
             f"https://graph.facebook.com/v22.0/{phone_id}",
             headers={"Authorization": f"Bearer {token}"},
@@ -142,17 +160,21 @@ def probe_telegram():
 
 def probe_gee():
     def _():
-        key = (
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            or os.getenv("EE_PRIVATE_KEY")
-            or os.getenv("GEE_SERVICE_ACCOUNT_KEY")
-        )
-        if not key:
-            return {"status": "warn", "message": "Credenciais GEE não configuradas (env var ausente)"}
+        # Env var real usada em app/gee_connector.py → initialize_gee()
+        creds_json = os.getenv("GEE_CREDENTIALS_JSON", "")
+        if not creds_json:
+            return {"status": "warn", "message": "GEE_CREDENTIALS_JSON não configurado"}
         try:
-            import ee
-            ee.Initialize()
-            return {"status": "ok", "message": "GEE inicializado com sucesso"}
+            import json as _json
+            import ee as _ee
+            creds = _json.loads(creds_json)
+            credentials = _ee.ServiceAccountCredentials(
+                creds["client_email"], key_data=creds["private_key"]
+            )
+            _ee.Initialize(credentials)
+            return {"status": "ok", "message": f"GEE OK — conta: {creds.get('client_email', '?')}"}
+        except ImportError:
+            return {"status": "warn", "message": "earthengine-api não instalado neste ambiente"}
         except Exception as exc:
             return {"status": "error", "message": str(exc)[:150]}
     return _run(_)

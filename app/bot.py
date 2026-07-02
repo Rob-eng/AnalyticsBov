@@ -153,37 +153,51 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         session.close()
 
-    # 2. CAR Database Connection
+    # 2. CAR Database Connection (Supabase)
     msg += "🗺️ *Banco de Dados CAR (Supabase):* "
     try:
         if not Config.CAR_DATABASE_URL:
-             msg += "NÃO CONFIGURADO ⚠️\n_(Variável CAR_DATABASE_URL ausente)_\n"
+            msg += "NÃO CONFIGURADO ⚠️\n_(Variável CAR\\_DATABASE\\_URL ausente)_\n"
         else:
-            # Test direct connection
             try:
                 from app.models import CarSessionLocal, CARProperty
                 car_session = CarSessionLocal()
                 count = car_session.query(CARProperty).count()
                 car_session.close()
-                msg += f"OK ✅ ({count} registros)\n"
+                msg += f"OK ✅ ({count:,} registros)\n"
             except Exception as e:
-                msg += f"FALHA NA CONEXÃO ❌\n_Erro: {str(e)}_\n"
+                err_str = str(e)
+                if "could not translate host name" in err_str or "Name or service not known" in err_str:
+                    msg += "PAUSADO ⚠️\n_O projeto Supabase está inativo. Acesse supabase.com e retome o projeto._\n"
+                else:
+                    short = err_str[:120].replace("_", "\\_").replace("*", "\\*")
+                    msg += f"FALHA ❌\n_{short}_\n"
     except Exception as e:
-        msg += f"ERRO GERAL ({str(e)}) ❌\n"
+        msg += f"ERRO ❌\n"
 
-    # 3. Local API Health Check
-    msg += "🔌 *API Local:* "
+    # 3. Câmbio USD/BRL
+    msg += "💱 *Câmbio USD/BRL:* "
     try:
-        import requests
-        import os
-        port = os.getenv("PORT", 8000)
-        resp = requests.get(f"http://127.0.0.1:{port}/", timeout=3)
-        if resp.status_code == 200:
-            msg += "ONLINE ✅\n"
-        else:
-             msg += f"ERRO {resp.status_code} ❌\n"
+        from app.exchange_rate import get_usd_brl_rate
+        rate = get_usd_brl_rate()
+        msg += f"R\\$ {rate:.2f} ✅\n"
     except Exception as e:
-         msg += f"OFFLINE ❌\n_Erro: {str(e)}_\n"
+        msg += f"INDISPONÍVEL ❌\n"
+
+    # 4. Scot / Cotação
+    msg += "📈 *Scot (Cotação):* "
+    try:
+        from app.models import SessionLocal, PriceHistory
+        from sqlalchemy import func as _func
+        db2 = SessionLocal()
+        last_price = db2.query(PriceHistory).order_by(PriceHistory.date.desc()).first()
+        db2.close()
+        if last_price:
+            msg += f"OK ✅ _(último: {last_price.date.strftime('%d/%m/%Y')})_\n"
+        else:
+            msg += "SEM DADOS ⚠️\n"
+    except Exception:
+        msg += "ERRO ❌\n"
 
     await update.message.reply_text(msg, parse_mode='Markdown')
 
