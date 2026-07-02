@@ -30,10 +30,10 @@ WAITING_WEATHER_MODE = 10
 WAITING_ENV_MODE = 11
 
 MAIN_MENU_BUTTONS = [
-    "📊 Cotação Atual", "🔮 Mercado Futuro", "🌧️ Precipitação (chuva)",
-    "🌿 Análise Ambiental", "📢 Enviar Anúncio", "📈 Status",
-    "📥 Importar Histórico", "👥 Lista de Usuários", "💬 Feedback",
-    "📌 Minhas Propriedades"
+    "📊 Cotação Atual", "🔮 Mercado Futuro", "🐂 Leilão CDA",
+    "🌧️ Precipitação (chuva)", "🌿 Análise Ambiental", "📢 Enviar Anúncio",
+    "📈 Status", "📥 Importar Histórico", "👥 Lista de Usuários",
+    "💬 Feedback", "📌 Minhas Propriedades"
 ]
 
 
@@ -53,18 +53,16 @@ def get_keyboard(chat_id):
     """Get appropriate keyboard based on user role"""
     if is_admin(chat_id):
         keyboard = [
-            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("📈 Status")],
-            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
-            [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários")],
-            [KeyboardButton("📢 Enviar Anúncio"), KeyboardButton("💬 Feedback")]
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro"), KeyboardButton("🐂 Leilão CDA")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental"), KeyboardButton("📈 Status")],
+            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("💬 Feedback")],
+            [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários"), KeyboardButton("📢 Enviar Anúncio")],
         ]
     else:
         keyboard = [
-            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro")],
-            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("📈 Status")],
-            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("🌿 Análise Ambiental")],
-            [KeyboardButton("💬 Feedback")]
+            [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro"), KeyboardButton("🐂 Leilão CDA")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental")],
+            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("💬 Feedback")],
         ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -1446,6 +1444,8 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
     elif text == "💬 Feedback":
         await start_feedback(update, context)
         return WAITING_FEEDBACK
+    elif text == "🐂 Leilão CDA":
+        await cda_chart(update, context)
     elif text == "🌧️ Precipitação (chuva)":
         await start_weather(update, context)
         return WAITING_WEATHER_LOCATION

@@ -130,6 +130,80 @@ def get_feature_health(
     }
 
 
+@router.get("/health/probes")
+def get_probe_results(api_key: str = Depends(get_api_key)):
+    """
+    Retorna o último resultado de cada probe ativo.
+    Busca o registro mais recente por probe_name na tabela health_check_results.
+    """
+    from app.models import SessionLocal, HealthCheckResult
+    from sqlalchemy import func
+
+    db = SessionLocal()
+    try:
+        # Subquery: max checked_at por probe_name
+        sub = (
+            db.query(
+                HealthCheckResult.probe_name,
+                func.max(HealthCheckResult.checked_at).label("latest"),
+            )
+            .group_by(HealthCheckResult.probe_name)
+            .subquery()
+        )
+        rows = (
+            db.query(HealthCheckResult)
+            .join(
+                sub,
+                (HealthCheckResult.probe_name == sub.c.probe_name)
+                & (HealthCheckResult.checked_at == sub.c.latest),
+            )
+            .all()
+        )
+        results = {
+            r.probe_name: {
+                "status":     r.status,
+                "latency_ms": r.latency_ms,
+                "message":    r.message,
+                "checked_at": r.checked_at.isoformat() if r.checked_at else None,
+            }
+            for r in rows
+        }
+        statuses = [v["status"] for v in results.values()]
+        overall = "error" if "error" in statuses else ("warn" if "warn" in statuses else "ok")
+        return {
+            "overall": overall,
+            "checked_at": rows[0].checked_at.isoformat() if rows else None,
+            "probes": results,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/health/run")
+async def run_health_probes(
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(get_api_key),
+):
+    """Aciona todos os health probes imediatamente (roda em background)."""
+    from app.health_probe import run_all_probes
+
+    background_tasks.add_task(run_all_probes)
+    return {"status": "started", "message": "Health probes iniciados. Resultados em /admin/health/probes em ~30s."}
+
+
+@router.get("/build-cda-comparisons")
+@router.post("/build-cda-comparisons")
+async def trigger_cda_comparisons(
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(get_api_key),
+):
+    """Reconstrói as comparações CDA vs Scot em background."""
+    from app.cda_analytics import build_cda_scot_comparisons
+
+    background_tasks.add_task(build_cda_scot_comparisons)
+    return {"status": "started", "message": "Rebuild de comparações CDA vs Scot iniciado em background."}
+
+
 @router.get("/cda/status")
 def get_cda_status(api_key: str = Depends(get_api_key)):
     """Retorna o estado atual da captura de dados do Leilão CDA."""

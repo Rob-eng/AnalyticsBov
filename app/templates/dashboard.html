@@ -272,6 +272,8 @@
         <div class="tab-nav">
             <button class="tab-btn active" onclick="switchTab('overview', this)">📊 Visão Geral</button>
             <button class="tab-btn" onclick="switchTab('health', this)">🩺 Saúde do Sistema</button>
+            <button class="tab-btn" onclick="switchTab('probes', this)">🔌 APIs ao Vivo</button>
+            <button class="tab-btn" onclick="switchTab('features', this)">📋 Funcionalidades</button>
         </div>
 
         <!-- ═══════════════════════════════════════════════════════════════════
@@ -454,6 +456,96 @@
             </div>
 
         </div><!-- /tab-health -->
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 3: APIs AO VIVO (health probes ativos)
+        ════════════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane" id="tab-probes">
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+                <div>
+                    <h2 style="margin:0">🔌 Status das APIs em Tempo Real</h2>
+                    <div style="color:#94a3b8;font-size:0.85rem;margin-top:4px">Probes ativos — cada serviço é testado a cada 30 minutos</div>
+                </div>
+                <div style="display:flex;gap:0.75rem;align-items:center">
+                    <span id="probes-last-check" style="color:#64748b;font-size:0.8rem"></span>
+                    <button onclick="loadProbes(true)" id="probes-run-btn"
+                        style="background:rgba(34,197,94,0.15);border:1px solid #22c55e;color:#22c55e;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;font-size:0.85rem;font-weight:600">
+                        ▶ Testar Agora
+                    </button>
+                    <button onclick="loadProbes(false)"
+                        style="background:rgba(99,102,241,0.2);border:1px solid #6366f1;color:white;padding:6px 14px;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;font-size:0.85rem">
+                        🔄 Atualizar
+                    </button>
+                </div>
+            </div>
+
+            <!-- Overall banner -->
+            <div id="probes-overall-banner" style="border-radius:0.75rem;padding:0.9rem 1.2rem;margin-bottom:1.5rem;font-weight:600;display:none"></div>
+
+            <!-- Probe cards grid -->
+            <div id="probes-grid" class="health-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+                <div style="color:#94a3b8;grid-column:1/-1">Clique em "Atualizar" para carregar o último resultado dos probes.</div>
+            </div>
+
+        </div><!-- /tab-probes -->
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             TAB 4: MAPA DE FUNCIONALIDADES
+        ════════════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane" id="tab-features">
+            <h2 style="margin-bottom:1.5rem">📋 Mapa de Funcionalidades</h2>
+
+            {% set features = [
+                {"name": "Cotação Atual (Scot)", "tg": "📊 botão / /atual", "wa": "📊 botão menu", "agent": "✅", "deps": "Scot Consultoria (scraper)", "plan": "FREE"},
+                {"name": "Mercado Futuro (B3)", "tg": "🔮 botão / /futuro", "wa": "🔮 botão menu", "agent": "✅", "deps": "Scot Consultoria (scraper)", "plan": "FREE"},
+                {"name": "Leilão CDA", "tg": "🐂 botão / /leilao", "wa": "🐂 botão menu", "agent": "✅", "deps": "CDA scraper + DB", "plan": "FREE"},
+                {"name": "Previsão de Chuva", "tg": "🌧️ botão / /clima", "wa": "🌧️ botão menu", "agent": "✅", "deps": "OpenMeteo / ECMWF", "plan": "FREE"},
+                {"name": "Histórico de Chuva", "tg": "modo /clima → Histórico", "wa": "via agente", "agent": "✅", "deps": "OpenMeteo", "plan": "FREE"},
+                {"name": "NDVI (saúde pasto)", "tg": "🌿 botão / /ambiental", "wa": "🌿 botão menu", "agent": "✅", "deps": "Google Earth Engine", "plan": "FREE (1 consulta)"},
+                {"name": "MDT / Terreno 2D", "tg": "🏔️ submenu /ambiental", "wa": "🏔️ botão menu", "agent": "✅", "deps": "Google Earth Engine", "plan": "FREE"},
+                {"name": "MDT 3D (vídeo)", "tg": "🏔️ submenu /ambiental", "wa": "🏔️ botão menu", "agent": "✅", "deps": "Google Earth Engine", "plan": "PRO"},
+                {"name": "CAR / Shapefile", "tg": "envio de .zip", "wa": "envio de .zip", "agent": "❌", "deps": "SICAR scraper + GEE", "plan": "FREE"},
+                {"name": "Alertas NDVI", "tg": "automático (scheduler)", "wa": "automático", "agent": "❌", "deps": "GEE + scheduler", "plan": "STARTER"},
+                {"name": "Minhas Propriedades", "tg": "📌 botão / /propriedades", "wa": "📌 botão menu", "agent": "✅", "deps": "DB", "plan": "FREE"},
+                {"name": "Relatório Semanal", "tg": "automático (2ª 08h)", "wa": "automático", "agent": "❌", "deps": "Scot + scheduler", "plan": "STARTER"},
+                {"name": "Meu Plano / Upgrade", "tg": "via agente", "wa": "via agente", "agent": "✅", "deps": "Stripe + DB", "plan": "FREE"},
+                {"name": "Transcrição de Áudio", "tg": "mensagem de voz", "wa": "mensagem de áudio", "agent": "✅", "deps": "OpenAI Whisper", "plan": "FREE"},
+                {"name": "Feedback", "tg": "💬 botão / /feedback", "wa": "via agente", "agent": "✅", "deps": "DB + notificação", "plan": "FREE"},
+            ] %}
+
+            <div class="table-section" style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Funcionalidade</th>
+                            <th>Telegram</th>
+                            <th>WhatsApp</th>
+                            <th>Agente IA</th>
+                            <th>Dependência</th>
+                            <th>Plano mínimo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for f in features %}
+                        <tr>
+                            <td style="font-weight:600">{{ f.name }}</td>
+                            <td style="font-size:0.82rem;color:#94a3b8">{{ f.tg }}</td>
+                            <td style="font-size:0.82rem;color:#94a3b8">{{ f.wa }}</td>
+                            <td style="text-align:center">{{ f.agent }}</td>
+                            <td style="font-size:0.8rem;color:#64748b">{{ f.deps }}</td>
+                            <td>
+                                <span class="badge badge-{{ 'pro' if f.plan not in ('FREE',) else 'free' }}"
+                                    style="font-size:0.72rem">
+                                    {{ f.plan }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div><!-- /tab-features -->
 
     </div>
 
@@ -675,6 +767,101 @@
         if (location.hash === "#health") {
             document.querySelector('[onclick*="health"]')?.click();
         }
+
+        // ── Probe tab ─────────────────────────────────────────────────────────
+        const PROBE_ICONS = {
+            "Database":       "🗄️",
+            "Câmbio USD/BRL": "💱",
+            "OpenMeteo":      "🌧️",
+            "Scot Website":   "📈",
+            "CDA Leilão":     "🐂",
+            "WhatsApp API":   "📱",
+            "Telegram API":   "✈️",
+            "Google EE":      "🛰️",
+            "OpenAI":         "🤖",
+            "Stripe":         "💳",
+        };
+
+        async function loadProbes(runNow = false) {
+            const grid   = document.getElementById("probes-grid");
+            const banner = document.getElementById("probes-overall-banner");
+            const btn    = document.getElementById("probes-run-btn");
+
+            if (runNow) {
+                btn.disabled = true;
+                btn.textContent = "⏳ Testando...";
+                try {
+                    const runUrl = new URL("/admin/health/run", location.origin);
+                    runUrl.searchParams.set("api_key", API_KEY);
+                    await fetch(runUrl.toString(), { method: "POST" });
+                    // Wait ~35s for background task then fetch
+                    await new Promise(r => setTimeout(r, 35000));
+                } catch(e) {}
+                btn.disabled = false;
+                btn.textContent = "▶ Testar Agora";
+            }
+
+            try {
+                const url = new URL("/admin/health/probes", location.origin);
+                url.searchParams.set("api_key", API_KEY);
+                const data = await (await fetch(url.toString())).json();
+
+                // Overall banner
+                banner.style.display = "block";
+                const overallColors = { ok: ["rgba(34,197,94,0.12)", "#22c55e"], warn: ["rgba(245,158,11,0.12)", "#f59e0b"], error: ["rgba(239,68,68,0.12)", "#ef4444"] };
+                const [bg, fg] = overallColors[data.overall] || overallColors.warn;
+                const overallLabels = { ok: "✅ Todos os serviços operacionais", warn: "⚠️ Alguns serviços com atenção", error: "🔴 Serviços com erros" };
+                banner.style.background = bg;
+                banner.style.border = `1px solid ${fg}`;
+                banner.style.color = fg;
+                banner.textContent = overallLabels[data.overall] || data.overall;
+
+                // Last check time
+                if (data.checked_at) {
+                    document.getElementById("probes-last-check").textContent =
+                        "Última verificação: " + new Date(data.checked_at).toLocaleString("pt-BR", {dateStyle:"short",timeStyle:"short"});
+                }
+
+                // Build probe cards
+                if (!data.probes || Object.keys(data.probes).length === 0) {
+                    grid.innerHTML = '<div style="color:#94a3b8;grid-column:1/-1">Nenhum resultado ainda. Clique em "Testar Agora".</div>';
+                    return;
+                }
+                const statusColors = { ok: "#22c55e", warn: "#f59e0b", error: "#ef4444" };
+                const statusLabels = { ok: "Operacional", warn: "Atenção", error: "Erro" };
+                grid.innerHTML = Object.entries(data.probes).map(([name, r]) => {
+                    const color = statusColors[r.status] || "#475569";
+                    const label = statusLabels[r.status] || r.status;
+                    const icon  = PROBE_ICONS[name] || "🔧";
+                    const lat   = r.latency_ms != null ? `${r.latency_ms}ms` : "—";
+                    const msg   = r.message ? r.message.substring(0, 80) : "";
+                    return `
+                    <div class="health-card ${r.status}" style="gap:0.4rem">
+                        <div class="health-title" style="display:flex;justify-content:space-between;align-items:center">
+                            <span><span class="health-status-dot dot-${r.status}"></span>${icon} ${name}</span>
+                            <span style="font-size:0.72rem;color:${color};font-weight:700">${label}</span>
+                        </div>
+                        <div class="health-meta" style="color:${r.status==='ok'?'#22c55e':r.status==='warn'?'#f59e0b':'#ef4444'};font-size:0.8rem">${msg}</div>
+                        <div class="health-meta" style="display:flex;justify-content:space-between">
+                            <span>Latência: <strong>${lat}</strong></span>
+                            <span>${r.checked_at ? new Date(r.checked_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : "—"}</span>
+                        </div>
+                    </div>`;
+                }).join("");
+            } catch(err) {
+                grid.innerHTML = `<div style="color:#ef4444;grid-column:1/-1">❌ Falha ao carregar probes: ${err.message}</div>`;
+            }
+        }
+
+        // Patch switchTab to load probes on first open
+        const _origSwitch = switchTab;
+        window.switchTab = function(name, btn) {
+            _origSwitch(name, btn);
+            if (name === "probes" && !window._probesLoaded) {
+                loadProbes(false);
+                window._probesLoaded = true;
+            }
+        };
 
     </script>
 

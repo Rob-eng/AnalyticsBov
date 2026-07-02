@@ -1,5 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from app.scraper import run_scraping_cycle
 from app.scraper_cda import run_cda_daily_cycle
 from app.cda_analytics import build_cda_scot_comparisons
@@ -90,9 +91,27 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
+    # ── Health probes a cada 30 minutos ──────────────────────────────────
+    async def health_probe_job():
+        try:
+            from app.health_probe import run_all_probes
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, run_all_probes)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ Health probe FAILED: {traceback.format_exc()}", flush=True)
+
+    scheduler.add_job(
+        health_probe_job,
+        IntervalTrigger(minutes=30),
+        id='health_probes',
+        replace_existing=True,
+    )
+
     print(
         f"✓ Scheduler configured (tz={USER_TZ}): "
-        "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) + cda_daily_ingest (daily 05:30)",
+        "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) "
+        "+ cda_daily_ingest (daily 05:30) + health_probes (every 30min)",
         flush=True
     )
     return scheduler

@@ -138,12 +138,22 @@ class ActivityLog(Base):
 
 class Feedback(Base):
     __tablename__ = 'feedbacks'
-    
+
     id = Column(Integer, primary_key=True)
     user_id = Column(String, ForeignKey('users.chat_id'))
     message = Column(String)
     status = Column(String, default='NEW') # 'NEW', 'READ', 'IMPLEMENTED'
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class HealthCheckResult(Base):
+    __tablename__ = 'health_check_results'
+
+    id         = Column(Integer, primary_key=True)
+    probe_name = Column(String, nullable=False, index=True)
+    status     = Column(String, nullable=False)   # ok / warn / error
+    latency_ms = Column(Float, nullable=True)
+    message    = Column(String, nullable=True)
+    checked_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class CARProperty(SpatialBase):
     __tablename__ = 'car_properties'

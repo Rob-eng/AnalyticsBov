@@ -484,6 +484,10 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
             from app.whatsapp.trigger_handler import handle_wa_trigger_flow
             await handle_wa_trigger_flow(sender_phone, "TRIGGER_FLOW: MERCADO_FUTURO")
             return
+        elif user_text == "TRIGGER_LEILAO":
+            from app.whatsapp.trigger_handler import handle_wa_trigger_flow
+            await handle_wa_trigger_flow(sender_phone, "TRIGGER_FLOW: LEILAO")
+            return
         elif user_text == "TRIGGER_PREVISAO_CHUVA":
             user_text = "Quero a previsão de chuva. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
         elif user_text == "TRIGGER_NDVI":

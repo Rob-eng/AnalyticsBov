@@ -362,6 +362,10 @@ def send_whatsapp_menu(to_phone: str):
                             {
                                 "id": "TRIGGER_MERCADO_FUTURO",
                                 "title": "🔮 Mercado Futuro"
+                            },
+                            {
+                                "id": "TRIGGER_LEILAO",
+                                "title": "🐂 Leilão CDA"
                             }
                         ]
                     },
