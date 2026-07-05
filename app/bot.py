@@ -153,27 +153,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         session.close()
 
-    # 2. CAR Database Connection (Supabase)
-    msg += "🗺️ *Banco de Dados CAR (Supabase):* "
+    # 2. GEE (CAR lookup)
+    msg += "🛰️ *GEE \\(CAR/NDVI\\):* "
     try:
-        if not Config.CAR_DATABASE_URL:
-            msg += "NÃO CONFIGURADO ⚠️\n_(Variável CAR\\_DATABASE\\_URL ausente)_\n"
-        else:
-            try:
-                from app.models import CarSessionLocal, CARProperty
-                car_session = CarSessionLocal()
-                count = car_session.query(CARProperty).count()
-                car_session.close()
-                msg += f"OK ✅ ({count:,} registros)\n"
-            except Exception as e:
-                err_str = str(e)
-                if "could not translate host name" in err_str or "Name or service not known" in err_str:
-                    msg += "PAUSADO ⚠️\n_O projeto Supabase está inativo. Acesse supabase.com e retome o projeto._\n"
-                else:
-                    short = err_str[:120].replace("_", "\\_").replace("*", "\\*")
-                    msg += f"FALHA ❌\n_{short}_\n"
-    except Exception as e:
-        msg += f"ERRO ❌\n"
+        import os
+        gee_ok = bool(os.getenv("GEE_CREDENTIALS_JSON"))
+        msg += "CONFIGURADO ✅\n" if gee_ok else "CREDENCIAIS AUSENTES ⚠️\n"
+    except Exception:
+        msg += "ERRO ❌\n"
 
     # 3. Câmbio USD/BRL
     msg += "💱 *Câmbio USD/BRL:* "

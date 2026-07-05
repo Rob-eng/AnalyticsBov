@@ -20,11 +20,10 @@ import migrate_ms # Import master migration script
 def run_api_process():
     """Runs the FastAPI service in a separate process."""
     print("🚀 Starting API Service...")
-    
-    # SQLAlchemy Multiprocessing safety: Dispose engines to reset connection pool in child process
-    from app.models import engine, car_engine
+
+    # SQLAlchemy Multiprocessing safety: dispose engine before forking
+    from app.models import engine
     engine.dispose()
-    car_engine.dispose()
 
     try:
         port = int(os.getenv("PORT", 8000))
@@ -36,10 +35,9 @@ def run_bot_process():
     """Runs the Telegram Bot in a separate process."""
     print(f"🤖 Starting Telegram Bot... | PID: {os.getpid()}", flush=True)
     
-    # SQLAlchemy Multiprocessing safety: Dispose engines to reset connection pool in child process
-    from app.models import engine, car_engine
+    # SQLAlchemy Multiprocessing safety: dispose engine before forking
+    from app.models import engine
     engine.dispose()
-    car_engine.dispose()
 
     import asyncio
     

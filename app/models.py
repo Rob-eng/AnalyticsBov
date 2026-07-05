@@ -1,13 +1,11 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, create_engine, text, ForeignKey, Text, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, create_engine, text, ForeignKey, Text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import pandas as pd
-from geoalchemy2 import Geometry
 from app.config import Config
 
 Base = declarative_base()
-SpatialBase = declarative_base()
 
 class User(Base):
     __tablename__ = 'users'
@@ -155,16 +153,6 @@ class HealthCheckResult(Base):
     message    = Column(String, nullable=True)
     checked_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-class CARProperty(SpatialBase):
-    __tablename__ = 'car_properties'
-    
-    id = Column(BigInteger, primary_key=True)
-    cod_imovel = Column(String(100), unique=True, index=True)
-    uf = Column(String(2), index=True)
-    municipio = Column(String(100))
-    # SRID 4674 is SIRGAS 2000 (Geodetic), common in Brazil and compatible with WGS84
-    geometry = Column(Geometry('MULTIPOLYGON', srid=4674))
-
 import os
 if not Config.DATABASE_URL:
     raise ValueError("A variável de ambiente DATABASE_URL não está definida. Verifique as configurações no Railway.")
@@ -177,56 +165,11 @@ if db_url and db_url.startswith("postgres://"):
 engine = create_engine(db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
 SessionLocal = sessionmaker(bind=engine)
 
-# Secondary engine for CAR spatial data (Supabase)
-# Railway tem problemas com IPv6 para o Supabase.
-# Solução: usar o Transaction Pooler (porta 6543) que resolve via IPv4.
-car_db_url = Config.CAR_DATABASE_URL or db_url 
-if car_db_url and car_db_url.startswith("postgres://"):
-    car_db_url = car_db_url.replace("postgres://", "postgresql://", 1)
-
-# 🔧 AUTO-FIX: Se a URL do Supabase usa porta 5432 (direta), tenta usar o pooler (6543)
-# O pooler usa IPv4 e não sofre do erro "Network is unreachable" no Railway/IPv6.
-car_db_url_pooler = None
-if car_db_url and 'supabase.co' in car_db_url and ':5432' in car_db_url:
-    car_db_url_pooler = car_db_url.replace(':5432', ':6543').replace(
-        'db.', ''  # Pooler URL remove o prefixo 'db.'
-    )
-    # O pooler do Supabase usa o formato: 
-    # postgresql://user:pass@PROJECT_REF.pooler.supabase.com:6543/postgres
-    # Tentamos construir a URL automaticamente
-    import re
-    match = re.search(r'db\.([a-z]+\.supabase\.co)', car_db_url)
-    if match:
-        pooler_host = match.group(1).replace('.supabase.co', '.pooler.supabase.com')
-        car_db_url_pooler = re.sub(
-            r'@db\.[a-z]+\.supabase\.co:\d+',
-            f'@{pooler_host}:6543',
-            car_db_url
-        )
-        print(f"🔧 [CAR DB] Pooler URL gerada: ...@{pooler_host}:6543/...")
-
-# Tenta a conexão direta primeiro, se falhar, usa o pooler
-try:
-    car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 5})
-    with car_engine.connect() as test_conn:
-        test_conn.execute(text("SELECT 1"))
-    print("✅ [CAR DB] Conexão direta com Supabase OK.")
-except Exception as e:
-    print(f"⚠️ [CAR DB] Conexão direta falhou: {e}")
-    if car_db_url_pooler:
-        print(f"🔄 [CAR DB] Tentando via Transaction Pooler (IPv4)...")
-        try:
-            car_engine = create_engine(car_db_url_pooler, pool_pre_ping=True, connect_args={'connect_timeout': 10})
-            with car_engine.connect() as test_conn:
-                test_conn.execute(text("SELECT 1"))
-            print("✅ [CAR DB] Conexão via Pooler OK!")
-        except Exception as e2:
-            print(f"❌ [CAR DB] Pooler também falhou: {e2}")
-            car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
-    else:
-        car_engine = create_engine(car_db_url, pool_pre_ping=True, connect_args={'connect_timeout': 10})
-
-CarSessionLocal = sessionmaker(bind=car_engine)
+# Alias mantido para compatibilidade com scripts de ingestão na raiz do projeto
+# (ingest_ms_data.py, ingest_mt_wfs.py). O Supabase foi removido da produção —
+# lookup de CAR agora é feito exclusivamente via Google Earth Engine (gee_connector.py).
+car_engine = engine
+CarSessionLocal = SessionLocal
 
 def init_db():
     """Initialize database connections and perform essential migrations."""

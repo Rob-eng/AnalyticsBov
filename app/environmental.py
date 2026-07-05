@@ -2,7 +2,7 @@ import requests
 import json
 import time
 from app.config import Config
-from shapely.geometry import shape, Point, mapping
+from shapely.geometry import shape, Point
 import geopandas as gpd
 import pandas as pd
 import matplotlib
@@ -13,9 +13,6 @@ import os
 from pathlib import Path
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
-from app.models import CarSessionLocal, CARProperty
-from geoalchemy2.functions import ST_Intersects, ST_GeomFromText, ST_Distance
-from geoalchemy2.shape import to_shape
 from sqlalchemy import text
 
 def get_state_from_coords(lat, lon):
@@ -75,32 +72,7 @@ def fetch_car_perimeter(lat, lon):
     except Exception as e:
         print(f"⚠️ GEE lookup failed: {e}")
 
-    # 2. 🐘 TRY LOCAL POSTGIS
-    try:
-        from app.models import CarSessionLocal, CARProperty
-        from geoalchemy2.functions import ST_GeomFromText, ST_Intersects
-        from geoalchemy2.shape import to_shape
-        from shapely.geometry import mapping
-        
-        print(f"🐘 [Environmental] Querying PostGIS fallback for {lat}, {lon}...", flush=True)
-        session = CarSessionLocal()
-        point_wkt = f'POINT({lon} {lat})'
-        
-        prop = session.query(CARProperty).filter(
-            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
-        ).first()
-
-        if prop:
-            geom_shape = to_shape(prop.geometry)
-            print(f"✅ [Environmental] PostGIS found property: {prop.cod_imovel}", flush=True)
-            return (mapping(geom_shape), 'OFFICIAL', prop.cod_imovel)
-        else:
-            print(f"📍 [Environmental] No property found in PostGIS for this coordinate.", flush=True)
-        session.close()
-    except Exception as e:
-        print(f"❌ [Environmental] PostGIS Error: {e}", flush=True)
-    
-    # 3. Last resort: estimated area
+    # 2. Last resort: estimated area
     print("⚠ All sources failed. Using estimated 1km² area")
     offset = 0.005 # ~500m
     bbox_polygon = {

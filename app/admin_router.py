@@ -285,26 +285,11 @@ async def trigger_mt_ingestion(background_tasks: BackgroundTasks, api_key: str =
 
 @router.get("/status/db")
 def check_db_counts(api_key: str = Depends(get_api_key)):
-    """
-    Checks the number of rows in CARProperty and Users.
-    """
-    from app.models import CarSessionLocal, CARProperty, SessionLocal, User, ActivityLog, CdaEvent, CdaLotResult
+    """Retorna contagens de usuários, logs e eventos CDA."""
+    from app.models import SessionLocal, User, ActivityLog, CdaEvent, CdaLotResult
     from sqlalchemy import func
-    
-    res = {}
-    
-    # Check CAR Properties (Pode ser lento se for milhoes, ok para MT/MS)
-    car_session = CarSessionLocal()
-    try:
-        counts = car_session.query(CARProperty.uf, func.count(CARProperty.id)).group_by(CARProperty.uf).all()
-        res["car_by_state"] = {uf: count for uf, count in counts}
-        res["total_car"] = sum(count for uf, count in counts)
-    except Exception as e:
-        res["car_error"] = str(e)
-    finally:
-        car_session.close()
 
-    # Check Bot Users
+    res = {}
     db = SessionLocal()
     try:
         res["total_users"] = db.query(User).count()
@@ -313,8 +298,7 @@ def check_db_counts(api_key: str = Depends(get_api_key)):
             "telegram": db.query(User).filter(User.platform == 'telegram').count()
         }
         res["recent_logs"] = db.query(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(10).all()
-        # CDA stats
-        res["cda_events"]     = db.query(CdaEvent).count()
+        res["cda_events"]      = db.query(CdaEvent).count()
         res["cda_lot_results"] = db.query(CdaLotResult).count()
     except Exception as e:
         res["user_error"] = str(e)

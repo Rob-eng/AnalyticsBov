@@ -3,7 +3,6 @@ import os
 class Config:
     # Database
     DATABASE_URL = os.getenv('DATABASE_URL')
-    CAR_DATABASE_URL = os.getenv('CAR_DATABASE_URL')
 
     # Telegram
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
