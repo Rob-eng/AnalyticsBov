@@ -1,13 +1,6 @@
-from fastapi import FastAPI, HTTPException, Query, Depends, Security
-from fastapi.security.api_key import APIKeyHeader, APIKey, APIKeyQuery
-from sqlalchemy import text
-from app.models import SessionLocal, CARProperty, engine
-from geoalchemy2.functions import ST_Intersects, ST_GeomFromText, ST_Distance, ST_Centroid
-from geoalchemy2.shape import to_shape
-from shapely.geometry import mapping
-import json
+from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi.security.api_key import APIKey
 import os
-from starlette.status import HTTP_403_FORBIDDEN
 
 from app.whatsapp.webhook import router as whatsapp_router
 from app.telegram_webhook import router as telegram_router
@@ -102,84 +95,17 @@ def get_property_at(lat: float = Query(..., description="Latitude"),
             "geometry": prop_gee["geometry"]
         }
 
-    # 2. 🐘 Fallback para PostGISLocal (Para carregamentos manuais/ZIPs)
-    from app.models import CarSessionLocal
-    session = CarSessionLocal()
-    try:
-        from geoalchemy2.functions import ST_GeomFromText, ST_Intersects, ST_Distance
-        point_wkt = f'POINT({lon} {lat})'
-        
-        prop = session.query(CARProperty).filter(
-            CARProperty.geometry.ST_Intersects(ST_GeomFromText(point_wkt, 4674))
-        ).first()
-
-        if prop:
-            from geoalchemy2.shape import to_shape
-            from shapely.geometry import mapping
-            geom_shape = to_shape(prop.geometry)
-            return {
-                "found": True,
-                "source": "POSTGIS_LOCAL",
-                "cod_imovel": prop.cod_imovel,
-                "uf": prop.uf,
-                "municipio": prop.municipio,
-                "geometry": mapping(geom_shape)
-            }
-    except Exception as e:
-        print(f"⚠️ Erro no Fallback PostGIS: {e}")
-    finally:
-        session.close()
-
     return {"found": False, "message": "Nenhuma propriedade localizada nesta coordenada."}
             
 @app.get("/property/details/{cod_imovel}")
 def get_property_details(cod_imovel: str, api_key: APIKey = Depends(get_api_key)):
-    """
-    Retrieve full details and perimeter for a specific property code.
-    """
-    from app.models import CarSessionLocal
-    session = CarSessionLocal()
-    try:
-        prop = session.query(CARProperty).filter(CARProperty.cod_imovel == cod_imovel).first()
-        if not prop:
-            raise HTTPException(status_code=404, detail="Property not found")
-            
-        geom_shape = to_shape(prop.geometry)
-        return {
-            "found": True,
-            "cod_imovel": prop.cod_imovel,
-            "uf": prop.uf,
-            "municipio": prop.municipio,
-            "geometry": mapping(geom_shape)
-        }
-    finally:
-        session.close()
+    raise HTTPException(status_code=501, detail="Lookup by cod_imovel via GEE não implementado.")
 
 @app.get("/property/search")
-def search_properties(query: str = Query(..., min_length=3), 
+def search_properties(query: str = Query(..., min_length=3),
                       limit: int = 20,
                       api_key: APIKey = Depends(get_api_key)):
-    """
-    Search properties by code or municipality.
-    """
-    from app.models import CarSessionLocal
-    session = CarSessionLocal()
-    try:
-        props = session.query(CARProperty).filter(
-            (CARProperty.cod_imovel.ilike(f"%{query}%")) | 
-            (CARProperty.municipio.ilike(f"%{query}%"))
-        ).limit(limit).all()
-        
-        results = []
-        for p in props:
-            results.append({
-                "cod_imovel": p.cod_imovel,
-                "uf": p.uf,
-                "municipio": p.municipio
-            })
-        return {"count": len(results), "results": results}
-    finally:
-        session.close()
+    raise HTTPException(status_code=501, detail="Busca textual de propriedades não disponível via GEE.")
 
 import threading
 import migrate_ms
