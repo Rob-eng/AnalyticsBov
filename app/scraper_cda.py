@@ -22,6 +22,7 @@ Calculamos: arroba = peso_kg / 15; price_arroba = preco_fechado / arrobas
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -35,9 +36,76 @@ BASE_URL        = "https://www.correadacosta.com.br"
 RESULTS_URL     = f"{BASE_URL}/resultados"
 REQUEST_TIMEOUT = 40
 USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+
+# ── Sessão autenticada ────────────────────────────────────────────────────────
+
+_session: requests.Session | None = None
+
+def _get_session() -> requests.Session:
+    """
+    Retorna uma requests.Session autenticada no CDA.
+    Faz login apenas na primeira chamada; reutiliza o cookie nas seguintes.
+    """
+    global _session
+    if _session is not None:
+        return _session
+
+    email    = os.getenv("CDA_EMAIL", "")
+    password = os.getenv("CDA_PASSWORD", "")
+
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": USER_AGENT,
+        "Accept-Language": "pt-BR,pt;q=0.9",
+    })
+
+    if not email or not password:
+        print("[CDA] ⚠️ CDA_EMAIL/CDA_PASSWORD não configurados — scraping sem login.", flush=True)
+        _session = s
+        return _session
+
+    # 1. GET /login → extrai CSRF token
+    try:
+        login_page = s.get(f"{BASE_URL}/login", timeout=REQUEST_TIMEOUT)
+        soup = BeautifulSoup(login_page.text, "lxml")
+        token_input = soup.find("input", {"name": "__RequestVerificationToken"})
+        csrf_token = token_input["value"] if token_input else ""
+    except Exception as e:
+        print(f"[CDA] ❌ Falha ao carregar página de login: {e}", flush=True)
+        _session = s
+        return _session
+
+    # 2. POST /Login com credenciais
+    try:
+        resp = s.post(
+            f"{BASE_URL}/Login",
+            data={
+                "Apelido":                    email,
+                "Password":                   password,
+                "__RequestVerificationToken": csrf_token,
+            },
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=True,
+        )
+        # Login bem-sucedido redireciona para / ou /perfil (não para /login)
+        if "/login" in resp.url.lower():
+            print("[CDA] ❌ Login falhou — verifique CDA_EMAIL e CDA_PASSWORD.", flush=True)
+        else:
+            print(f"[CDA] ✅ Login efetuado com sucesso (redirect → {resp.url})", flush=True)
+    except Exception as e:
+        print(f"[CDA] ❌ Erro durante POST /Login: {e}", flush=True)
+
+    _session = s
+    return _session
+
+
+def _reset_session():
+    """Força novo login na próxima chamada (usar se receber 401/redirect para login)."""
+    global _session
+    _session = None
 
 # ── Utilidades ────────────────────────────────────────────────────────────────
 
@@ -101,13 +169,13 @@ def fetch_cda_auction_urls(max_pages: int = 10) -> list:
     Padrão válido: /leiloes/<slug> onde slug tem pelo menos um hífen (é uma página de evento).
     Exclui: /leiloes, /leiloes/medias/*, /leiloes/agenda, etc.
     """
-    headers = {"User-Agent": USER_AGENT}
+    session = _get_session()
     found   = set()
 
     for page in range(1, max_pages + 1):
         page_url = RESULTS_URL if page == 1 else f"{RESULTS_URL}?page={page}"
         try:
-            resp = requests.get(page_url, timeout=REQUEST_TIMEOUT, headers=headers)
+            resp = session.get(page_url, timeout=REQUEST_TIMEOUT)
         except Exception as e:
             print(f"[CDA] Erro ao acessar {page_url}: {e}", flush=True)
             break
@@ -302,8 +370,14 @@ def scrape_cda_url(url: str) -> list:
     2. Se não encontrar, tenta a tabela de médias (Classificação|Idade|Peso|Valor)
        presente nos leilões de segunda/terça já encerrados.
     """
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, timeout=REQUEST_TIMEOUT, headers=headers)
+    session = _get_session()
+    resp = session.get(url, timeout=REQUEST_TIMEOUT)
+    # Se redirecionou para login, sessão expirou — tenta renovar uma vez
+    if "/login" in resp.url.lower():
+        print(f"[CDA] Sessão expirada em {url}, renovando login...", flush=True)
+        _reset_session()
+        session = _get_session()
+        resp = session.get(url, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
 
     soup       = BeautifulSoup(resp.text, "lxml")
