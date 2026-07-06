@@ -1,9 +1,9 @@
-import cleanup_db
-import download_car_data_v2
-import ingest_ms_data
 import os
 
 def run_migration():
+    import cleanup_db
+    import download_car_data_v2
+    import ingest_ms_data
     if os.getenv("RUN_MIGRATION", "true") != "true":
         print("⏭️ Skipping migration (RUN_MIGRATION != true)")
         return
