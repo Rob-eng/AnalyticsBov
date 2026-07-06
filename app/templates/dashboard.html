@@ -445,7 +445,20 @@
 
             <!-- Status CDA Leilão -->
             <div style="background:var(--card-bg);border-radius:1rem;padding:1.5rem;border:1px solid rgba(255,255,255,0.08);margin-bottom:1.5rem" id="cda-status-panel">
-                <h3 style="margin:0 0 1rem 0;font-size:0.95rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em">🐂 Leilão CDA — Status da Captura</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                    <h3 style="margin:0;font-size:0.95rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em">🐂 Leilão CDA — Status da Captura</h3>
+                    <div style="display:flex;gap:0.5rem">
+                        <button onclick="runCdaBackfill(4)" id="cda-backfill-btn"
+                            style="background:rgba(245,158,11,0.15);border:1px solid #f59e0b;color:#f59e0b;padding:5px 12px;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;font-size:0.82rem;font-weight:600">
+                            ⬇ Backfill (4 pág)
+                        </button>
+                        <button onclick="loadCdaStatus()"
+                            style="background:rgba(99,102,241,0.15);border:1px solid #6366f1;color:white;padding:5px 12px;border-radius:8px;cursor:pointer;font-family:'Outfit',sans-serif;font-size:0.82rem">
+                            🔄 Atualizar
+                        </button>
+                    </div>
+                </div>
+                <div id="cda-backfill-msg" style="display:none;margin-bottom:0.75rem;padding:0.6rem 1rem;border-radius:8px;font-size:0.85rem"></div>
                 <div id="cda-status-body" style="color:#94a3b8">Carregando...</div>
             </div>
 
@@ -729,6 +742,10 @@
             }
 
             // Load CDA status
+            loadCdaStatus();
+        }
+
+        async function loadCdaStatus() {
             try {
                 const cdaUrl = new URL("/admin/cda/status", location.origin);
                 cdaUrl.searchParams.set("api_key", API_KEY);
@@ -760,6 +777,36 @@
                 `;
             } catch(err) {
                 document.getElementById("cda-status-body").innerHTML = `<span style="color:#ef4444">❌ ${err.message}</span>`;
+            }
+        }
+
+        async function runCdaBackfill(maxPages) {
+            const btn = document.getElementById("cda-backfill-btn");
+            const msg = document.getElementById("cda-backfill-msg");
+            btn.disabled = true;
+            btn.textContent = "⏳ Processando...";
+            msg.style.display = "block";
+            msg.style.background = "rgba(245,158,11,0.1)";
+            msg.style.border = "1px solid #f59e0b";
+            msg.style.color = "#f59e0b";
+            msg.textContent = `Backfill iniciado (${maxPages} páginas). Aguarde ~2 min...`;
+            try {
+                const url = new URL("/admin/ingest/cda", location.origin);
+                url.searchParams.set("max_pages", maxPages);
+                url.searchParams.set("api_key", API_KEY);
+                await fetch(url.toString(), { method: "POST" });
+                msg.style.background = "rgba(34,197,94,0.1)";
+                msg.style.border = "1px solid #22c55e";
+                msg.style.color = "#22c55e";
+                msg.textContent = "✅ Backfill em andamento nos logs do Railway. Atualize o status em ~2 min.";
+            } catch(err) {
+                msg.style.background = "rgba(239,68,68,0.1)";
+                msg.style.border = "1px solid #ef4444";
+                msg.style.color = "#ef4444";
+                msg.textContent = `❌ Erro: ${err.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "⬇ Backfill (4 pág)";
             }
         }
 
