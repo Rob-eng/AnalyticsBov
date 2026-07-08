@@ -346,33 +346,34 @@ def get_cda_latest_summary(top_n_races: int = 12) -> dict:
     session = SessionLocal()
     try:
         # ── Estratégia 1: usar o último evento real de cda_events ──────────
+        # Ordena por coalesce(event_date, collected_at) desc para pegar o mais recente
+        # independente de ter data no slug da URL ou não.
         last_event = (
             session.query(CdaEvent)
-            .filter(CdaEvent.event_date.isnot(None))
-            .order_by(CdaEvent.event_date.desc())
+            .order_by(func.coalesce(CdaEvent.event_date, CdaEvent.collected_at).desc())
             .first()
         )
-        if not last_event:
-            last_event = (
-                session.query(CdaEvent)
-                .order_by(CdaEvent.collected_at.desc())
-                .first()
-            )
 
         if last_event:
             event_date = last_event.event_date or last_event.collected_at
-            # Agrega TODOS os eventos do mesmo dia (ex: leilão principal + reprodutores)
+
+            # Agrega eventos do mesmo DIA real só quando temos event_date confiável.
+            # Sem event_date, usar collected_at agruparia todos os eventos do backfill.
             from datetime import timedelta as _td0
-            day_start = event_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end   = day_start + _td0(days=1)
-            same_day_events = (
-                session.query(CdaEvent)
-                .filter(
-                    func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) >= day_start,
-                    func.coalesce(CdaEvent.event_date, CdaEvent.collected_at) <  day_end,
+            if last_event.event_date:
+                day_start = event_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                day_end   = day_start + _td0(days=1)
+                same_day_events = (
+                    session.query(CdaEvent)
+                    .filter(
+                        CdaEvent.event_date >= day_start,
+                        CdaEvent.event_date <  day_end,
+                    )
+                    .all()
                 )
-                .all()
-            )
+            else:
+                same_day_events = [last_event]
+
             event_ids = [e.id for e in same_day_events]
 
             # Lotes de todos os eventos do dia

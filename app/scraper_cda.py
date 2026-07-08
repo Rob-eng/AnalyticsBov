@@ -234,16 +234,40 @@ def _extract_event_meta(soup, source_url: str) -> dict:
         except ValueError:
             pass
 
-    # Fallback: procura "quinta, 11/junho/2026" no texto da página
+    # Fallback: procura data no texto da página em vários formatos
     if not meta["event_date"]:
         body_text = soup.get_text(" ")
+        # "quinta, 11/junho/2026" ou "quinta-feira 11 junho 2026"
         dm = re.search(
-            r"(?:segunda|terça|quarta|quinta|sexta|sábado|domingo),?\s*"
-            r"(\d{1,2})[/\s]([a-záêçõ]+)[/\s](\d{4})",
+            r"(?:segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)"
+            r"(?:-feira)?,?\s*"
+            r"(\d{1,2})[/\s]+([a-záêçõãíóú]+)[/\s]+(\d{4})",
             body_text, re.IGNORECASE
         )
         if dm:
             meta["event_date"] = _to_date(f"{dm.group(1)}/{dm.group(2)}/{dm.group(3)}")
+
+    if not meta["event_date"]:
+        # "07/07/2026" ou "07-07-2026"
+        dm2 = re.search(r"\b(\d{2})[/\-](\d{2})[/\-](202\d)\b", soup.get_text(" "))
+        if dm2:
+            try:
+                meta["event_date"] = datetime.strptime(
+                    f"{dm2.group(1)}/{dm2.group(2)}/{dm2.group(3)}", "%d/%m/%Y"
+                )
+            except ValueError:
+                pass
+
+    if not meta["event_date"]:
+        # <time datetime="2026-07-07"> ou similar no HTML
+        time_tag = soup.find("time", attrs={"datetime": True})
+        if time_tag:
+            try:
+                meta["event_date"] = datetime.strptime(
+                    time_tag["datetime"][:10], "%Y-%m-%d"
+                )
+            except ValueError:
+                pass
 
     # Local: "Local: Estância Orsi / Leiloeiro: ..."
     local_m = re.search(r"[Ll]ocal:\s*(.+?)(?:[/\n]|Leiloeiro|$)", soup.get_text(" "))
