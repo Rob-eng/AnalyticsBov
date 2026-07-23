@@ -42,6 +42,18 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                         sender_phone = msg.get("from")
                         user_name = contacts_map.get(sender_phone)
                         msg_type = msg.get("type")
+
+                        # Registra horário da última mensagem (controla janela 24h do WhatsApp)
+                        try:
+                            from datetime import datetime as _dt
+                            from app.models import SessionLocal as _SL, User as _User
+                            with _SL() as _db:
+                                _u = _db.query(_User).filter_by(chat_id=sender_phone).first()
+                                if _u:
+                                    _u.last_message_at = _dt.utcnow()
+                                    _db.commit()
+                        except Exception:
+                            pass
                         
                         texto = ""
                         if msg_type == "text":

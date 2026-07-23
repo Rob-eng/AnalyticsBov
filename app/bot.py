@@ -295,44 +295,56 @@ async def broadcast_report(application, data):
                         _upload_media,
                     )
                     from io import BytesIO
-                    
+                    from datetime import datetime as _dt, timedelta as _tdelta
+
                     success = False
                     used_template = False
-                    
+
+                    # Decide canal com base na janela de 24h (sem tentativa desperdiçada)
+                    last_msg = getattr(user, 'last_message_at', None)
+                    within_window = (
+                        last_msg is not None
+                        and (_dt.utcnow() - last_msg) < _tdelta(hours=23)
+                    )
+
+                    # Pré-calcula variáveis do template (usado em ambos os caminhos como fallback)
+                    date_str = data[0]['date'].strftime('%d/%m/%Y') if data else ""
+                    sorted_data = sorted(data, key=lambda x: x['price'], reverse=True)
+                    country_map = {item['country']: f"{item['price']:.2f}" for item in sorted_data}
+                    vars_list = [
+                        date_str,
+                        country_map.get("China", "N/A"),
+                        country_map.get("Estados Unidos", "N/A"),
+                        country_map.get("Irlanda", "N/A"),
+                        country_map.get("Argentina", "N/A"),
+                        country_map.get("Austrália", country_map.get("Australia", "N/A")),
+                        country_map.get("Uruguai", "N/A"),
+                        country_map.get("Paraguai", "N/A"),
+                        country_map.get("Brasil", "N/A"),
+                    ]
+
                     # 1. Upload ÚNICO da imagem
                     with open(chart_path, 'rb') as f:
                         media_id = _upload_media(BytesIO(f.read()), "image/png", "cotacao.png")
-                    
+
                     if media_id:
-                        # 2. Tenta envio livre (funciona se interagiu nas últimas 24h)
-                        print(f"[Broadcast WA] Tentando envio livre para {user.chat_id}...", flush=True)
-                        success = send_whatsapp_image_by_id(user.chat_id, media_id, caption)
-                        print(f"[Broadcast WA] Envio livre para {user.chat_id}: {'OK' if success else 'FALHOU'}", flush=True)
-                        
-                        # 3. Fallback: Template pré-aprovado (reutiliza o MESMO media_id)
-                        if not success:
-                            print(f"[Broadcast WA] ⚠️ Janela 24h expirada. Tentando Template com media_id existente...", flush=True)
-                            date_str = data[0]['date'].strftime('%d/%m/%Y') if data else ""
-                            sorted_data = sorted(data, key=lambda x: x['price'], reverse=True)
-                            country_map = {item['country']: f"{item['price']:.2f}" for item in sorted_data}
-                            vars_list = [
-                                date_str,
-                                country_map.get("China", "N/A"),
-                                country_map.get("Estados Unidos", "N/A"),
-                                country_map.get("Irlanda", "N/A"),
-                                country_map.get("Argentina", "N/A"),
-                                country_map.get("Austrália", country_map.get("Australia", "N/A")),
-                                country_map.get("Uruguai", "N/A"),
-                                country_map.get("Paraguai", "N/A"),
-                                country_map.get("Brasil", "N/A")
-                            ]
-                            print(f"[Broadcast WA] Template vars: {vars_list}", flush=True)
+                        if within_window:
+                            # Janela aberta → envio livre; template só se falhar
+                            print(f"[Broadcast WA] Janela aberta → envio livre para {user.chat_id}", flush=True)
+                            success = send_whatsapp_image_by_id(user.chat_id, media_id, caption)
+                            if not success:
+                                print(f"[Broadcast WA] Livre falhou → template para {user.chat_id}", flush=True)
+                                success = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
+                                used_template = True
+                        else:
+                            # Fora da janela → template diretamente (sem tentativa perdida)
+                            window_info = f"última msg: {last_msg}" if last_msg else "sem histórico"
+                            print(f"[Broadcast WA] Janela expirada ({window_info}) → template direto para {user.chat_id}", flush=True)
                             success = send_whatsapp_market_template(user.chat_id, media_id, vars_list)
                             used_template = True
-                            print(f"[Broadcast WA] Template para {user.chat_id}: {'OK' if success else 'FALHOU'}", flush=True)
                     else:
-                        # Upload falhou — tenta enviar só texto como último recurso
-                        print(f"[Broadcast WA] ❌ Upload de imagem falhou. Enviando só texto...", flush=True)
+                        # Upload falhou — texto como último recurso
+                        print(f"[Broadcast WA] ❌ Upload falhou → texto puro para {user.chat_id}", flush=True)
                         success = send_whatsapp_text(user.chat_id, caption)
                     
                     delivery_success = bool(success)

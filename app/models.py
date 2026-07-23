@@ -9,16 +9,17 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = 'users'
-    
+
     chat_id = Column(String, primary_key=True)
     username = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # SaaS & Platform fields
     platform = Column(String, default='telegram')  # 'telegram' ou 'whatsapp'
     plan_type = Column(String, default='FREE')     # 'FREE', 'STARTER', 'PRO', 'ENTERPRISE'
     stripe_subscription_id = Column(String, nullable=True)
     trial_expires_at = Column(DateTime, nullable=True)  # Data de expiração do trial/promo grátis
+    last_message_at = Column(DateTime, nullable=True)   # Última vez que o usuário enviou mensagem (WA 24h window)
 
     
     locations = relationship("FavoriteLocation", backref="user", cascade="all, delete-orphan")
