@@ -1505,7 +1505,7 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
                         
                         # 1. Buscar perímetro
                         print("[TRIGGER_FLOW] Buscando perímetro CAR...", flush=True)
-                        geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
+                        geometry, car_status, _cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
                         print(f"[TRIGGER_FLOW] Perímetro: {car_status}", flush=True)
                         
                         # 2. Análise NDVI
@@ -1618,7 +1618,7 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
                         from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
                         
                         # 1. Perímetro
-                        geometry, car_status = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
+                        geometry, car_status, _cod_imovel = await loop.run_in_executor(None, fetch_car_perimeter, lat_val, lon_val)
                         
                         # 2. Dados de terreno
                         terrain_data = await loop.run_in_executor(None, get_terrain_data, geometry)
