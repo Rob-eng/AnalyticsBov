@@ -28,6 +28,12 @@ class Config:
             ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
         except ValueError:
             ADMIN_CHAT_ID = 1118914866
-    
+
     if SPREADSHEET_ID:
         SPREADSHEET_ID = SPREADSHEET_ID.strip()
+
+    # PRODES tool
+    PRODES_GCS_BUCKET = os.getenv('PRODES_GCS_BUCKET')  # sem isso, feature roda sem cache persistente
+    PRODES_MAX_CONCURRENT_JOBS = int(os.getenv('PRODES_MAX_CONCURRENT_JOBS', '2'))
+    PRODES_POLL_INTERVAL_SECONDS = int(os.getenv('PRODES_POLL_INTERVAL_SECONDS', '20'))
+    PRODES_JOB_STALE_MINUTES = int(os.getenv('PRODES_JOB_STALE_MINUTES', '10'))

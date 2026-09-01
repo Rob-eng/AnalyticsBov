@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, create_engine, text, ForeignKey, Text, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, create_engine, text, ForeignKey, Text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -153,6 +153,59 @@ class HealthCheckResult(Base):
     latency_ms = Column(Float, nullable=True)
     message    = Column(String, nullable=True)
     checked_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ProdesJob(Base):
+    """
+    Fila de análises PRODES pendentes/processadas. Um job é processado pelo
+    poller em app/prodes_worker.py, não pelo handler do bot (a análise pode
+    levar minutos). car_perimeter_geojson e apontamento_geometry_geojson são
+    snapshots do perímetro/apontamento no momento em que o usuário escolheu a
+    análise — o worker não busca nenhum dos dois de novo, para o relatório
+    final descrever exatamente o que o usuário viu na tela.
+
+    Não há tabela de "base PRODES" — os apontamentos são consultados AO VIVO
+    via WFS do TerraBrasilis/INPE a cada /prodes (não há cópia local a
+    versionar); source_label/source_queried_at registram a fonte e o
+    instante da consulta, citados no relatório para reprodutibilidade.
+    """
+    __tablename__ = 'prodes_jobs'
+
+    id                          = Column(Integer, primary_key=True)
+    user_id                     = Column(String, ForeignKey('users.chat_id'), nullable=False, index=True)
+    chat_id                     = Column(String, nullable=False)
+    location_id                 = Column(Integer, ForeignKey('favorite_locations.id'), nullable=True)
+    location_lat                = Column(Float, nullable=True)
+    location_lon                = Column(Float, nullable=True)
+    location_name               = Column(String, nullable=True)
+    car_cod_imovel              = Column(String, nullable=True)
+    car_status                  = Column(String, nullable=True)   # 'OFFICIAL' (único status aceito hoje)
+    car_perimeter_geojson       = Column(Text, nullable=False)
+    source_label                = Column(String, nullable=True)   # ex.: 'TerraBrasilis/INPE (WFS, prodes-pantanal-nb:yearly_deforestation)'
+    source_queried_at           = Column(DateTime, nullable=True)
+    apontamento_uuid            = Column(String, nullable=False, index=True)   # uuid original do INPE
+    apontamento_class_name      = Column(String, nullable=True)                # ex.: 'd2008'
+    apontamento_year            = Column(Integer, nullable=True)
+    apontamento_image_date      = Column(Date, nullable=True)
+    apontamento_geometry_geojson = Column(Text, nullable=False)
+    area_total_ha               = Column(Float, nullable=True)   # snapshot calculado na listagem (WFS + shapely)
+    area_intersect_ha           = Column(Float, nullable=True)
+    forced_before_date          = Column(Date, nullable=True)
+    forced_after_date           = Column(Date, nullable=True)
+    status                      = Column(String, default='PENDING', index=True)   # PENDING/PROCESSING/DONE/ERROR
+    attempts                    = Column(Integer, default=0)
+    max_attempts                = Column(Integer, default=4)
+    next_attempt_at             = Column(DateTime, default=datetime.utcnow)
+    last_error                  = Column(Text, nullable=True)
+    idempotency_key             = Column(String, nullable=False, index=True)
+    result_pdf_path             = Column(String, nullable=True)
+    result_png_before_path      = Column(String, nullable=True)
+    result_png_after_path       = Column(String, nullable=True)
+    locked_by                   = Column(String, nullable=True)
+    locked_at                   = Column(DateTime, nullable=True)
+    created_at                  = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at                  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finished_at                 = Column(DateTime, nullable=True)
 
 import os
 if not Config.DATABASE_URL:

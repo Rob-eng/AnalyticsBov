@@ -28,6 +28,8 @@ WAITING_LOCATION_DELETE = 8
 WAITING_FORECAST_PERIOD = 9
 WAITING_WEATHER_MODE = 10
 WAITING_ENV_MODE = 11
+WAITING_PRODES_LOCATION = 12
+WAITING_PRODES_APONTAMENTO = 13
 
 MAIN_MENU_BUTTONS = [
     "📊 Cotação Atual", "🔮 Mercado Futuro", "🐂 Leilão CDA",
@@ -1072,6 +1074,56 @@ async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return WAITING_ENV_MODE
 
+def _build_location_picker_text(chat_id: str) -> str:
+    """
+    Lista numerada das localizações favoritas do usuário ("1. Nome\\n2. Nome...").
+    Reaproveitada por /ambiental e /prodes. Devolve "" se o usuário não tiver
+    nenhuma localização salva.
+    """
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+        if not locs:
+            return ""
+        lines = ["\n📌 *Suas Propriedades (Digite o número):*"]
+        for i, loc in enumerate(locs, 1):
+            lines.append(f"{i}. {loc.name}")
+        return "\n".join(lines) + "\n"
+    finally:
+        session.close()
+
+
+def _resolve_location_input(chat_id: str, query: str):
+    """
+    Resolve uma entrada de localização (número de propriedade favorita,
+    coordenadas decimais ou link do Google Maps) em (lat, lon, prop_name).
+    Reaproveitada por /ambiental e /prodes. Casos especiais:
+    - ('NOT_FOUND', query, None): número de propriedade inexistente — o
+      chamador decide a mensagem de erro.
+    - (None, None, None): não foi possível interpretar a entrada.
+    """
+    if query.isdigit():
+        session = SessionLocal()
+        try:
+            from app.models import FavoriteLocation
+            idx = int(query) - 1
+            locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+            if 0 <= idx < len(locs):
+                return (locs[idx].latitude, locs[idx].longitude, locs[idx].name)
+            return ('NOT_FOUND', query, None)
+        finally:
+            session.close()
+
+    url_coords = extract_coords_from_url(query)
+    if url_coords:
+        return (url_coords[0], url_coords[1], None)
+    coords = parse_coordinates(query)
+    if coords:
+        return (coords[0], coords[1], None)
+    return (None, None, None)
+
+
 async def receive_env_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Store env mode choice (ndvi/mdt) and ask for location."""
     text = update.message.text.strip()
@@ -1092,16 +1144,7 @@ async def receive_env_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- Coordenadas (ex: -21.43, -54.78)\n"
         "- Link do Google Maps\n"
     )
-    session = SessionLocal()
-    try:
-        from app.models import FavoriteLocation
-        locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
-        if locs:
-            help_text += "\n📌 *Suas Propriedades (Digite o número):*\n"
-            for i, loc in enumerate(locs, 1):
-                help_text += f"{i}. {loc.name}\n"
-    finally:
-        session.close()
+    help_text += _build_location_picker_text(chat_id)
 
     help_text += "\nEnvie /cancelar para sair."
     await update.message.reply_text(
@@ -1126,36 +1169,15 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
     
     try:
         # 1. Determine Lat/Lon
-        lat, lon = None, None
-        
-        # Priority 1: Check for numerical shortcut
-        if query.isdigit():
-            session = SessionLocal()
-            try:
-                from app.models import FavoriteLocation
-                idx = int(query) - 1
-                locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
-                if 0 <= idx < len(locs):
-                    lat, lon = locs[idx].latitude, locs[idx].longitude
-                    context.user_data['prop_name'] = locs[idx].name
-                else:
-                    await status_msg.edit_text(f"⚠️ Propriedade nº {query} não encontrada.")
-                    return WAITING_ENV_LOCATION
-            finally:
-                session.close()
-
-        if lat is None:
-            url_coords = extract_coords_from_url(query)
-            if url_coords:
-                lat, lon = url_coords
-            else:
-                coords = parse_coordinates(query)
-                if coords:
-                    lat, lon = coords
-        
+        lat, lon, prop_name_or_err = _resolve_location_input(chat_id, query)
+        if lat == 'NOT_FOUND':
+            await status_msg.edit_text(f"⚠️ Propriedade nº {prop_name_or_err} não encontrada.")
+            return WAITING_ENV_LOCATION
         if lat is None or lon is None:
             await status_msg.edit_text("⚠️ Não consegui interpretar as coordenadas. Envie coordenadas decimais ou um link do Google Maps.")
             return WAITING_ENV_LOCATION
+        if prop_name_or_err:
+            context.user_data['prop_name'] = prop_name_or_err
 
         # 2. Fetch CAR Perimeter
         geometry, is_real_car, cod_imovel = fetch_car_perimeter(lat, lon)
@@ -1317,6 +1339,265 @@ async def cancel_env(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_keyboard(chat_id)
     )
     return ConversationHandler.END
+
+
+# ── PRODES: cruza o perímetro do imóvel com a base de desmatamento do INPE ──
+
+def _parse_prodes_date_args(args) -> tuple:
+    """Lê overrides `antes=YYYY-MM-DD depois=YYYY-MM-DD` de /prodes."""
+    forced_before = None
+    forced_after = None
+    for arg in (args or []):
+        if '=' not in arg:
+            continue
+        key, _, value = arg.partition('=')
+        key = key.strip().lower()
+        try:
+            d = datetime.strptime(value.strip(), '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        if key == 'antes':
+            forced_before = d
+        elif key == 'depois':
+            forced_after = d
+    return forced_before, forced_after
+
+
+def _parse_prodes_selection(text: str, n: int):
+    """'todos' -> 'all'; '1,3' -> [0, 2]; entrada inválida -> None."""
+    import re
+    normalized = text.strip().lower()
+    if normalized in ('todos', 'all', 'tudo'):
+        return 'all'
+    parts = re.split(r'[,\s]+', normalized)
+    indices = []
+    for p in parts:
+        if not p.isdigit():
+            return None
+        idx = int(p)
+        if not (1 <= idx <= n):
+            return None
+        indices.append(idx - 1)
+    return indices or None
+
+
+async def start_prodes_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point do /prodes: cruza o perímetro do imóvel com a base PRODES/INPE."""
+    chat_id = str(update.effective_chat.id)
+
+    forced_before, forced_after = _parse_prodes_date_args(context.args)
+    context.user_data['prodes_forced_before'] = forced_before
+    context.user_data['prodes_forced_after'] = forced_after
+
+    help_text = (
+        "🌳 *Análise PRODES*\n\n"
+        "Cruza o perímetro do imóvel com a base de desmatamento do PRODES/INPE "
+        "e gera mapas de satélite antes/depois de cada apontamento encontrado.\n\n"
+        "⚠️ Exige perímetro *oficial* do CAR — não funciona com área estimada.\n\n"
+        "Envie uma localização para analisar:\n"
+        "- Coordenadas (ex: -21.43, -54.78)\n"
+        "- Link do Google Maps\n"
+    )
+    help_text += _build_location_picker_text(chat_id)
+    help_text += "\nEnvie /cancelar para sair."
+
+    await update.message.reply_text(
+        help_text, parse_mode='Markdown', disable_web_page_preview=True,
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancelar")]], resize_keyboard=True)
+    )
+    return WAITING_PRODES_LOCATION
+
+
+async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resolve a localização, exige CAR oficial e lista apontamentos PRODES que cruzam o imóvel."""
+    chat_id = str(update.effective_chat.id)
+    query = update.message.text.strip()
+
+    if query.startswith('/'):
+        return WAITING_PRODES_LOCATION
+    if query in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
+
+    status_msg = await update.message.reply_text("🛰️ Resolvendo perímetro do imóvel...")
+
+    lat, lon, prop_name_or_err = _resolve_location_input(chat_id, query)
+    if lat == 'NOT_FOUND':
+        await status_msg.edit_text(f"⚠️ Propriedade nº {prop_name_or_err} não encontrada.")
+        return WAITING_PRODES_LOCATION
+    if lat is None or lon is None:
+        await status_msg.edit_text(
+            "⚠️ Não consegui interpretar as coordenadas. Envie coordenadas decimais ou um link do Google Maps."
+        )
+        return WAITING_PRODES_LOCATION
+    prop_name = prop_name_or_err
+
+    loop = asyncio.get_running_loop()
+    from app.prodes_analysis import fetch_car_perimeter_full, find_intersecting_apontamentos, PRODES_SOURCE_LABEL
+
+    car = await loop.run_in_executor(None, fetch_car_perimeter_full, lat, lon)
+
+    if car['status'] != 'OFFICIAL':
+        await status_msg.edit_text(
+            "⚠️ *Perímetro oficial do CAR não encontrado nesta coordenada.*\n\n"
+            "A ferramenta PRODES exige o perímetro oficial (não funciona com área estimada), "
+            "pois o resultado precisa ter valor probatório para defesa técnica/judicial.\n\n"
+            "Tente uma coordenada dentro de um imóvel com CAR cadastrado.",
+            parse_mode='Markdown',
+        )
+        return ConversationHandler.END
+
+    await status_msg.edit_text("🔎 Cruzando perímetro com a base PRODES/INPE (consulta ao vivo)...")
+    queried_at = datetime.utcnow()
+    try:
+        apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
+    except RuntimeError as e:
+        await status_msg.edit_text(
+            f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente novamente em instantes.",
+        )
+        return ConversationHandler.END
+
+    if not apontamentos:
+        await status_msg.edit_text(
+            f"✅ Nenhum apontamento PRODES cruza este imóvel (CAR `{car['cod_imovel']}`).",
+            parse_mode='Markdown', reply_markup=get_keyboard(chat_id),
+        )
+        return ConversationHandler.END
+
+    lines = [f"🌳 *{len(apontamentos)} apontamento(s) PRODES encontrado(s)* — CAR `{car['cod_imovel']}`\n"]
+    for i, ap in enumerate(apontamentos, 1):
+        divergence_flag = ""
+        if ap.get('area_km_inpe'):
+            inpe_ha = ap['area_km_inpe'] * 100.0
+            if inpe_ha > 0 and abs(ap['area_total_ha'] - inpe_ha) / inpe_ha > 0.01:
+                divergence_flag = " ⚠️ divergência>1%"
+        lines.append(
+            f"{i}. {ap['class_name']} — {ap['year']} — "
+            f"{ap['area_total_ha']:.2f} ha total ({ap['area_intersect_ha']:.2f} ha no imóvel){divergence_flag}"
+        )
+    lines.append("\nDigite o número (ex.: `1` ou `1,3`) ou `todos`.\nEnvie /cancelar para sair.")
+
+    context.user_data['prodes_ctx'] = {
+        'geometry': car['geometry'],
+        'cod_imovel': car['cod_imovel'],
+        'location_lat': lat, 'location_lon': lon, 'location_name': prop_name,
+        'apontamentos': apontamentos,
+        'source_info': {'label': PRODES_SOURCE_LABEL, 'queried_at': queried_at},
+    }
+    await status_msg.edit_text("\n".join(lines), parse_mode='Markdown')
+    return WAITING_PRODES_APONTAMENTO
+
+
+async def receive_prodes_apontamento_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Enfileira a análise PRODES (tabela prodes_jobs) para os apontamentos escolhidos."""
+    chat_id = str(update.effective_chat.id)
+    text = update.message.text.strip()
+
+    if text.startswith('/'):
+        return WAITING_PRODES_APONTAMENTO
+    if text in MAIN_MENU_BUTTONS:
+        return await handle_keyboard_buttons(update, context)
+
+    ctx = context.user_data.get('prodes_ctx')
+    if not ctx:
+        await update.message.reply_text("⚠️ Sessão expirada. Envie /prodes novamente.", reply_markup=get_keyboard(chat_id))
+        return ConversationHandler.END
+
+    apontamentos = ctx['apontamentos']
+    selection = _parse_prodes_selection(text, len(apontamentos))
+    if selection is None:
+        await update.message.reply_text(
+            "⚠️ Não entendi. Digite o número (ex.: `1` ou `1,3`) ou `todos`.", parse_mode='Markdown'
+        )
+        return WAITING_PRODES_APONTAMENTO
+
+    MAX_TODOS = 10
+    if selection == 'all':
+        chosen = sorted(apontamentos, key=lambda a: a['area_intersect_ha'], reverse=True)[:MAX_TODOS]
+        if len(apontamentos) > MAX_TODOS:
+            await update.message.reply_text(
+                f"⚠️ {len(apontamentos)} apontamentos encontrados — processando os {MAX_TODOS} de maior área no imóvel."
+            )
+    else:
+        chosen = [apontamentos[i] for i in selection]
+
+    forced_before = context.user_data.get('prodes_forced_before')
+    forced_after = context.user_data.get('prodes_forced_after')
+    if (forced_before or forced_after) and len(chosen) > 1:
+        await update.message.reply_text(
+            "⚠️ Data manual (`antes=`/`depois=`) só é aplicada quando exatamente 1 apontamento é "
+            "escolhido — ignorando para esta seleção.", parse_mode='Markdown',
+        )
+        forced_before = forced_after = None
+
+    from app.models import SessionLocal, ProdesJob
+    from app.prodes_worker import compute_idempotency_key
+    import json as _json
+
+    # Autorização na camada de dados: o job sempre grava o chat_id do próprio
+    # request — não há como um usuário enfileirar job em nome de outro.
+    location_key = f"{ctx['location_lat']:.6f},{ctx['location_lon']:.6f}"
+    geometry_json = _json.dumps(ctx['geometry'])
+    source_info = ctx['source_info']
+    # Não há "versão da base" (consulta ao vivo) — usa a data da consulta como
+    # componente grosseiro de versão na chave de cache (INPE não atualiza sub-diariamente).
+    source_version = source_info['queried_at'].strftime('%Y-%m-%d')
+
+    session = SessionLocal()
+    job_entries = []
+    try:
+        for ap in chosen:
+            idem_key = compute_idempotency_key(
+                location_key, ap['uuid'], forced_before, forced_after, source_version
+            )
+
+            new_job = ProdesJob(
+                user_id=chat_id, chat_id=chat_id,
+                location_lat=ctx['location_lat'], location_lon=ctx['location_lon'],
+                location_name=ctx['location_name'],
+                car_cod_imovel=ctx['cod_imovel'], car_status='OFFICIAL',
+                car_perimeter_geojson=geometry_json,
+                source_label=source_info['label'], source_queried_at=source_info['queried_at'],
+                apontamento_uuid=ap['uuid'], apontamento_class_name=ap['class_name'],
+                apontamento_year=ap['year'], apontamento_image_date=ap['image_date'],
+                apontamento_geometry_geojson=_json.dumps(ap['geometry']),
+                area_total_ha=ap['area_total_ha'], area_intersect_ha=ap['area_intersect_ha'],
+                forced_before_date=forced_before, forced_after_date=forced_after,
+                status='PENDING', idempotency_key=idem_key,
+            )
+            session.add(new_job)
+            session.flush()
+            job_entries.append((new_job.id, ap['class_name']))
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        print(f"[PRODES] Erro ao enfileirar jobs: {e}", flush=True)
+        await update.message.reply_text("❌ Erro ao enfileirar a análise. Tente novamente.", reply_markup=get_keyboard(chat_id))
+        return ConversationHandler.END
+    finally:
+        session.close()
+
+    _log_tg_activity(update, "PRODES", details=f"CAR {ctx['cod_imovel']}, {len(chosen)} apontamento(s)")
+
+    lines = ["🕓 *Análise(s) enfileirada(s):*"]
+    for job_id, class_name in job_entries:
+        lines.append(f"• Job #{job_id} — {class_name}")
+    lines.append(
+        "\nVocê recebe os mapas e o PDF aqui assim que prontos "
+        "(cenas já processadas antes são reenviadas na hora, sem gastar quota do satélite de novo)."
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode='Markdown', reply_markup=get_keyboard(chat_id))
+
+    context.user_data.pop('prodes_ctx', None)
+    return ConversationHandler.END
+
+
+async def cancel_prodes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel PRODES conversation"""
+    chat_id = str(update.effective_chat.id)
+    context.user_data.pop('prodes_ctx', None)
+    await update.message.reply_text("❌ Análise PRODES cancelada.", reply_markup=get_keyboard(chat_id))
+    return ConversationHandler.END
+
 
 async def cancel_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel weather conversation"""
@@ -2181,6 +2462,17 @@ def create_bot_application(post_init=None):
         fallbacks=[CommandHandler("cancelar", cancel_locations)]
     )
     app.add_handler(loc_conv)
+
+    # PRODES (cruzamento com base de desmatamento do INPE)
+    prodes_conv = ConversationHandler(
+        entry_points=[CommandHandler("prodes", start_prodes_analysis)],
+        states={
+            WAITING_PRODES_LOCATION:    [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prodes_location)],
+            WAITING_PRODES_APONTAMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prodes_apontamento_choice)],
+        },
+        fallbacks=[CommandHandler("cancelar", cancel_prodes)]
+    )
+    app.add_handler(prodes_conv)
 
     # 2. Command Handlers
     app.add_handler(CommandHandler("start", start))

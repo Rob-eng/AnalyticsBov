@@ -76,6 +76,7 @@ pyogrio==0.11.1
 pyparsing==3.2.3
 pyproj==3.6.1
 pytest==8.4.1
+reportlab==4.2.5
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 python-telegram-bot==22.5

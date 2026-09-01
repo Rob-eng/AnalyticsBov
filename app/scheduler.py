@@ -1,11 +1,13 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from app.config import Config
 from app.scraper import run_scraping_cycle
 from app.scraper_cda import run_cda_daily_cycle
 from app.cda_analytics import build_cda_scot_comparisons
 from app.bot import broadcast_report
 from app.ndvi_alerts import run_ndvi_alert_scan
+from app.prodes_worker import run_prodes_poll
 import asyncio
 
 # Fuso horário do usuário: UTC-4 (sem horário de verão)
@@ -108,10 +110,32 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
+    # ── Poller da fila de análises PRODES ────────────────────────────────
+    async def prodes_poll_job():
+        try:
+            await run_prodes_poll(application)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ PRODES poll FAILED: {traceback.format_exc()}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(f"❌ *Falha no poller de jobs PRODES*\n\nErro: `{e}`")
+            except Exception:
+                pass
+
+    scheduler.add_job(
+        prodes_poll_job,
+        IntervalTrigger(seconds=Config.PRODES_POLL_INTERVAL_SECONDS),
+        id='prodes_job_poll',
+        replace_existing=True,
+        max_instances=1,
+    )
+
     print(
         f"✓ Scheduler configured (tz={USER_TZ}): "
         "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) "
-        "+ cda_daily_ingest (daily 05:30) + health_probes (every 30min)",
+        "+ cda_daily_ingest (daily 05:30) + health_probes (every 30min) "
+        f"+ prodes_job_poll (every {Config.PRODES_POLL_INTERVAL_SECONDS}s)",
         flush=True
     )
     return scheduler
