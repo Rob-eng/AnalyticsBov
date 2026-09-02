@@ -33,7 +33,7 @@ WAITING_PRODES_APONTAMENTO = 13
 
 MAIN_MENU_BUTTONS = [
     "📊 Cotação Atual", "🔮 Mercado Futuro", "🐂 Leilão CDA",
-    "🌧️ Precipitação (chuva)", "🌿 Análise Ambiental", "📢 Enviar Anúncio",
+    "🌧️ Precipitação (chuva)", "🌿 Análise Ambiental", "🌳 Análise PRODES", "📢 Enviar Anúncio",
     "📈 Status", "📥 Importar Histórico", "👥 Lista de Usuários",
     "💬 Feedback", "📌 Minhas Propriedades"
 ]
@@ -56,14 +56,14 @@ def get_keyboard(chat_id):
     if is_admin(chat_id):
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro"), KeyboardButton("🐂 Leilão CDA")],
-            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental"), KeyboardButton("📈 Status")],
-            [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("💬 Feedback")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental"), KeyboardButton("🌳 Análise PRODES")],
+            [KeyboardButton("📈 Status"), KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("💬 Feedback")],
             [KeyboardButton("📥 Importar Histórico"), KeyboardButton("👥 Lista de Usuários"), KeyboardButton("📢 Enviar Anúncio")],
         ]
     else:
         keyboard = [
             [KeyboardButton("📊 Cotação Atual"), KeyboardButton("🔮 Mercado Futuro"), KeyboardButton("🐂 Leilão CDA")],
-            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental")],
+            [KeyboardButton("🌧️ Precipitação (chuva)"), KeyboardButton("🌿 Análise Ambiental"), KeyboardButton("🌳 Análise PRODES")],
             [KeyboardButton("📌 Minhas Propriedades"), KeyboardButton("💬 Feedback")],
         ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -95,6 +95,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "- *Alertas:* Receba mapas NDVI automáticos assim que o satélite passar (sem nuvens)\n"
             "- *MDT:* Modelos Digitais de Terreno em 2D (curvas de nível) e 3D interativo\n"
             "- Sobreposição automática do perímetro CAR\n\n"
+            "🌳 *Análise PRODES (/prodes):*\n"
+            "- Cruza o perímetro do CAR com apontamentos de desmatamento do INPE\n"
+            "- Gera mapas de satélite antes/depois e um PDF de laudo técnico\n\n"
             "📌 *Suas Propriedades:*\n"
             "- Cadastre suas fazendas e receba análises com 1 clique.\n"
             "- Acesse o menu 'Minhas Propriedades' para ativar as notificações automáticas de satélite.\n\n"
@@ -1714,6 +1717,9 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
     elif text == "🌿 Análise Ambiental":
         await start_env_analysis(update, context)
         return WAITING_ENV_LOCATION
+    elif text == "🌳 Análise PRODES":
+        await start_prodes_analysis(update, context)
+        return WAITING_PRODES_LOCATION
     elif text == "🔮 Mercado Futuro":
         await future_market(update, context)
     elif text == "📥 Importar Histórico":
@@ -2465,7 +2471,10 @@ def create_bot_application(post_init=None):
 
     # PRODES (cruzamento com base de desmatamento do INPE)
     prodes_conv = ConversationHandler(
-        entry_points=[CommandHandler("prodes", start_prodes_analysis)],
+        entry_points=[
+            CommandHandler("prodes", start_prodes_analysis),
+            MessageHandler(filters.Regex("^🌳 Análise PRODES$"), start_prodes_analysis)
+        ],
         states={
             WAITING_PRODES_LOCATION:    [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prodes_location)],
             WAITING_PRODES_APONTAMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prodes_apontamento_choice)],
