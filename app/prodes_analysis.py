@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ee
 import requests
+import time
 from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
@@ -385,6 +386,8 @@ PRODES_WFS_URL = 'https://terrabrasilis.dpi.inpe.br/geoserver/ows'
 PRODES_WFS_TYPENAME = 'prodes-pantanal-nb:yearly_deforestation'  # único bioma coberto por ora
 PRODES_SOURCE_LABEL = f'TerraBrasilis/INPE (WFS, {PRODES_WFS_TYPENAME})'
 PRODES_WFS_BBOX_PAD_DEG = 0.001  # ~100m de margem de segurança pro filtro por bbox
+PRODES_WFS_MAX_RETRIES = 3
+PRODES_WFS_RETRY_BACKOFF_SECONDS = 3  # multiplicado pelo nº da tentativa (3s, 6s)
 
 
 def _parse_flexible_date(value):
@@ -426,12 +429,25 @@ def find_intersecting_apontamentos(geometry_geojson: dict) -> list:
         'typeName': PRODES_WFS_TYPENAME, 'outputFormat': 'application/json',
         'bbox': bbox,
     }
-    try:
-        resp = requests.get(PRODES_WFS_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        raise RuntimeError(f"Falha ao consultar o WFS do TerraBrasilis/INPE: {e}")
+
+    data = None
+    last_error = None
+    for attempt in range(1, PRODES_WFS_MAX_RETRIES + 1):
+        try:
+            # (connect_timeout, read_timeout) — connect curto pra falhar rápido se o
+            # servidor estiver inalcançável, read maior pra dar tempo de montar a resposta.
+            resp = requests.get(PRODES_WFS_URL, params=params, timeout=(10, 25))
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as e:
+            last_error = e
+            print(f"[PRODES] WFS falhou (tentativa {attempt}/{PRODES_WFS_MAX_RETRIES}): {e}", flush=True)
+            if attempt < PRODES_WFS_MAX_RETRIES:
+                time.sleep(PRODES_WFS_RETRY_BACKOFF_SECONDS * attempt)
+
+    if data is None:
+        raise RuntimeError(f"Falha ao consultar o WFS do TerraBrasilis/INPE: {last_error}")
 
     apontamentos = []
     for feat in data.get('features', []):
