@@ -1460,8 +1460,12 @@ async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     if not apontamentos:
-        await status_msg.edit_text(
-            f"✅ Nenhum apontamento PRODES cruza este imóvel (CAR `{car['cod_imovel']}`).",
+        # edit_text não aceita ReplyKeyboardMarkup (só InlineKeyboardMarkup) — apaga e
+        # manda mensagem nova, mesmo padrão usado em receive_env_location.
+        await status_msg.delete()
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Nenhum apontamento PRODES cruza este imóvel (CAR `{car['cod_imovel']}`).",
             parse_mode='Markdown', reply_markup=get_keyboard(chat_id),
         )
         return ConversationHandler.END
