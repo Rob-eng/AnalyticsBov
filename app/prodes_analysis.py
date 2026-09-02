@@ -383,8 +383,19 @@ def render_scene_visualization(scene_meta: dict, property_geometry_geojson: dict
 # ~0.2s para um bbox do tamanho de um imóvel rural.
 
 PRODES_WFS_URL = 'https://terrabrasilis.dpi.inpe.br/geoserver/ows'
-PRODES_WFS_TYPENAME = 'prodes-pantanal-nb:yearly_deforestation'  # único bioma coberto por ora
-PRODES_SOURCE_LABEL = f'TerraBrasilis/INPE (WFS, {PRODES_WFS_TYPENAME})'
+# Um imóvel pode estar em qualquer um dos 6 biomas (ou atravessar mais de
+# um) — consulta todas as camadas "novo bioma" (harmonizadas, mesmo schema)
+# em paralelo, não só uma. O nome do tipo da Amazônia é o único que difere
+# (yearly_deforestation_biome, em vez de yearly_deforestation).
+PRODES_WFS_LAYERS = {
+    'Amazônia': 'prodes-amazon-nb:yearly_deforestation_biome',
+    'Caatinga': 'prodes-caatinga-nb:yearly_deforestation',
+    'Cerrado': 'prodes-cerrado-nb:yearly_deforestation',
+    'Mata Atlântica': 'prodes-mata-atlantica-nb:yearly_deforestation',
+    'Pampa': 'prodes-pampa-nb:yearly_deforestation',
+    'Pantanal': 'prodes-pantanal-nb:yearly_deforestation',
+}
+PRODES_SOURCE_LABEL = 'TerraBrasilis/INPE (WFS, camadas de todos os biomas: ' + ', '.join(PRODES_WFS_LAYERS) + ')'
 PRODES_WFS_BBOX_PAD_DEG = 0.001  # ~100m de margem de segurança pro filtro por bbox
 PRODES_WFS_MAX_RETRIES = 3
 PRODES_WFS_RETRY_BACKOFF_SECONDS = 3  # multiplicado pelo nº da tentativa (3s, 6s)
@@ -408,29 +419,12 @@ def _parse_flexible_date(value):
     return None
 
 
-def find_intersecting_apontamentos(geometry_geojson: dict) -> list:
-    """
-    Apontamentos do PRODES/INPE que INTERSECTAM (não apenas contêm) o
-    perímetro, consultados AO VIVO via WFS do TerraBrasilis — sem cópia
-    local. Filtra por bbox no servidor (rápido, poucas dezenas de KB de
-    resposta para um imóvel rural) e faz a interseção exata em Python
-    (shapely), já que o filtro por bbox pode incluir falsos positivos que só
-    tocam a caixa delimitadora, não o polígono do imóvel de fato.
-    """
-    from shapely.geometry import shape, mapping
-
-    property_shape = shape(geometry_geojson)
-    minx, miny, maxx, maxy = property_shape.bounds
-    pad = PRODES_WFS_BBOX_PAD_DEG
-    bbox = f"{minx - pad},{miny - pad},{maxx + pad},{maxy + pad},EPSG:4674"
-
+def _query_wfs_layer(typename: str, bbox: str) -> dict:
+    """Uma consulta ao WFS, com retry — devolve o GeoJSON bruto ou levanta RuntimeError."""
     params = {
         'service': 'WFS', 'version': '1.1.0', 'request': 'GetFeature',
-        'typeName': PRODES_WFS_TYPENAME, 'outputFormat': 'application/json',
-        'bbox': bbox,
+        'typeName': typename, 'outputFormat': 'application/json', 'bbox': bbox,
     }
-
-    data = None
     last_error = None
     for attempt in range(1, PRODES_WFS_MAX_RETRIES + 1):
         try:
@@ -438,47 +432,99 @@ def find_intersecting_apontamentos(geometry_geojson: dict) -> list:
             # servidor estiver inalcançável, read maior pra dar tempo de montar a resposta.
             resp = requests.get(PRODES_WFS_URL, params=params, timeout=(10, 25))
             resp.raise_for_status()
-            data = resp.json()
-            break
+            return resp.json()
         except Exception as e:
             last_error = e
-            print(f"[PRODES] WFS falhou (tentativa {attempt}/{PRODES_WFS_MAX_RETRIES}): {e}", flush=True)
+            print(f"[PRODES] WFS falhou em {typename} (tentativa {attempt}/{PRODES_WFS_MAX_RETRIES}): {e}", flush=True)
             if attempt < PRODES_WFS_MAX_RETRIES:
                 time.sleep(PRODES_WFS_RETRY_BACKOFF_SECONDS * attempt)
+    raise RuntimeError(f"{typename}: {last_error}")
 
-    if data is None:
-        raise RuntimeError(f"Falha ao consultar o WFS do TerraBrasilis/INPE: {last_error}")
+
+def find_intersecting_apontamentos(geometry_geojson: dict) -> list:
+    """
+    Apontamentos do PRODES/INPE que INTERSECTAM (não apenas contêm) o
+    perímetro, consultados AO VIVO via WFS do TerraBrasilis — sem cópia
+    local. Consulta as camadas de TODOS os biomas em paralelo (um imóvel
+    pode estar em qualquer um, ou atravessar mais de um — não dá pra supor
+    o bioma pela UF), filtra por bbox no servidor e faz a interseção exata
+    em Python (shapely), já que o filtro por bbox pode incluir falsos
+    positivos que só tocam a caixa delimitadora, não o polígono de fato.
+    """
+    import concurrent.futures
+    from shapely.geometry import shape, mapping
+
+    def _make_valid(geom):
+        """Geometria de fonte governamental frequentemente vem com autointerseções
+        leves (side location conflict no GEOS) — buffer(0) é o saneamento padrão."""
+        if geom is not None and not geom.is_valid:
+            geom = geom.buffer(0)
+        return geom
+
+    property_shape = _make_valid(shape(geometry_geojson))
+    minx, miny, maxx, maxy = property_shape.bounds
+    pad = PRODES_WFS_BBOX_PAD_DEG
+    bbox = f"{minx - pad},{miny - pad},{maxx + pad},{maxy + pad},EPSG:4674"
+
+    results_by_biome = {}
+    errors = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(PRODES_WFS_LAYERS)) as executor:
+        future_to_biome = {
+            executor.submit(_query_wfs_layer, typename, bbox): biome
+            for biome, typename in PRODES_WFS_LAYERS.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_biome):
+            biome = future_to_biome[future]
+            try:
+                results_by_biome[biome] = future.result()
+            except Exception as e:
+                errors.append(str(e))
+
+    if not results_by_biome:
+        raise RuntimeError(f"Falha ao consultar o WFS do TerraBrasilis/INPE em todos os biomas: {'; '.join(errors)}")
+    if errors:
+        print(f"[PRODES] Aviso: falha ao consultar {len(errors)}/{len(PRODES_WFS_LAYERS)} biomas "
+              f"(seguindo com os demais): {'; '.join(errors)}", flush=True)
 
     apontamentos = []
-    for feat in data.get('features', []):
-        geom = feat.get('geometry')
-        if not geom:
-            continue
-        apon_shape = shape(geom)
-        if not apon_shape.intersects(property_shape):
-            continue  # falso positivo do filtro por bbox
+    for biome, data in results_by_biome.items():
+        for feat in data.get('features', []):
+            geom = feat.get('geometry')
+            if not geom:
+                continue
+            apon_shape = _make_valid(shape(geom))
+            if apon_shape is None or apon_shape.is_empty or not apon_shape.intersects(property_shape):
+                continue  # falso positivo do filtro por bbox (ou geometria irrecuperável)
 
-        props = feat.get('properties', {})
-        intersection = apon_shape.intersection(property_shape)
-        area_total_ha = geodesic_area_ha(geom)
-        area_intersect_ha = geodesic_area_ha(mapping(intersection)) if not intersection.is_empty else 0.0
+            props = feat.get('properties', {})
+            try:
+                intersection = apon_shape.intersection(property_shape)
+            except Exception as e:
+                print(f"[PRODES] Falha ao calcular interseção do apontamento "
+                      f"{props.get('uuid')}: {e} — pulando.", flush=True)
+                continue
+            # Usa a geometria já saneada (apon_shape), não o GeoJSON bruto, pra
+            # área total bater com a mesma geometria usada na interseção.
+            area_total_ha = geodesic_area_ha(mapping(apon_shape))
+            area_intersect_ha = geodesic_area_ha(mapping(intersection)) if not intersection.is_empty else 0.0
 
-        apontamentos.append({
-            'uuid': props.get('uuid'),
-            'class_name': props.get('class_name'),
-            'main_class': props.get('main_class'),
-            'year': int(props['year']) if props.get('year') not in (None, '') else None,
-            'image_date': _parse_flexible_date(props.get('image_date')),
-            'satellite': props.get('satellite'),
-            'sensor': props.get('sensor'),
-            'path_row': props.get('path_row'),
-            'state': props.get('state'),
-            'source': props.get('source'),
-            'area_km_inpe': float(props['area_km']) if props.get('area_km') not in (None, '') else None,
-            'area_total_ha': area_total_ha,
-            'area_intersect_ha': area_intersect_ha,
-            'geometry': geom,
-        })
+            apontamentos.append({
+                'uuid': props.get('uuid'),
+                'class_name': props.get('class_name'),
+                'main_class': props.get('main_class'),
+                'year': int(props['year']) if props.get('year') not in (None, '') else None,
+                'image_date': _parse_flexible_date(props.get('image_date')),
+                'satellite': props.get('satellite'),
+                'sensor': props.get('sensor'),
+                'path_row': props.get('path_row'),
+                'state': props.get('state'),
+                'source': props.get('source'),
+                'area_km_inpe': float(props['area_km']) if props.get('area_km') not in (None, '') else None,
+                'area_total_ha': area_total_ha,
+                'area_intersect_ha': area_intersect_ha,
+                'geometry': geom,
+                'biome': biome,
+            })
 
     apontamentos.sort(key=lambda a: (-(a['year'] or 0), -(a['area_intersect_ha'] or 0)))
     return apontamentos

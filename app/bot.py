@@ -1478,7 +1478,7 @@ async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_
             if inpe_ha > 0 and abs(ap['area_total_ha'] - inpe_ha) / inpe_ha > 0.01:
                 divergence_flag = " ⚠️ divergência>1%"
         lines.append(
-            f"{i}. {ap['class_name']} — {ap['year']} — "
+            f"{i}. {ap['class_name']} — {ap['year']} — bioma {ap.get('biome', '—')} — "
             f"{ap['area_total_ha']:.2f} ha total ({ap['area_intersect_ha']:.2f} ha no imóvel){divergence_flag}"
         )
     lines.append("\nDigite o número (ex.: `1` ou `1,3`) ou `todos`.\nEnvie /cancelar para sair.")
