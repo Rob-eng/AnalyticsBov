@@ -563,6 +563,32 @@ def fetch_car_perimeter_full(lat: float, lon: float) -> dict:
     }
 
 
+PRODES_MAX_TODOS = 10  # teto ao escolher "todos", prioriza maior área de interseção
+
+
+def parse_apontamento_selection(text: str, n: int):
+    """
+    Interpreta a escolha do usuário sobre a lista de apontamentos — mesma regra
+    em Telegram (app/bot.py) e WhatsApp (app/whatsapp/trigger_handler.py):
+    'todos'/'all'/'tudo' -> 'all'; '1,3' -> [0, 2] (índices 0-based);
+    entrada inválida -> None.
+    """
+    import re
+    normalized = text.strip().lower()
+    if normalized in ('todos', 'all', 'tudo'):
+        return 'all'
+    parts = re.split(r'[,\s]+', normalized)
+    indices = []
+    for p in parts:
+        if not p.isdigit():
+            return None
+        idx = int(p)
+        if not (1 <= idx <= n):
+            return None
+        indices.append(idx - 1)
+    return indices or None
+
+
 def build_footer_notes(scenes_result: dict, source_info: dict) -> list:
     """
     Única fonte das notas de rodapé (mapas e PDF chamam esta função, para

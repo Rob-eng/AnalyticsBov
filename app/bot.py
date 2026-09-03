@@ -1366,24 +1366,6 @@ def _parse_prodes_date_args(args) -> tuple:
     return forced_before, forced_after
 
 
-def _parse_prodes_selection(text: str, n: int):
-    """'todos' -> 'all'; '1,3' -> [0, 2]; entrada inválida -> None."""
-    import re
-    normalized = text.strip().lower()
-    if normalized in ('todos', 'all', 'tudo'):
-        return 'all'
-    parts = re.split(r'[,\s]+', normalized)
-    indices = []
-    for p in parts:
-        if not p.isdigit():
-            return None
-        idx = int(p)
-        if not (1 <= idx <= n):
-            return None
-        indices.append(idx - 1)
-    return indices or None
-
-
 async def start_prodes_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Entry point do /prodes: cruza o perímetro do imóvel com a base PRODES/INPE."""
     chat_id = str(update.effective_chat.id)
@@ -1525,19 +1507,19 @@ async def receive_prodes_apontamento_choice(update: Update, context: ContextType
         return ConversationHandler.END
 
     apontamentos = ctx['apontamentos']
-    selection = _parse_prodes_selection(text, len(apontamentos))
+    from app.prodes_analysis import parse_apontamento_selection, PRODES_MAX_TODOS
+    selection = parse_apontamento_selection(text, len(apontamentos))
     if selection is None:
         await update.message.reply_text(
             "⚠️ Não entendi. Digite o número (ex.: `1` ou `1,3`) ou `todos`.", parse_mode='Markdown'
         )
         return WAITING_PRODES_APONTAMENTO
 
-    MAX_TODOS = 10
     if selection == 'all':
-        chosen = sorted(apontamentos, key=lambda a: a['area_intersect_ha'], reverse=True)[:MAX_TODOS]
-        if len(apontamentos) > MAX_TODOS:
+        chosen = sorted(apontamentos, key=lambda a: a['area_intersect_ha'], reverse=True)[:PRODES_MAX_TODOS]
+        if len(apontamentos) > PRODES_MAX_TODOS:
             await update.message.reply_text(
-                f"⚠️ {len(apontamentos)} apontamentos encontrados — processando os {MAX_TODOS} de maior área no imóvel."
+                f"⚠️ {len(apontamentos)} apontamentos encontrados — processando os {PRODES_MAX_TODOS} de maior área no imóvel."
             )
     else:
         chosen = [apontamentos[i] for i in selection]
@@ -1551,52 +1533,19 @@ async def receive_prodes_apontamento_choice(update: Update, context: ContextType
         )
         forced_before = forced_after = None
 
-    from app.models import SessionLocal, ProdesJob
-    from app.prodes_worker import compute_idempotency_key
-    import json as _json
-
-    # Autorização na camada de dados: o job sempre grava o chat_id do próprio
-    # request — não há como um usuário enfileirar job em nome de outro.
-    location_key = f"{ctx['location_lat']:.6f},{ctx['location_lon']:.6f}"
-    geometry_json = _json.dumps(ctx['geometry'])
-    source_info = ctx['source_info']
-    # Não há "versão da base" (consulta ao vivo) — usa a data da consulta como
-    # componente grosseiro de versão na chave de cache (INPE não atualiza sub-diariamente).
-    source_version = source_info['queried_at'].strftime('%Y-%m-%d')
-
-    session = SessionLocal()
-    job_entries = []
+    from app.prodes_worker import enqueue_prodes_jobs
     try:
-        for ap in chosen:
-            idem_key = compute_idempotency_key(
-                location_key, ap['uuid'], forced_before, forced_after, source_version
-            )
-
-            new_job = ProdesJob(
-                user_id=chat_id, chat_id=chat_id,
-                location_lat=ctx['location_lat'], location_lon=ctx['location_lon'],
-                location_name=ctx['location_name'],
-                car_cod_imovel=ctx['cod_imovel'], car_status='OFFICIAL',
-                car_perimeter_geojson=geometry_json,
-                source_label=source_info['label'], source_queried_at=source_info['queried_at'],
-                apontamento_uuid=ap['uuid'], apontamento_class_name=ap['class_name'],
-                apontamento_year=ap['year'], apontamento_image_date=ap['image_date'],
-                apontamento_geometry_geojson=_json.dumps(ap['geometry']),
-                area_total_ha=ap['area_total_ha'], area_intersect_ha=ap['area_intersect_ha'],
-                forced_before_date=forced_before, forced_after_date=forced_after,
-                status='PENDING', idempotency_key=idem_key,
-            )
-            session.add(new_job)
-            session.flush()
-            job_entries.append((new_job.id, ap['class_name']))
-        session.commit()
+        job_entries = enqueue_prodes_jobs(
+            user_id=chat_id, chat_id=chat_id,
+            location_lat=ctx['location_lat'], location_lon=ctx['location_lon'],
+            location_name=ctx['location_name'], cod_imovel=ctx['cod_imovel'],
+            geometry_geojson=ctx['geometry'], source_info=ctx['source_info'],
+            chosen_apontamentos=chosen, forced_before=forced_before, forced_after=forced_after,
+        )
     except Exception as e:
-        session.rollback()
         print(f"[PRODES] Erro ao enfileirar jobs: {e}", flush=True)
         await update.message.reply_text("❌ Erro ao enfileirar a análise. Tente novamente.", reply_markup=get_keyboard(chat_id))
         return ConversationHandler.END
-    finally:
-        session.close()
 
     _log_tg_activity(update, "PRODES", details=f"CAR {ctx['cod_imovel']}, {len(chosen)} apontamento(s)")
 

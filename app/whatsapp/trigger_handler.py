@@ -47,6 +47,41 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             await _handle_premium(sender_phone)
             return
 
+        # PRODES tem parsing próprio (PRODES_ESCOLHA carrega um 5º campo, a
+        # escolha do usuário) — tratado antes do dispatch genérico abaixo.
+        if fluxo == 'PRODES':
+            if len(parts) < 3:
+                send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
+                return
+            lat = float(parts[1])
+            lon = float(parts[2])
+            nome = parts[3] if len(parts) > 3 else "Local Selecionado"
+            loop = asyncio.get_running_loop()
+            from app.saas.limit_engine import can_perform_action
+            can_do, msg_limit = can_perform_action(sender_phone, 'LOOKUP')
+            if not can_do:
+                send_whatsapp_text(sender_phone, msg_limit)
+                await _handle_premium(sender_phone)
+                return
+            from app.models import log_activity
+            log_activity(sender_phone, "PRODES", details=f"{nome} ({lat},{lon})")
+            await _handle_prodes_list(sender_phone, lat, lon, nome, loop)
+            return
+
+        if fluxo == 'PRODES_ESCOLHA':
+            if len(parts) < 5:
+                send_whatsapp_text(sender_phone, "⚠️ Não entendi a escolha. Responda com um número, vários (ex.: 1,3) ou 'todos'.")
+                return
+            lat = float(parts[1])
+            lon = float(parts[2])
+            nome = parts[3]
+            escolha = parts[4]
+            loop = asyncio.get_running_loop()
+            from app.models import log_activity
+            log_activity(sender_phone, "PRODES_ESCOLHA", details=f"{nome} escolha={escolha}")
+            await _handle_prodes_escolha(sender_phone, lat, lon, nome, escolha, loop)
+            return
+
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
             return
@@ -315,6 +350,152 @@ async def _handle_mdt(phone, lat, lon, nome, loop):
         send_whatsapp_text(phone, "❌ Não foi possível gerar as imagens MDT.")
     else:
         print("[WA TRIGGER] MDT enviado com sucesso!", flush=True)
+
+
+async def _handle_prodes_list(phone, lat, lon, nome, loop):
+    """
+    Etapa 1 do PRODES: resolve o CAR, lista os apontamentos que cruzam o
+    imóvel e manda o mapa-visão-geral. Não enfileira nada ainda — só depois
+    que o usuário responder com a escolha (ver _handle_prodes_escolha) é que
+    um ProdesJob é criado. Mesma lógica de app/bot.py:receive_prodes_location,
+    adaptada pro WhatsApp (sem ConversationHandler).
+    """
+    from app.prodes_analysis import fetch_car_perimeter_full, find_intersecting_apontamentos
+    from app.prodes_maps import compose_prodes_overview_map
+
+    car = await loop.run_in_executor(None, fetch_car_perimeter_full, lat, lon)
+    if car['status'] != 'OFFICIAL':
+        send_whatsapp_text(
+            phone,
+            "⚠️ Perímetro oficial do CAR não encontrado nesta coordenada.\n\n"
+            "A ferramenta PRODES exige o perímetro oficial (não funciona com área estimada), "
+            "pois o resultado precisa ter valor probatório para defesa técnica/judicial.\n\n"
+            "Tente uma coordenada dentro de um imóvel com CAR cadastrado."
+        )
+        return
+
+    try:
+        apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
+    except RuntimeError as e:
+        send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
+        return
+
+    if not apontamentos:
+        send_whatsapp_text(phone, f"✅ Nenhum apontamento PRODES cruza este imóvel (CAR {car['cod_imovel']}).")
+        return
+
+    lines = [f"🌳 *{len(apontamentos)} apontamento(s) PRODES encontrado(s)* — CAR {car['cod_imovel']}\n"]
+    for i, ap in enumerate(apontamentos, 1):
+        divergence_flag = ""
+        if ap.get('area_km_inpe'):
+            inpe_ha = ap['area_km_inpe'] * 100.0
+            if inpe_ha > 0 and abs(ap['area_total_ha'] - inpe_ha) / inpe_ha > 0.01:
+                divergence_flag = " ⚠️ divergência>1%"
+        lines.append(
+            f"{i}. {ap['class_name']} — {ap['year']} — bioma {ap.get('biome', '—')} — "
+            f"{ap['area_total_ha']:.2f} ha total ({ap['area_intersect_ha']:.2f} ha no imóvel){divergence_flag}"
+        )
+    lines.append(
+        "\nResponda com o número (ex.: 2), vários separados por vírgula (ex.: 1,3) ou 'todos' "
+        "pra eu gerar os mapas antes/depois e o PDF do(s) apontamento(s) escolhido(s)."
+    )
+
+    try:
+        overview_map = await loop.run_in_executor(
+            None, compose_prodes_overview_map, car['geometry'], apontamentos, car['cod_imovel']
+        )
+        send_whatsapp_image(phone, overview_map, f"🗺️ Visão geral — {len(apontamentos)} apontamento(s) PRODES")
+    except Exception as e:
+        print(f"[WA PRODES] Falha ao gerar mapa-visão-geral: {e}", flush=True)
+
+    send_whatsapp_text(phone, "\n".join(lines))
+    print("[WA TRIGGER] PRODES (listagem) enviado com sucesso!", flush=True)
+
+
+async def _handle_prodes_escolha(phone, lat, lon, nome, escolha, loop):
+    """
+    Etapa 2 do PRODES: o usuário respondeu com a escolha (número/'todos').
+    Como o WhatsApp não tem estado de conversa formal (ver app/agent.py),
+    re-consulta o CAR e o PRODES com as mesmas coordenadas (rápido, ~poucos
+    segundos, sem custo de GEE) em vez de guardar a lista anterior em algum
+    lugar — a ordenação de find_intersecting_apontamentos é determinística,
+    então o índice escolhido continua se referindo ao mesmo apontamento.
+    """
+    from datetime import datetime as _dt
+    from app.prodes_analysis import (
+        fetch_car_perimeter_full, find_intersecting_apontamentos,
+        parse_apontamento_selection, PRODES_MAX_TODOS, PRODES_SOURCE_LABEL,
+    )
+    from app.prodes_worker import enqueue_prodes_jobs
+    from app.models import SessionLocal, User
+
+    car = await loop.run_in_executor(None, fetch_car_perimeter_full, lat, lon)
+    if car['status'] != 'OFFICIAL':
+        send_whatsapp_text(
+            phone,
+            "⚠️ Não encontrei mais o perímetro oficial do CAR nessa coordenada. "
+            "Peça a análise PRODES de novo pra essa propriedade."
+        )
+        return
+
+    queried_at = _dt.utcnow()
+    try:
+        apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
+    except RuntimeError as e:
+        send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
+        return
+
+    if not apontamentos:
+        send_whatsapp_text(phone, "⚠️ Não encontrei mais apontamentos pra essa coordenada — pode ter mudado algo, peça a análise de novo.")
+        return
+
+    selection = parse_apontamento_selection(escolha, len(apontamentos))
+    if selection is None:
+        send_whatsapp_text(phone, "⚠️ Não entendi a escolha. Responda com um número (ex.: 2), vários (ex.: 1,3) ou 'todos'.")
+        return
+
+    if selection == 'all':
+        chosen = sorted(apontamentos, key=lambda a: a['area_intersect_ha'], reverse=True)[:PRODES_MAX_TODOS]
+        if len(apontamentos) > PRODES_MAX_TODOS:
+            send_whatsapp_text(
+                phone,
+                f"⚠️ {len(apontamentos)} apontamentos encontrados — processando os {PRODES_MAX_TODOS} de maior área no imóvel."
+            )
+    else:
+        chosen = [apontamentos[i] for i in selection]
+
+    # Garante que o usuário existe no banco (mesmo padrão de cadastrar_propriedade em app/agent.py)
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter_by(chat_id=phone).first()
+        if not user:
+            session.add(User(chat_id=phone, platform='whatsapp'))
+            session.commit()
+    finally:
+        session.close()
+
+    source_info = {'label': PRODES_SOURCE_LABEL, 'queried_at': queried_at}
+    try:
+        job_entries = enqueue_prodes_jobs(
+            user_id=phone, chat_id=phone,
+            location_lat=lat, location_lon=lon, location_name=nome,
+            cod_imovel=car['cod_imovel'], geometry_geojson=car['geometry'], source_info=source_info,
+            chosen_apontamentos=chosen,
+        )
+    except Exception as e:
+        print(f"[WA PRODES] Erro ao enfileirar jobs: {e}", flush=True)
+        send_whatsapp_text(phone, "❌ Erro ao enfileirar a análise. Tente novamente.")
+        return
+
+    lines = ["🕓 *Análise(s) enfileirada(s):*"]
+    for job_id, class_name in job_entries:
+        lines.append(f"• Job #{job_id} — {class_name}")
+    lines.append(
+        "\nVocê recebe os mapas e o PDF aqui assim que prontos "
+        "(cenas já processadas antes são reenviadas na hora, sem gastar quota do satélite de novo)."
+    )
+    send_whatsapp_text(phone, "\n".join(lines))
+    print("[WA TRIGGER] PRODES (escolha enfileirada) enviado com sucesso!", flush=True)
 
 async def _handle_cotacao(phone, loop):
     """Pipeline Cotação Atual → envia gráfico e tabela via WhatsApp."""

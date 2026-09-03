@@ -285,6 +285,41 @@ def send_whatsapp_video(to_phone: str, video_buffer, caption: str = ""):
     return success
 
 
+def send_whatsapp_document(to_phone: str, doc_buffer, filename: str = "documento.pdf", caption: str = ""):
+    """
+    Envia um documento (ex.: PDF) via WhatsApp Cloud API.
+    doc_buffer: BytesIO ou bytes contendo o arquivo (recomendado <16MB)
+    """
+    if not _check_credentials():
+        return False
+
+    caption = caption.replace('_', '').strip()
+    if len(caption) > 1024:
+        caption = caption[:1020] + "..."
+
+    media_id = _upload_media(doc_buffer, "application/pdf", filename)
+    if not media_id:
+        print("⚠️ WA: Upload de documento falhou, enviando só texto", flush=True)
+        return send_whatsapp_text(to_phone, caption or "Não foi possível enviar o documento.")
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "document",
+        "document": {
+            "id": media_id,
+            "caption": caption,
+            "filename": filename,
+        }
+    }
+
+    success = _send_message(payload)
+    if success:
+        print(f"✅ WA documento enviado para {to_phone}", flush=True)
+    return success
+
+
 def send_whatsapp_buttons(to_phone: str, body_text: str, buttons: list):
     """
     Envia uma mensagem com botões interativos (Reply Buttons — máx 3).
@@ -383,6 +418,10 @@ def send_whatsapp_menu(to_phone: str):
                             {
                                 "id": "TRIGGER_MDT",
                                 "title": "🏔️ Terreno (MDT)"
+                            },
+                            {
+                                "id": "TRIGGER_PRODES",
+                                "title": "🌳 Análise PRODES"
                             }
                         ]
                     },

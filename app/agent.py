@@ -101,6 +101,39 @@ def get_tools_definition():
         {
              "type": "function",
              "function": {
+                 "name": "analisar_prodes",
+                 "description": (
+                     "Cruza o perímetro oficial do CAR do imóvel com apontamentos de desmatamento do "
+                     "PRODES/INPE, gera um mapa geral e, depois de escolhido o apontamento, mapas de "
+                     "satélite antes/depois + um PDF de laudo técnico. Use para 'PRODES', 'desmatamento', "
+                     "'autuação ambiental', 'multa ambiental', 'defesa ambiental', 'laudo de desmatamento' "
+                     "ou qualquer pedido de análise de desmatamento no imóvel. "
+                     "FLUXO EM DUAS ETAPAS: primeiro chame SEM o parâmetro 'escolha' — isso lista os "
+                     "apontamentos encontrados. Se o usuário responder em seguida com um número (ex.: '2'), "
+                     "vários (ex.: '1,3') ou 'todos', chame de novo com os MESMOS lat/lon da consulta "
+                     "anterior e esse texto no parâmetro 'escolha'."
+                 ),
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"},
+                         "escolha": {
+                             "type": "string",
+                             "description": (
+                                 "Resposta do usuário à listagem de apontamentos já mostrada: um número "
+                                 "('2'), vários ('1,3') ou 'todos'. Deixe vazio/omita na primeira chamada."
+                             )
+                         }
+                     },
+                     "required": ["lat", "lon"]
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
                  "name": "analisar_terreno_mdt",
                  "description": "Gera mapa MDT (Modelo Digital de Terreno) com curvas de nível 2D e modelo 3D. Use para 'MDT', 'terreno', 'elevação', 'relevo', 'curvas de nível', 'topografia'. NÃO use para vegetação/NDVI.",
                  "parameters": {
@@ -251,6 +284,18 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             if not lat or not lon: return "Coordenadas inválidas."
             return f"TRIGGER_FLOW: MDT | {lat} | {lon} | {nome}"
 
+        elif name == "analisar_prodes":
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
+            escolha = arguments.get("escolha")
+            if not lat or not lon: return "Coordenadas inválidas."
+            if escolha:
+                # "|" separa os campos no parser do trigger_handler — troca por "e" se vier na escolha.
+                escolha_safe = str(escolha).replace("|", " e ")
+                return f"TRIGGER_FLOW: PRODES_ESCOLHA | {lat} | {lon} | {nome} | {escolha_safe}"
+            return f"TRIGGER_FLOW: PRODES | {lat} | {lon} | {nome}"
+
         elif name == "listar_propriedades":
             from app.models import SessionLocal, FavoriteLocation
             session = SessionLocal()
@@ -396,7 +441,14 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
             "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
             "8. NUNCA invente números.\n"
-            "9. Se o Patrão mencionar 'leilão', 'CDA', 'Correa da Costa', 'preço arroba leilão' ou pedir gráfico de leilão, use `consultar_leilao_cda` IMEDIATAMENTE."
+            "9. Se o Patrão mencionar 'leilão', 'CDA', 'Correa da Costa', 'preço arroba leilão' ou pedir gráfico de leilão, use `consultar_leilao_cda` IMEDIATAMENTE.\n"
+            "10. Se o Patrão mencionar 'PRODES' (mesmo sozinho, sem mais nada), 'desmatamento', 'autuação "
+            "ambiental', 'multa ambiental', 'defesa ambiental' ou pedir laudo/análise de desmatamento, use "
+            "`analisar_prodes` IMEDIATAMENTE (sem o parâmetro 'escolha' na primeira vez — isso lista os "
+            "apontamentos encontrados no imóvel). Se, na mensagem seguinte, ele responder só com um número "
+            "(ex.: '2'), vários números (ex.: '1,3') ou 'todos', isso é a escolha de qual apontamento "
+            "analisar — chame `analisar_prodes` de novo com os MESMOS lat/lon da consulta anterior (não "
+            "peça de novo) e essa resposta no parâmetro 'escolha'."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
@@ -494,6 +546,8 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
             user_text = "Quero o mapa de saúde do pasto NDVI. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
         elif user_text == "TRIGGER_MDT":
             user_text = "Quero o mapa de topografia MDT. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
+        elif user_text == "TRIGGER_PRODES":
+            user_text = "Quero analisar apontamentos de desmatamento do PRODES no meu imóvel. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
         elif user_text == "TRIGGER_LISTAR":
             user_text = "Liste minhas propriedades cadastradas."
 
