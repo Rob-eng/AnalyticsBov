@@ -322,19 +322,38 @@ def compose_prodes_overview_map(property_geometry: dict, apontamentos: list, cod
     ax.set_yticklabels([_format_dm(t, is_lat=True) for t in lat_ticks], fontsize=7,
                         rotation=90, va='center')
 
-    if years_before:
-        sm_before = ScalarMappable(cmap=cmap_before, norm=norm_before)
-        sm_before.set_array([])
-        cbar_before = fig.colorbar(sm_before, ax=ax, fraction=0.04, pad=0.03)
-        cbar_before.set_label(f'Ano (até {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
-        cbar_before.ax.tick_params(labelsize=7)
+    # Uma única coluna reservada à direita, dividida em duas metades que se
+    # tocam (sem espaço entre elas) — lê como uma linha do tempo contínua:
+    # mais recente (vermelho) em cima, mais antigo (azul) embaixo, com a
+    # transição bem no marco de 2008. Duas fig.colorbar(ax=ax) lado a lado
+    # ficariam horizontais; aqui é um único cax de mplt_toolkits dividido.
+    if years_before or years_after:
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="4%", pad=0.35)
+        cax.axis('off')
 
-    if years_after:
-        sm_after = ScalarMappable(cmap=cmap_after, norm=norm_after)
-        sm_after.set_array([])
-        cbar_after = fig.colorbar(sm_after, ax=ax, fraction=0.04, pad=0.03)
-        cbar_after.set_label(f'Ano (após {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
-        cbar_after.ax.tick_params(labelsize=7)
+        if years_before and years_after:
+            cax_after = cax.inset_axes([0, 0.5, 1, 0.5])
+            cax_before = cax.inset_axes([0, 0.0, 1, 0.5])
+        elif years_after:
+            cax_after, cax_before = cax.inset_axes([0, 0, 1, 1]), None
+        else:
+            cax_after, cax_before = None, cax.inset_axes([0, 0, 1, 1])
+
+        if cax_after is not None:
+            sm_after = ScalarMappable(cmap=cmap_after, norm=norm_after)
+            sm_after.set_array([])
+            cbar_after = fig.colorbar(sm_after, cax=cax_after)
+            cbar_after.set_label(f'Ano (após {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
+            cbar_after.ax.tick_params(labelsize=7)
+
+        if cax_before is not None:
+            sm_before = ScalarMappable(cmap=cmap_before, norm=norm_before)
+            sm_before.set_array([])
+            cbar_before = fig.colorbar(sm_before, cax=cax_before)
+            cbar_before.set_label(f'Ano (até {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
+            cbar_before.ax.tick_params(labelsize=7)
 
     ax.legend(handles=[Line2D([0], [0], color='black', lw=2.2, label='Perímetro do imóvel')],
               loc='upper right', fontsize=8, framealpha=0.9)
