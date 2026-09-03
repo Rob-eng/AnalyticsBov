@@ -125,7 +125,11 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     ax_main.set_xticks([(t - minx) / w for t in lon_ticks])
     ax_main.set_xticklabels([_format_dm(t, is_lat=False) for t in lon_ticks], fontsize=6)
     ax_main.set_yticks([(t - miny) / h for t in lat_ticks])
-    ax_main.set_yticklabels([_format_dm(t, is_lat=True) for t in lat_ticks], fontsize=6)
+    # Latitude (eixo Y, borda esquerda) na vertical, paralela à linha lateral do mapa.
+    # Precisa ser via set_yticklabels(..., rotation=90) com texto explícito — tick_params
+    # (labelrotation) não é respeitado de forma confiável no savefig com esta versão do matplotlib.
+    ax_main.set_yticklabels([_format_dm(t, is_lat=True) for t in lat_ticks], fontsize=6,
+                             rotation=90, va='center')
     ax_main.tick_params(length=2)
     for spine in ax_main.spines.values():
         spine.set_visible(False)
@@ -216,15 +220,34 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     return buf
 
 
+# Marco temporal de área rural consolidada, Lei 12.651/2012, art. 3º, IV (22/07/2008)
+# — mesma referência usada em LEGAL_CONSOLIDATION_MARK (app/prodes_analysis.py).
+# Apontamentos até 2008 (inclusive) entram na rampa azul; dali em diante, amarelo->vermelho.
+OVERVIEW_LEGAL_MARK_YEAR = 2008
+
+
+def _year_color(year, cmap_before, norm_before, cmap_after, norm_after):
+    if year is None:
+        return '#999999'
+    if year <= OVERVIEW_LEGAL_MARK_YEAR:
+        # desloca pra fora do extremo quase-branco do Blues, senão anos antigos somem no fundo
+        return cmap_before(0.35 + 0.65 * norm_before(year))
+    return cmap_after(0.25 + 0.75 * norm_after(year))
+
+
 def compose_prodes_overview_map(property_geometry: dict, apontamentos: list, cod_imovel: str = None) -> BytesIO:
     """
     Mapa-visão-geral: perímetro do imóvel + TODOS os apontamentos PRODES
-    encontrados de uma vez, coloridos por ano (amarelo->vermelho, mais
-    recente = mais vermelho) — enviado logo após a listagem em texto,
-    antes do usuário escolher qual apontamento vai para a análise detalhada
-    (mapas antes/depois + PDF, gerados só depois pelo worker). Não usa
-    imagem de satélite de fundo nem chama o GEE — só desenha as geometrias
-    já trazidas pelo WFS em find_intersecting_apontamentos, então é rápido.
+    encontrados de uma vez — enviado logo após a listagem em texto, antes do
+    usuário escolher qual apontamento vai para a análise detalhada (mapas
+    antes/depois + PDF, gerados só depois pelo worker). Não usa imagem de
+    satélite de fundo nem chama o GEE — só desenha as geometrias já trazidas
+    pelo WFS em find_intersecting_apontamentos, então é rápido.
+
+    Cor por ano em duas rampas, separadas pelo marco de área consolidada
+    (22/07/2008): azul (claro->escuro) para até 2008, amarelo->vermelho para
+    depois — a cor já comunica de longe se o apontamento é anterior ou
+    posterior ao marco legal.
     """
     from matplotlib.colors import Normalize
     from matplotlib.cm import ScalarMappable, get_cmap
@@ -256,15 +279,26 @@ def compose_prodes_overview_map(property_geometry: dict, apontamentos: list, cod
         ax.plot(xs, ys, color='black', linewidth=2.2, zorder=5)
 
     years = [ap['year'] for ap in apontamentos if ap.get('year')]
-    norm = Normalize(vmin=min(years), vmax=max(years)) if years else Normalize(vmin=2000, vmax=2025)
-    cmap = get_cmap('YlOrRd')
+    years_before = [y for y in years if y <= OVERVIEW_LEGAL_MARK_YEAR]
+    years_after = [y for y in years if y > OVERVIEW_LEGAL_MARK_YEAR]
+
+    cmap_before = get_cmap('Blues')
+    cmap_after = get_cmap('YlOrRd')
+    norm_before = Normalize(
+        vmin=min(years_before) if years_before else OVERVIEW_LEGAL_MARK_YEAR - 10,
+        vmax=OVERVIEW_LEGAL_MARK_YEAR,
+    )
+    norm_after = Normalize(
+        vmin=OVERVIEW_LEGAL_MARK_YEAR,
+        vmax=max(years_after) if years_after else OVERVIEW_LEGAL_MARK_YEAR + 10,
+    )
 
     for ap in apontamentos:
-        color = cmap(norm(ap['year'])) if ap.get('year') else '#999999'
+        color = _year_color(ap.get('year'), cmap_before, norm_before, cmap_after, norm_after)
         for ring in _extract_rings(ap.get('geometry')):
             xs = [p[0] for p in ring]
             ys = [p[1] for p in ring]
-            ax.fill(xs, ys, color=color, alpha=0.75, zorder=3, edgecolor='#333333', linewidth=0.4)
+            ax.fill(xs, ys, color=color, alpha=0.85, zorder=3, edgecolor='#333333', linewidth=0.4)
 
     ax.set_xlim(minx, maxx)
     ax.set_ylim(miny, maxy)
@@ -273,16 +307,34 @@ def compose_prodes_overview_map(property_geometry: dict, apontamentos: list, cod
         f"Visão geral — CAR {cod_imovel or '—'} — {len(apontamentos)} apontamento(s) PRODES",
         fontsize=11, fontweight='bold',
     )
-    ax.set_xlabel('Longitude', fontsize=8)
-    ax.set_ylabel('Latitude', fontsize=8)
     ax.tick_params(labelsize=7)
 
-    if years:
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax, fraction=0.04, pad=0.03)
-        cbar.set_label('Ano do apontamento', fontsize=8)
-        cbar.ax.tick_params(labelsize=7)
+    # Mesmo estilo de coordenadas (grau/minuto) do mapa antes/depois — e a mesma
+    # ressalva se aplica aqui: precisa ser set_xticklabels/set_yticklabels com texto
+    # explícito, tick_params(labelrotation) não é respeitado de forma confiável no
+    # savefig nesta versão do matplotlib.
+    lon_ticks = _generate_ticks(minx, maxx)
+    lat_ticks = _generate_ticks(miny, maxy)
+    ax.set_xticks(lon_ticks)
+    ax.set_xticklabels([_format_dm(t, is_lat=False) for t in lon_ticks], fontsize=7)
+    ax.set_yticks(lat_ticks)
+    # Latitude (eixo Y, borda esquerda) na vertical, paralela à linha lateral do mapa.
+    ax.set_yticklabels([_format_dm(t, is_lat=True) for t in lat_ticks], fontsize=7,
+                        rotation=90, va='center')
+
+    if years_before:
+        sm_before = ScalarMappable(cmap=cmap_before, norm=norm_before)
+        sm_before.set_array([])
+        cbar_before = fig.colorbar(sm_before, ax=ax, fraction=0.04, pad=0.03)
+        cbar_before.set_label(f'Ano (até {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
+        cbar_before.ax.tick_params(labelsize=7)
+
+    if years_after:
+        sm_after = ScalarMappable(cmap=cmap_after, norm=norm_after)
+        sm_after.set_array([])
+        cbar_after = fig.colorbar(sm_after, ax=ax, fraction=0.04, pad=0.03)
+        cbar_after.set_label(f'Ano (após {OVERVIEW_LEGAL_MARK_YEAR})', fontsize=8)
+        cbar_after.ax.tick_params(labelsize=7)
 
     ax.legend(handles=[Line2D([0], [0], color='black', lw=2.2, label='Perímetro do imóvel')],
               loc='upper right', fontsize=8, framealpha=0.9)
