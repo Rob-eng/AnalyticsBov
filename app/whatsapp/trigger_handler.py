@@ -4,8 +4,18 @@ Executa os pipelines visuais (NDVI, CLIMA, MDT, HISTORICO) e envia
 os resultados via WhatsApp Cloud API.
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.whatsapp.sender import send_whatsapp_text, send_whatsapp_image, send_whatsapp_video
+
+# Cache da última listagem PRODES por telefone — a memória de conversa da IA
+# (app/agent.py:_conversation_memory) é apagada a cada TRIGGER_FLOW, então ela
+# não tem como repassar lat/lon corretos na 2ª etapa (escolha do apontamento).
+# Este cache é a fonte de verdade pra isso: guarda o CAR + apontamentos já
+# resolvidos, e _handle_prodes_escolha usa ele em vez de confiar no que a IA
+# reenviar. Em memória do processo (mesmo padrão de _conversation_memory) —
+# some num restart, mas o usuário só perde a escolha pendente, não a análise.
+_prodes_session_cache = {}
+PRODES_SESSION_TTL_MINUTES = 30
 
 
 async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
@@ -72,8 +82,13 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             if len(parts) < 5:
                 send_whatsapp_text(sender_phone, "⚠️ Não entendi a escolha. Responda com um número, vários (ex.: 1,3) ou 'todos'.")
                 return
-            lat = float(parts[1])
-            lon = float(parts[2])
+            # lat/lon podem vir vazios (a IA foi orientada a não inventar) — não tem problema,
+            # _handle_prodes_escolha usa o cache da última listagem, não esses campos.
+            try:
+                lat = float(parts[1]) if parts[1] else None
+                lon = float(parts[2]) if parts[2] else None
+            except ValueError:
+                lat = lon = None
             nome = parts[3]
             escolha = parts[4]
             loop = asyncio.get_running_loop()
@@ -358,8 +373,9 @@ async def _handle_prodes_list(phone, lat, lon, nome, loop):
     imóvel e manda o mapa-visão-geral. Não enfileira nada ainda — só depois
     que o usuário responder com a escolha (ver _handle_prodes_escolha) é que
     um ProdesJob é criado. Mesma lógica de app/bot.py:receive_prodes_location,
-    adaptada pro WhatsApp (sem ConversationHandler).
+    adaptada pro WhatsApp (sem ConversationHandler — ver _prodes_session_cache).
     """
+    from datetime import datetime as _dt
     from app.prodes_analysis import fetch_car_perimeter_full, find_intersecting_apontamentos
     from app.prodes_maps import compose_prodes_overview_map
 
@@ -409,17 +425,26 @@ async def _handle_prodes_list(phone, lat, lon, nome, loop):
         print(f"[WA PRODES] Falha ao gerar mapa-visão-geral: {e}", flush=True)
 
     send_whatsapp_text(phone, "\n".join(lines))
+
+    # Guarda a listagem resolvida pra etapa 2 (ver _handle_prodes_escolha) —
+    # é isso, não o que a IA reenviar, que decide qual CAR/apontamentos usar.
+    _prodes_session_cache[phone] = {
+        'car': car, 'apontamentos': apontamentos, 'nome': nome,
+        'lat': lat, 'lon': lon, 'queried_at': _dt.utcnow(),
+    }
     print("[WA TRIGGER] PRODES (listagem) enviado com sucesso!", flush=True)
 
 
 async def _handle_prodes_escolha(phone, lat, lon, nome, escolha, loop):
     """
     Etapa 2 do PRODES: o usuário respondeu com a escolha (número/'todos').
-    Como o WhatsApp não tem estado de conversa formal (ver app/agent.py),
-    re-consulta o CAR e o PRODES com as mesmas coordenadas (rápido, ~poucos
-    segundos, sem custo de GEE) em vez de guardar a lista anterior em algum
-    lugar — a ordenação de find_intersecting_apontamentos é determinística,
-    então o índice escolhido continua se referindo ao mesmo apontamento.
+    A memória de conversa da IA (app/agent.py:_conversation_memory) é apagada
+    a cada TRIGGER_FLOW — ela não tem como saber lat/lon da consulta anterior
+    nesta chamada, e inventar coordenadas já causou apontamento/perímetro
+    errado em produção. Por isso a fonte de verdade aqui é
+    _prodes_session_cache (gravado no fim de _handle_prodes_list para este
+    mesmo telefone), não os lat/lon que chegam nesta chamada — esses só
+    servem de fallback se o cache tiver expirado (ex.: processo reiniciou).
     """
     from datetime import datetime as _dt
     from app.prodes_analysis import (
@@ -429,25 +454,44 @@ async def _handle_prodes_escolha(phone, lat, lon, nome, escolha, loop):
     from app.prodes_worker import enqueue_prodes_jobs
     from app.models import SessionLocal, User
 
-    car = await loop.run_in_executor(None, fetch_car_perimeter_full, lat, lon)
-    if car['status'] != 'OFFICIAL':
-        send_whatsapp_text(
-            phone,
-            "⚠️ Não encontrei mais o perímetro oficial do CAR nessa coordenada. "
-            "Peça a análise PRODES de novo pra essa propriedade."
-        )
-        return
+    cached = _prodes_session_cache.get(phone)
+    cache_fresh = (
+        cached is not None
+        and _dt.utcnow() - cached['queried_at'] < timedelta(minutes=PRODES_SESSION_TTL_MINUTES)
+    )
 
-    queried_at = _dt.utcnow()
-    try:
-        apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
-    except RuntimeError as e:
-        send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
-        return
-
-    if not apontamentos:
-        send_whatsapp_text(phone, "⚠️ Não encontrei mais apontamentos pra essa coordenada — pode ter mudado algo, peça a análise de novo.")
-        return
+    if cache_fresh:
+        car = cached['car']
+        apontamentos = cached['apontamentos']
+        nome = cached['nome']
+        lat, lon = cached['lat'], cached['lon']
+        queried_at = cached['queried_at']
+    else:
+        # Sem cache (ou expirado) — só funciona se a IA de fato mandou lat/lon válidos.
+        if lat is None or lon is None:
+            send_whatsapp_text(
+                phone,
+                "⚠️ Não encontrei mais a análise PRODES em aberto (pode ter expirado). "
+                "Peça a análise de novo pra essa propriedade e responda a escolha logo em seguida."
+            )
+            return
+        car = await loop.run_in_executor(None, fetch_car_perimeter_full, lat, lon)
+        if car['status'] != 'OFFICIAL':
+            send_whatsapp_text(
+                phone,
+                "⚠️ Não encontrei mais o perímetro oficial do CAR nessa coordenada. "
+                "Peça a análise PRODES de novo pra essa propriedade."
+            )
+            return
+        queried_at = _dt.utcnow()
+        try:
+            apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
+        except RuntimeError as e:
+            send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
+            return
+        if not apontamentos:
+            send_whatsapp_text(phone, "⚠️ Não encontrei mais apontamentos pra essa coordenada — pode ter mudado algo, peça a análise de novo.")
+            return
 
     selection = parse_apontamento_selection(escolha, len(apontamentos))
     if selection is None:
@@ -486,6 +530,8 @@ async def _handle_prodes_escolha(phone, lat, lon, nome, escolha, loop):
         print(f"[WA PRODES] Erro ao enfileirar jobs: {e}", flush=True)
         send_whatsapp_text(phone, "❌ Erro ao enfileirar a análise. Tente novamente.")
         return
+
+    _prodes_session_cache.pop(phone, None)
 
     lines = ["🕓 *Análise(s) enfileirada(s):*"]
     for job_id, class_name in job_entries:

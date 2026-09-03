@@ -108,26 +108,27 @@ def get_tools_definition():
                      "satélite antes/depois + um PDF de laudo técnico. Use para 'PRODES', 'desmatamento', "
                      "'autuação ambiental', 'multa ambiental', 'defesa ambiental', 'laudo de desmatamento' "
                      "ou qualquer pedido de análise de desmatamento no imóvel. "
-                     "FLUXO EM DUAS ETAPAS: primeiro chame SEM o parâmetro 'escolha' — isso lista os "
-                     "apontamentos encontrados. Se o usuário responder em seguida com um número (ex.: '2'), "
-                     "vários (ex.: '1,3') ou 'todos', chame de novo com os MESMOS lat/lon da consulta "
-                     "anterior e esse texto no parâmetro 'escolha'."
+                     "FLUXO EM DUAS ETAPAS: primeiro chame COM lat/lon e SEM 'escolha' — isso lista os "
+                     "apontamentos encontrados. Se a mensagem seguinte do usuário for só a escolha (um "
+                     "número, vários separados por vírgula, ou 'todos'), chame de novo só com 'escolha' "
+                     "preenchida — NÃO envie lat/lon nessa segunda chamada (o servidor já sabe qual foi a "
+                     "última consulta deste usuário; inventar coordenadas nessa etapa quebra a análise)."
                  ),
                  "parameters": {
                      "type": "object",
                      "properties": {
-                         "lat": {"type": "number", "description": "Latitude"},
-                         "lon": {"type": "number", "description": "Longitude"},
+                         "lat": {"type": "number", "description": "Latitude — obrigatório na 1ª chamada (sem 'escolha'); omita na 2ª chamada (com 'escolha')."},
+                         "lon": {"type": "number", "description": "Longitude — obrigatório na 1ª chamada (sem 'escolha'); omita na 2ª chamada (com 'escolha')."},
                          "nome_propriedade": {"type": "string", "description": "Nome da propriedade"},
                          "escolha": {
                              "type": "string",
                              "description": (
                                  "Resposta do usuário à listagem de apontamentos já mostrada: um número "
-                                 "('2'), vários ('1,3') ou 'todos'. Deixe vazio/omita na primeira chamada."
+                                 "('2'), vários ('1,3') ou 'todos'. Omita na 1ª chamada (a que lista)."
                              )
                          }
                      },
-                     "required": ["lat", "lon"]
+                     "required": []
                  }
              }
         },
@@ -289,11 +290,15 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             lon = arguments.get("lon")
             nome = arguments.get("nome_propriedade", "Local Selecionado")
             escolha = arguments.get("escolha")
-            if not lat or not lon: return "Coordenadas inválidas."
             if escolha:
+                # 2ª etapa: não depende de lat/lon corretos — o servidor usa o cache da
+                # última listagem PRODES deste usuário (ver app/whatsapp/trigger_handler.py).
                 # "|" separa os campos no parser do trigger_handler — troca por "e" se vier na escolha.
                 escolha_safe = str(escolha).replace("|", " e ")
-                return f"TRIGGER_FLOW: PRODES_ESCOLHA | {lat} | {lon} | {nome} | {escolha_safe}"
+                lat_field = lat if lat is not None else ""
+                lon_field = lon if lon is not None else ""
+                return f"TRIGGER_FLOW: PRODES_ESCOLHA | {lat_field} | {lon_field} | {nome} | {escolha_safe}"
+            if not lat or not lon: return "Coordenadas inválidas."
             return f"TRIGGER_FLOW: PRODES | {lat} | {lon} | {nome}"
 
         elif name == "listar_propriedades":
@@ -438,17 +443,22 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "   - Informe o plano atual ao Patrão e pergunte se quer ver opções de upgrade.\n"
             "   - Só mostre os planos detalhados se o Patrão pedir explicitamente.\n"
             "   - Se ele pedir para ver, responda EXATAMENTE: TRIGGER_FLOW: PREMIUM\n"
-            "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda.\n"
+            "6. Se não souber as coordenadas, use `listar_propriedades` para achar os dados da fazenda. "
+            "Se houver MAIS DE UMA propriedade cadastrada e o Patrão não tiver dito qual (por nome), NÃO "
+            "escolha sozinho — liste os nomes e pergunte qual ele quer antes de rodar qualquer análise "
+            "(NDVI, clima, MDT, PRODES). Só use direto se houver exatamente uma propriedade cadastrada.\n"
             "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
             "8. NUNCA invente números.\n"
             "9. Se o Patrão mencionar 'leilão', 'CDA', 'Correa da Costa', 'preço arroba leilão' ou pedir gráfico de leilão, use `consultar_leilao_cda` IMEDIATAMENTE.\n"
             "10. Se o Patrão mencionar 'PRODES' (mesmo sozinho, sem mais nada), 'desmatamento', 'autuação "
             "ambiental', 'multa ambiental', 'defesa ambiental' ou pedir laudo/análise de desmatamento, use "
             "`analisar_prodes` IMEDIATAMENTE (sem o parâmetro 'escolha' na primeira vez — isso lista os "
-            "apontamentos encontrados no imóvel). Se, na mensagem seguinte, ele responder só com um número "
-            "(ex.: '2'), vários números (ex.: '1,3') ou 'todos', isso é a escolha de qual apontamento "
-            "analisar — chame `analisar_prodes` de novo com os MESMOS lat/lon da consulta anterior (não "
-            "peça de novo) e essa resposta no parâmetro 'escolha'."
+            "apontamentos encontrados no imóvel). Se a PRÓXIMA mensagem dele for só um número (ex.: '2'), "
+            "vários números (ex.: '1,3') ou 'todos', isso é a escolha de qual apontamento analisar — chame "
+            "`analisar_prodes` de novo só com o parâmetro 'escolha' preenchido com essa resposta. NÃO tente "
+            "adivinhar ou reaproveitar lat/lon nessa segunda chamada — o servidor já sabe qual foi a última "
+            "consulta PRODES deste Patrão; se você não tiver certeza das coordenadas, deixe o campo vazio "
+            "em vez de inventar um valor."
         )
         if context_info:
             s_prompt += f" Contexto adicional: {context_info}"
