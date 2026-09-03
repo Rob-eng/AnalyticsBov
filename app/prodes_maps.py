@@ -214,3 +214,81 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     plt.close(fig)
     buf.seek(0)
     return buf
+
+
+def compose_prodes_overview_map(property_geometry: dict, apontamentos: list, cod_imovel: str = None) -> BytesIO:
+    """
+    Mapa-visão-geral: perímetro do imóvel + TODOS os apontamentos PRODES
+    encontrados de uma vez, coloridos por ano (amarelo->vermelho, mais
+    recente = mais vermelho) — enviado logo após a listagem em texto,
+    antes do usuário escolher qual apontamento vai para a análise detalhada
+    (mapas antes/depois + PDF, gerados só depois pelo worker). Não usa
+    imagem de satélite de fundo nem chama o GEE — só desenha as geometrias
+    já trazidas pelo WFS em find_intersecting_apontamentos, então é rápido.
+    """
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable, get_cmap
+    from matplotlib.lines import Line2D
+
+    property_poly = shape(property_geometry)
+    bounds_list = [property_poly.bounds]
+    for ap in apontamentos:
+        if ap.get('geometry'):
+            bounds_list.append(shape(ap['geometry']).bounds)
+
+    minx = min(b[0] for b in bounds_list)
+    miny = min(b[1] for b in bounds_list)
+    maxx = max(b[2] for b in bounds_list)
+    maxy = max(b[3] for b in bounds_list)
+    pad_x = (maxx - minx) * 0.06 or 0.005
+    pad_y = (maxy - miny) * 0.06 or 0.005
+    minx -= pad_x
+    maxx += pad_x
+    miny -= pad_y
+    maxy += pad_y
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=150)
+    ax.set_facecolor('#eef3ea')
+
+    for ring in _extract_rings(property_geometry):
+        xs = [p[0] for p in ring]
+        ys = [p[1] for p in ring]
+        ax.plot(xs, ys, color='black', linewidth=2.2, zorder=5)
+
+    years = [ap['year'] for ap in apontamentos if ap.get('year')]
+    norm = Normalize(vmin=min(years), vmax=max(years)) if years else Normalize(vmin=2000, vmax=2025)
+    cmap = get_cmap('YlOrRd')
+
+    for ap in apontamentos:
+        color = cmap(norm(ap['year'])) if ap.get('year') else '#999999'
+        for ring in _extract_rings(ap.get('geometry')):
+            xs = [p[0] for p in ring]
+            ys = [p[1] for p in ring]
+            ax.fill(xs, ys, color=color, alpha=0.75, zorder=3, edgecolor='#333333', linewidth=0.4)
+
+    ax.set_xlim(minx, maxx)
+    ax.set_ylim(miny, maxy)
+    ax.set_aspect('equal')
+    ax.set_title(
+        f"Visão geral — CAR {cod_imovel or '—'} — {len(apontamentos)} apontamento(s) PRODES",
+        fontsize=11, fontweight='bold',
+    )
+    ax.set_xlabel('Longitude', fontsize=8)
+    ax.set_ylabel('Latitude', fontsize=8)
+    ax.tick_params(labelsize=7)
+
+    if years:
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.04, pad=0.03)
+        cbar.set_label('Ano do apontamento', fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
+
+    ax.legend(handles=[Line2D([0], [0], color='black', lw=2.2, label='Perímetro do imóvel')],
+              loc='upper right', fontsize=8, framealpha=0.9)
+
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight', pad_inches=0.15)
+    plt.close(fig)
+    buf.seek(0)
+    return buf

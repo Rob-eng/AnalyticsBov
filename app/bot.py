@@ -1490,6 +1490,21 @@ async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_
         'apontamentos': apontamentos,
         'source_info': {'label': PRODES_SOURCE_LABEL, 'queried_at': queried_at},
     }
+
+    await status_msg.edit_text("🗺️ Gerando mapa-visão-geral...")
+    from app.prodes_maps import compose_prodes_overview_map
+    try:
+        overview_map = await loop.run_in_executor(
+            None, compose_prodes_overview_map, car['geometry'], apontamentos, car['cod_imovel']
+        )
+        await context.bot.send_photo(
+            chat_id=chat_id, photo=overview_map,
+            caption=f"🗺️ Visão geral — {len(apontamentos)} apontamento(s) PRODES no imóvel "
+                    f"(cor = ano, veja a legenda no mapa)",
+        )
+    except Exception as e:
+        print(f"[PRODES] Falha ao gerar mapa-visão-geral: {e}", flush=True)
+
     await status_msg.edit_text("\n".join(lines), parse_mode='Markdown')
     return WAITING_PRODES_APONTAMENTO
 
