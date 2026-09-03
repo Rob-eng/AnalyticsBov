@@ -536,7 +536,38 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
     """
     try:
         user_text = user_text.strip()
-        
+
+        # 0. Escolha de apontamento PRODES pendente — intercepta ANTES da IA.
+        # A memória de conversa é apagada a cada TRIGGER_FLOW (ver o except
+        # abaixo e o short-circuit mais acima), então numa mensagem futura
+        # como "19" a IA não tem mais nenhum contexto de que existe uma
+        # listagem PRODES em aberto — ela via só o texto sozinho e ou inventa
+        # coordenadas (já causou bug em produção) ou, como reportado, nem
+        # confia em chamar a ferramenta e só pergunta o que fazer. Resolvendo
+        # aqui, em Python, contra o cache real (app/whatsapp/trigger_handler),
+        # é determinístico e não depende da IA "lembrar" nada.
+        pending = None
+        try:
+            from app.whatsapp.trigger_handler import _prodes_session_cache
+            from app.prodes_analysis import parse_apontamento_selection
+            candidate = _prodes_session_cache.get(sender_phone)
+            if candidate and parse_apontamento_selection(user_text, len(candidate['apontamentos'])) is not None:
+                pending = candidate
+        except Exception as e:
+            # Só a checagem do cache é defensiva — se ISSO falhar, cai pro fluxo normal
+            # (a IA pergunta/tenta de novo). Já a chamada real ao handler (abaixo, fora
+            # deste try) não pode ser engolida em silêncio: se `pending` foi identificado
+            # e a chamada falhar, o erro deve aparecer pro usuário, não virar um "a IA
+            # não entendeu" — foi exatamente isso que mascarou o bug anterior.
+            print(f"[Agent] Falha ao checar cache PRODES pendente (seguindo pro fluxo normal): {e}", flush=True)
+
+        if pending:
+            from app.whatsapp.trigger_handler import handle_wa_trigger_flow
+            await handle_wa_trigger_flow(
+                sender_phone, f"TRIGGER_FLOW: PRODES_ESCOLHA | | | {pending['nome']} | {user_text}"
+            )
+            return
+
         # 1. Interceptar Cliques do Menu Interativo
         if user_text == "TRIGGER_COTACAO":
             from app.whatsapp.trigger_handler import handle_wa_trigger_flow
