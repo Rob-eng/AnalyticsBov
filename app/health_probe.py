@@ -123,6 +123,29 @@ def probe_cda_freshness():
     return _run(_)
 
 
+def probe_datagro_freshness():
+    def _():
+        from app.models import SessionLocal, DatagroQuote
+        from datetime import date
+        from sqlalchemy import func
+        db = SessionLocal()
+        try:
+            last = (
+                db.query(func.max(DatagroQuote.ref_date))
+                .filter(DatagroQuote.category == "boi")
+                .scalar()
+            )
+            if not last:
+                return {"status": "warn", "message": "Nenhuma cotação DATAGRO no banco"}
+            age = (date.today() - last).days
+            msg = f"Indicador do Boi há {age}d — {last.strftime('%d/%m/%Y')}"
+            # Tolera fim de semana/feriado (sexta → segunda = 3-4 dias)
+            return {"status": "ok" if age <= 4 else "warn", "message": msg}
+        finally:
+            db.close()
+    return _run(_)
+
+
 def probe_whatsapp():
     def _():
         # Env vars reais usados em app/saas/plans.py
@@ -225,6 +248,7 @@ ALL_PROBES = {
     "OpenMeteo":      probe_openmeteo,
     "Scot Website":   probe_scot_web,
     "CDA Leilão":     probe_cda_freshness,
+    "DATAGRO Boi":    probe_datagro_freshness,
     "WhatsApp API":   probe_whatsapp,
     "Telegram API":   probe_telegram,
     "Google EE":      probe_gee,
@@ -238,6 +262,7 @@ PROBE_ICONS = {
     "OpenMeteo":      "🌧️",
     "Scot Website":   "📈",
     "CDA Leilão":     "🐂",
+    "DATAGRO Boi":    "🐄",
     "WhatsApp API":   "📱",
     "Telegram API":   "✈️",
     "Google EE":      "🛰️",

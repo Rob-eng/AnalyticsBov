@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, create_engine, text, ForeignKey, Text, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, create_engine, text, ForeignKey, Text, UniqueConstraint, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -107,6 +107,27 @@ class CdaMarketComparison(Base):
 
     hash_key = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+class DatagroQuote(Base):
+    """Snapshot diário das cotações de Pecuária da DATAGRO (ver app/scraper_datagro.py)."""
+    __tablename__ = 'datagro_quotes'
+    __table_args__ = (UniqueConstraint('code', 'ref_date', name='uq_datagro_quote_code_date'),)
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String, nullable=False, index=True)      # ex.: D_PEPR_MS_BR
+    board_id = Column(Integer, nullable=True)
+    board_title = Column(String, nullable=True)            # ex.: "Indicador do Boi DATAGRO"
+    name = Column(String, nullable=True)
+    long_name = Column(String, nullable=True)
+    category = Column(String, nullable=True, index=True)   # boi, vaca, novilha, bonus, escala, futuro_b3...
+    region = Column(String, nullable=True, index=True)     # UF (praça) ou país
+    unit = Column(String, nullable=True)                   # R$/@, US$/@, dias, %
+    ref_date = Column(Date, nullable=False, index=True)
+    value = Column(Float, nullable=False)
+    change_pct = Column(Float, nullable=True)
+
+    collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class CARCaptchaSession(Base):

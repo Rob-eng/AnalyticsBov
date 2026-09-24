@@ -267,6 +267,54 @@ def get_cda_status(api_key: str = Depends(get_api_key)):
         db.close()
 
 
+@router.post("/ingest/datagro")
+async def trigger_datagro_ingest(api_key: str = Depends(get_api_key)):
+    """Coleta agora as cotações DATAGRO Pecuária (normalmente roda às 08:00/20:00)."""
+    import asyncio
+    from app.scraper_datagro import run_datagro_daily_cycle
+
+    summary = await asyncio.to_thread(run_datagro_daily_cycle)
+    return {"status": "ok", **summary}
+
+
+@router.get("/datagro/latest")
+def get_datagro_latest(
+    category: str = Query(None, description="boi, vaca, novilha, bonus, escala, futuro_b3..."),
+    api_key: str = Depends(get_api_key),
+):
+    """Última cotação de cada ativo DATAGRO no banco."""
+    from app.models import SessionLocal, DatagroQuote
+    from sqlalchemy import func
+
+    db = SessionLocal()
+    try:
+        latest = (
+            db.query(DatagroQuote.code, func.max(DatagroQuote.ref_date).label("ref_date"))
+            .group_by(DatagroQuote.code)
+            .subquery()
+        )
+        q = db.query(DatagroQuote).join(
+            latest,
+            (DatagroQuote.code == latest.c.code) & (DatagroQuote.ref_date == latest.c.ref_date),
+        )
+        if category:
+            q = q.filter(DatagroQuote.category == category)
+        rows = q.order_by(DatagroQuote.category, DatagroQuote.region, DatagroQuote.code).all()
+        return {
+            "total_rows": db.query(DatagroQuote).count(),
+            "quotes": [
+                {
+                    "code": r.code, "category": r.category, "region": r.region,
+                    "name": r.name, "ref_date": r.ref_date.isoformat(),
+                    "value": r.value, "unit": r.unit, "change_pct": r.change_pct,
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        db.close()
+
+
 @router.post("/ingest/mt")
 async def trigger_mt_ingestion(background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
     """

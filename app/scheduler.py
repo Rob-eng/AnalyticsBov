@@ -4,6 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.config import Config
 from app.scraper import run_scraping_cycle
 from app.scraper_cda import run_cda_daily_cycle
+from app.scraper_datagro import run_datagro_daily_cycle
 from app.cda_analytics import build_cda_scot_comparisons
 from app.bot import broadcast_report
 from app.ndvi_alerts import run_ndvi_alert_scan
@@ -93,6 +94,30 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
+    # ── Cotações DATAGRO Pecuária (08:00 e 20:00 local) ──────────────────
+    # O indicador do dia sai no fim da tarde; a rodada da manhã garante o
+    # fechamento do dia anterior. Upsert por (código, data) evita duplicatas.
+    async def datagro_daily_job():
+        loop = asyncio.get_running_loop()
+        try:
+            summary = await loop.run_in_executor(None, run_datagro_daily_cycle)
+            print(f"[Scheduler] DATAGRO ingestion done: {summary}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ DATAGRO ingestion FAILED: {traceback.format_exc()}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(f"❌ *Falha na coleta diária DATAGRO (Pecuária)*\n\nErro: `{e}`")
+            except Exception:
+                pass
+
+    scheduler.add_job(
+        datagro_daily_job,
+        CronTrigger(hour='8,20', minute=0, timezone=USER_TZ),
+        id='datagro_daily_ingest',
+        replace_existing=True,
+    )
+
     # ── Health probes a cada 30 minutos ──────────────────────────────────
     async def health_probe_job():
         try:
@@ -134,7 +159,8 @@ def setup_scheduler(application):
     print(
         f"✓ Scheduler configured (tz={USER_TZ}): "
         "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) "
-        "+ cda_daily_ingest (daily 05:30) + health_probes (every 30min) "
+        "+ cda_daily_ingest (daily 05:30) + datagro_daily_ingest (08:00/20:00) "
+        "+ health_probes (every 30min) "
         f"+ prodes_job_poll (every {Config.PRODES_POLL_INTERVAL_SECONDS}s)",
         flush=True
     )
