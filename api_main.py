@@ -73,6 +73,19 @@ def health_check():
         "service": "AnalyticsBov API",
     }
 
+@app.get("/market/futuro")
+def get_mercado_futuro():
+    """
+    Endpoint público e somente leitura: cotação do Mercado Futuro do Boi
+    Gordo (B3) por vencimento, raspada ao vivo da Scot Consultoria — a
+    mesma fonte usada pelo comando /futuro do bot.
+    """
+    from app.scraper import scrape_mercado_futuro
+    data = scrape_mercado_futuro()
+    if not data:
+        raise HTTPException(status_code=503, detail="Não foi possível obter o Mercado Futuro no momento.")
+    return data
+
 @app.get("/property/at")
 def get_property_at(lat: float = Query(..., description="Latitude"), 
                     lon: float = Query(..., description="Longitude"),
