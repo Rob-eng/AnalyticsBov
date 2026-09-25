@@ -151,9 +151,15 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     ax_text = fig.add_subplot(gs[0, 1])
     ax_text.axis('off')
 
+    # Proporção real: as coordenadas estão normalizadas (0-1 nos dois eixos), então
+    # sem isso todo imóvel vira um quadrado (achatado/esticado). 1 unidade em y = h graus
+    # de latitude; 1 em x = w graus de longitude = w·cos(lat) em distância.
+    true_aspect = h / (w * math.cos(math.radians((miny + maxy) / 2)))
+
     ax_main.imshow(img, extent=[0, 1, 0, 1], origin='upper')
     ax_main.set_xlim(0, 1)
     ax_main.set_ylim(0, 1)
+    ax_main.set_aspect(true_aspect, adjustable='box')
 
     for ring in _extract_rings(property_geometry):
         _draw_ring(ax_main, ring, minx, miny, w, h, 'yellow', 2.0)
@@ -190,8 +196,18 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     ix1 = (inset_maxx - minx) / w
     iy0 = (inset_miny - miny) / h
     iy1 = (inset_maxy - miny) / h
+    # O inset ocupa 35%×35% do mapa principal, logo tem a mesma proporção dele:
+    # a janela precisa ser quadrada em unidades normalizadas para não distorcer.
+    side = max(ix1 - ix0, iy1 - iy0)
+    cx, cy = (ix0 + ix1) / 2, (iy0 + iy1) / 2
+    # Desliza a janela para dentro do mapa (senão o retângulo indicador sai cortado).
+    if side <= 1:
+        cx = min(max(cx, side / 2), 1 - side / 2)
+        cy = min(max(cy, side / 2), 1 - side / 2)
+    ix0, ix1, iy0, iy1 = cx - side / 2, cx + side / 2, cy - side / 2, cy + side / 2
     axins.set_xlim(ix0, ix1)
     axins.set_ylim(iy0, iy1)
+    axins.set_aspect('auto')
     axins.set_xticks([])
     axins.set_yticks([])
     for spine in axins.spines.values():

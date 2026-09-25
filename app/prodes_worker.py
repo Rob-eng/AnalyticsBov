@@ -40,7 +40,7 @@ CLAIM_SQL = text("""
     RETURNING id
 """)
 
-MAP_RENDER_VERSION = 'ndvi-v2'  # v2: laudo PDF redesenhado
+MAP_RENDER_VERSION = 'ndvi-v3'  # v3: mapas com proporção real (sem achatar)
 
 BACKOFF_BASE_SECONDS = 30
 BACKOFF_CAP_SECONDS = 300
