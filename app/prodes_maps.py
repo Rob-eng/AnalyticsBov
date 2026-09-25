@@ -97,6 +97,11 @@ def _draw_ring(ax, ring, minx, miny, w, h, color, linewidth):
             path_effects=[pe.Stroke(linewidth=linewidth + 1.6, foreground=halo), pe.Normal()])
 
 
+def _fmt_br(value, decimals=2) -> str:
+    """1234.5 → '1.234,50' (padrão pt-BR, igual ao laudo PDF)."""
+    return f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+
 def _fmt_ndvi(value) -> str:
     return f"{value:.2f}".replace('.', ',') if value is not None else '—'
 
@@ -217,7 +222,7 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     blocks = [
         (title, 12, 'bold'),
         (date_label, 14, 'bold'),
-        (f"Área do apontamento — {area_total_ha:.2f} ha ({area_intersect_ha:.2f} ha dentro do imóvel)", 9, 'normal'),
+        (f"Área do apontamento — {_fmt_br(area_total_ha)} ha ({_fmt_br(area_intersect_ha)} ha dentro do imóvel)", 9, 'normal'),
     ]
     if ndvi_info:
         mean, before = ndvi_info.get('mean'), ndvi_info.get('before_mean')
@@ -234,8 +239,8 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
         ("Procedência da cena", 9, 'bold'),
         (f"ID: {scene_meta.get('system_index', '—')}", 7.5, 'normal'),
         (f"Coleção: {scene_meta.get('collection_id', '—')}", 7.5, 'normal'),
-        (f"Nuvem sobre o imóvel: {scene_meta.get('cloud_pct', 0):.1f}%", 7.5, 'normal'),
-        (f"Cobertura do imóvel: {scene_meta.get('coverage_pct', 0):.1f}%", 7.5, 'normal'),
+        (f"Nuvem sobre o imóvel: {_fmt_br(scene_meta.get('cloud_pct', 0), 1)}%", 7.5, 'normal'),
+        (f"Cobertura do imóvel: {_fmt_br(scene_meta.get('coverage_pct', 0), 1)}%", 7.5, 'normal'),
         (f"Base PRODES/INPE: {source_label}", 7.5, 'normal'),
     ]
 

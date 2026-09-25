@@ -40,7 +40,7 @@ CLAIM_SQL = text("""
     RETURNING id
 """)
 
-MAP_RENDER_VERSION = 'ndvi-v1'
+MAP_RENDER_VERSION = 'ndvi-v2'  # v2: laudo PDF redesenhado
 
 BACKOFF_BASE_SECONDS = 30
 BACKOFF_CAP_SECONDS = 300
@@ -112,6 +112,24 @@ def enqueue_prodes_jobs(user_id: str, chat_id: str, location_lat: float, locatio
         raise
     finally:
         session.close()
+
+
+def _uf_municipio_from_car(cod_imovel: str) -> tuple:
+    """'MS-5001102-…' → ('MS', 'Aquidauana'). Município via API do IBGE; None se indisponível."""
+    parts = (cod_imovel or '').split('-')
+    uf = parts[0] if parts and len(parts[0]) == 2 else None
+    municipio = None
+    if len(parts) > 1 and parts[1].isdigit():
+        try:
+            import requests
+            resp = requests.get(
+                f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{parts[1]}", timeout=8,
+            )
+            if resp.ok and resp.json():
+                municipio = resp.json().get('nome')
+        except Exception:
+            pass
+    return uf, municipio
 
 
 def _get_user_platform(user_id: str) -> str:
@@ -297,21 +315,33 @@ def _run_job_pipeline(job) -> dict:
         ndvi_info={**ndvi_scale, 'mean': ndvi_after, 'before_mean': ndvi_before},
     ).getvalue()
 
+    uf, municipio = _uf_municipio_from_car(job.car_cod_imovel)
+    try:
+        property_area_ha = prodes_analysis.geodesic_area_ha(property_geometry)
+    except Exception:
+        property_area_ha = None
     property_info = {
         'cod_imovel': job.car_cod_imovel,
-        'municipio': job.location_name,
-        'uf': None,
-        'area_ha': None,
+        'nome': job.location_name,
+        'municipio': municipio,
+        'uf': uf,
+        'area_ha': property_area_ha,
+        'lat': job.location_lat,
+        'lon': job.location_lon,
     }
     apontamento_for_pdf = {
         'class_name': apontamento_dict['class_name'],
         'year': apontamento_dict['year'],
+        'image_date': apontamento_dict['image_date'],
         'area_total_ha': area_total_ha,
         'area_intersect_ha': area_intersect_ha,
     }
     pdf_bytes = prodes_pdf.build_prodes_report(
-        job, apontamento_for_pdf, property_info, scene_before, scene_after,
+        job, apontamento_for_pdf, property_info,
+        {**scene_before, **prodes_analysis.collection_info(scene_before['collection_id'])},
+        {**scene_after, **prodes_analysis.collection_info(scene_after['collection_id'])},
         map_before_bytes, map_after_bytes, source_info, footer_notes,
+        ndvi={'before': ndvi_before, 'after': ndvi_after},
     )
 
     png_before_path = f"{cache_prefix}/before.png"

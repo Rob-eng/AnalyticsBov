@@ -68,6 +68,14 @@ _BAND_MAPS = {
 }
 
 
+def collection_info(collection_id: str) -> dict:
+    """{'label': 'Landsat 5', 'resolution_m': 30} da coleção (vazio se desconhecida)."""
+    for row in _COLLECTIONS + [_LANDSAT_LE07]:
+        if row['id'] == collection_id:
+            return {'label': row['label'], 'resolution_m': row['resolution_m']}
+    return {}
+
+
 # ── Seleção de sensor por data ───────────────────────────────────────────────
 
 def _date_in_window(d: date, row: dict) -> bool:
