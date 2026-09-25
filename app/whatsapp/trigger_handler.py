@@ -43,7 +43,7 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             
         if fluxo == 'MERCADO_FUTURO':
             loop = asyncio.get_running_loop()
-            await _handle_mercado_futuro(sender_phone, loop)
+            await _handle_mercado_futuro(sender_phone, loop, uf=parts[1] if len(parts) > 1 else None)
             return
 
         if fluxo == 'LEILAO':
@@ -577,8 +577,8 @@ async def _handle_cotacao(phone, loop):
     send_whatsapp_image(phone, img_bytes, caption)
     print("[WA TRIGGER] Cotação enviada com sucesso!", flush=True)
 
-async def _handle_mercado_futuro(phone, loop):
-    """Pipeline Mercado Futuro → envia tabela via WhatsApp."""
+async def _handle_mercado_futuro(phone, loop, uf=None):
+    """Pipeline Mercado Futuro → envia tabela + curva projetada via WhatsApp."""
     send_whatsapp_text(phone, "🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
     
     from app.scraper import scrape_mercado_futuro
@@ -610,6 +610,16 @@ async def _handle_mercado_futuro(phone, loop):
 
     send_whatsapp_image(phone, img_bytes, caption)
     print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)
+
+    # 5. Curva projetada boi/vaca/novilha (B3 + DATAGRO) — opcional, não bloqueia a tabela
+    try:
+        from app.futures_projection import build_bot_projection
+        proj_path, proj_caption = await loop.run_in_executor(None, lambda: build_bot_projection(uf))
+        with open(proj_path, "rb") as f:
+            send_whatsapp_image(phone, f.read(), proj_caption)
+        print("[WA TRIGGER] Curva projetada enviada com sucesso!", flush=True)
+    except Exception as e:
+        print(f"[WA TRIGGER] Curva projetada indisponível: {e}", flush=True)
 
 
 async def _handle_cda_chart(phone, loop):

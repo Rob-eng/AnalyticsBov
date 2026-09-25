@@ -315,6 +315,35 @@ def get_datagro_latest(
         db.close()
 
 
+@router.post("/ingest/b3-futures")
+async def trigger_b3_futures_ingest(
+    background_tasks: BackgroundTasks,
+    backfill: bool = Query(False, description="Carrega todo o histórico disponível na B3 (~21 pregões)"),
+    api_key: str = Depends(get_api_key),
+):
+    """Coleta os ajustes do Boi Gordo futuro (BGI) na B3 em background."""
+    from app.scraper_b3 import run_b3_futures_cycle, run_b3_futures_backfill
+
+    background_tasks.add_task(run_b3_futures_backfill if backfill else run_b3_futures_cycle)
+    return {"status": "started", "backfill": backfill, "message": "Acompanhe os logs ([B3])."}
+
+
+@router.get("/charts/projection")
+def get_projection_chart(
+    uf: str = Query("MS", description="Praça: BA, GO, MG, MS, MT, PA, RO, SP, TO"),
+    sessions: int = Query(10, ge=1, le=21),
+    api_key: str = Depends(get_api_key),
+):
+    """PNG da curva projetada (boi/vaca/novilha) sobrepondo os últimos pregões."""
+    import tempfile
+    from fastapi.responses import FileResponse
+    from app.futures_projection import load_from_db, generate_projection_chart
+
+    path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+    generate_projection_chart(load_from_db(uf=uf.upper(), sessions=sessions), path)
+    return FileResponse(path, media_type="image/png")
+
+
 @router.post("/ingest/mt")
 async def trigger_mt_ingestion(background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
     """

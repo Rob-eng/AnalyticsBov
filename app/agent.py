@@ -18,10 +18,16 @@ def get_tools_definition():
             "type": "function",
             "function": {
                 "name": "consultar_mercado_futuro",
-                "description": "Busca a cotação futura APENAS do Boi Gordo (BGI) em tempo real da bolsa B3.",
+                "description": "Busca a cotação futura APENAS do Boi Gordo (BGI) em tempo real da bolsa B3 e envia a curva de preço projetada de boi, vaca e novilha para uma praça. Use também quando o usuário pedir 'curva de preço', 'projeção de vaca/novilha' ou o futuro numa UF.",
                 "parameters": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "uf": {
+                            "type": "string",
+                            "enum": ["BA", "GO", "MG", "MS", "MT", "PA", "RO", "SP", "TO"],
+                            "description": "Praça (UF) da curva projetada. Omita se o usuário não citar um estado (padrão MS)."
+                        }
+                    },
                     "required": []
                 }
             }
@@ -249,7 +255,8 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
     print(f"[Agent] IA decidiu rodar a tool: {name} | Args: {arguments}")
     try:
         if name == "consultar_mercado_futuro":
-            return "TRIGGER_FLOW: MERCADO_FUTURO"
+            uf = (arguments or {}).get("uf")
+            return f"TRIGGER_FLOW: MERCADO_FUTURO | {uf}" if uf else "TRIGGER_FLOW: MERCADO_FUTURO"
 
         elif name == "consultar_leilao_cda":
             return "TRIGGER_FLOW: LEILAO"

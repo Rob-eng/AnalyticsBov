@@ -601,8 +601,11 @@ async def cda_ingest_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE, uf: str = None):
     chat_id = str(update.effective_chat.id)
+    # /futuro MT → praça da curva projetada (padrão MS)
+    if uf is None and getattr(context, "args", None):
+        uf = context.args[0]
     _log_tg_activity(update, "MERCADO_FUTURO")
     
     await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
@@ -636,6 +639,15 @@ async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=caption,
             parse_mode='Markdown'
         )
+
+        # 3. Curva projetada boi/vaca/novilha (B3 + DATAGRO) — opcional, não bloqueia a tabela
+        try:
+            from app.futures_projection import build_bot_projection
+            proj_path, proj_caption = await loop.run_in_executor(None, lambda: build_bot_projection(uf))
+            with open(proj_path, 'rb') as f:
+                await update.message.reply_photo(photo=f, caption=proj_caption, parse_mode='Markdown')
+        except Exception as e:
+            print(f"[future_market] Curva projetada indisponível: {e}", flush=True)
 
     except Exception as e:
         print(f"Error in future_market: {e}")
@@ -1737,7 +1749,9 @@ async def _process_text_command(update: Update, context: ContextTypes.DEFAULT_TY
                 await current_analysis(update, context)
                 return ConversationHandler.END
             elif "TRIGGER_FLOW: MERCADO_FUTURO" in resposta_txt:
-                await future_market(update, context)
+                import re
+                uf_match = re.search(r"TRIGGER_FLOW:\s*MERCADO_FUTURO\s*\|\s*([A-Za-z]{2})", resposta_txt)
+                await future_market(update, context, uf=uf_match.group(1) if uf_match else None)
                 return ConversationHandler.END
 
             # Fluxos com coordenadas (NDVI, CLIMA, MDT, HISTORICO)

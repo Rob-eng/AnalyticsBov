@@ -130,6 +130,20 @@ class DatagroQuote(Base):
     collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+class FuturesSettlement(Base):
+    """Ajuste diário de futuros B3 (Boi Gordo BGI) — ver app/scraper_b3.py."""
+    __tablename__ = 'futures_settlements'
+    __table_args__ = (UniqueConstraint('ticker', 'ref_date', name='uq_futures_settlement_ticker_date'),)
+
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String, nullable=False, index=True)       # ex.: BGIV26
+    contract_month = Column(Date, nullable=False)             # 1º dia do mês de vencimento
+    ref_date = Column(Date, nullable=False, index=True)       # data do pregão
+    settle = Column(Float, nullable=False)                    # ajuste R$/@
+    prev_settle = Column(Float, nullable=True)
+    trades = Column(Integer, nullable=True)
+    collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
 class CARCaptchaSession(Base):
     """
     Armazena o estado de uma tentativa de download do SICAR que 
