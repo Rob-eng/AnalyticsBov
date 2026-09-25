@@ -1101,7 +1101,7 @@ def _build_location_picker_text(chat_id: str) -> str:
         locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
         if not locs:
             return ""
-        lines = ["\n📌 *Suas Propriedades (Digite o número):*"]
+        lines = ["\n📌 *Suas Propriedades (digite o número ou o nome):*"]
         for i, loc in enumerate(locs, 1):
             lines.append(f"{i}. {loc.name}")
         return "\n".join(lines) + "\n"
@@ -1118,17 +1118,15 @@ def _resolve_location_input(chat_id: str, query: str):
       chamador decide a mensagem de erro.
     - (None, None, None): não foi possível interpretar a entrada.
     """
-    if query.isdigit():
-        session = SessionLocal()
-        try:
-            from app.models import FavoriteLocation
-            idx = int(query) - 1
-            locs = session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
-            if 0 <= idx < len(locs):
-                return (locs[idx].latitude, locs[idx].longitude, locs[idx].name)
-            return ('NOT_FOUND', query, None)
-        finally:
-            session.close()
+    import re
+    # Número da lista, aceitando pontuação em volta: "1", "1.", "1)", "nº 1", "#1"
+    num_match = re.fullmatch(r"(?:n[º°o]?\.?|#)?\s*(\d{1,3})\s*[.)\-]?", query.strip(), re.IGNORECASE)
+    if num_match:
+        locs = _get_favorite_locations(chat_id)
+        idx = int(num_match.group(1)) - 1
+        if 0 <= idx < len(locs):
+            return (locs[idx].latitude, locs[idx].longitude, locs[idx].name)
+        return ('NOT_FOUND', num_match.group(1), None)
 
     url_coords = extract_coords_from_url(query)
     if url_coords:
@@ -1136,7 +1134,43 @@ def _resolve_location_input(chat_id: str, query: str):
     coords = parse_coordinates(query)
     if coords:
         return (coords[0], coords[1], None)
+
+    # Nome da propriedade salva ("São Geraldo", "fazenda guaviral", "florida ii")
+    loc = _match_favorite_by_name(chat_id, query)
+    if loc:
+        return (loc.latitude, loc.longitude, loc.name)
     return (None, None, None)
+
+
+def _get_favorite_locations(chat_id: str):
+    session = SessionLocal()
+    try:
+        from app.models import FavoriteLocation
+        return session.query(FavoriteLocation).filter_by(user_id=chat_id).order_by(FavoriteLocation.created_at).all()
+    finally:
+        session.close()
+
+
+def _norm_prop_name(text: str) -> str:
+    import re
+    import unicodedata
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    text = re.sub(r"[^a-z0-9 ]", " ", text)
+    text = re.sub(r"^\s*(fazenda|faz|sitio|estancia)\b", " ", text)
+    return " ".join(text.split())
+
+
+def _match_favorite_by_name(chat_id: str, query: str):
+    """Nome exato (normalizado) primeiro; senão, trecho que identifique uma única propriedade."""
+    q = _norm_prop_name(query)
+    if len(q) < 3:
+        return None
+    locs = _get_favorite_locations(chat_id)
+    exact = [l for l in locs if _norm_prop_name(l.name) == q]
+    if exact:
+        return exact[0]
+    partial = [l for l in locs if q in _norm_prop_name(l.name)]
+    return partial[0] if len(partial) == 1 else None
 
 
 async def receive_env_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1422,6 +1456,7 @@ async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_
         await status_msg.edit_text(f"⚠️ Propriedade nº {prop_name_or_err} não encontrada.")
         return WAITING_PRODES_LOCATION
     if lat is None or lon is None:
+        print(f"[PRODES] Entrada não interpretada como coordenada ({chat_id}): {query[:200]!r}", flush=True)
         await status_msg.edit_text(
             "⚠️ Não consegui interpretar as coordenadas. Envie coordenadas decimais ou um link do Google Maps."
         )

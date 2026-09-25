@@ -1,5 +1,6 @@
 import requests
 import re
+from urllib.parse import unquote
 from datetime import datetime
 
 def parse_coordinates(text):
@@ -42,6 +43,15 @@ def parse_coordinates(text):
             results.append(val)
         return results[0], results[1]
 
+    # 3. Tolerante: exatamente dois números decimais em qualquer lugar do texto,
+    #    com ponto ou vírgula decimal e qualquer separador/rótulo em volta.
+    #    Ex.: "-21,4312, -54,7812" · "Lat -21.43 Long -54.78" · "(-21.43, -54.78)"
+    numbers = re.findall(r"-?\d{1,3}[.,]\d+", text)
+    if len(numbers) == 2:
+        lat, lon = (float(n.replace(",", ".")) for n in numbers)
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+
     return None
 
 def extract_coords_from_url(text):
@@ -55,12 +65,14 @@ def extract_coords_from_url(text):
     # 1. Check for long URL patterns
     # Pattern A: @lat,lon,
     # Pattern B: q=lat,lon
+    # Pattern C: query=lat,lon (links "api=1"); vírgula pode vir codificada (%2C)
     patterns = [
         r"@(-?\d+\.\d+),(-?\d+\.\d+)",
-        r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)"
+        r"[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)"
     ]
+    decoded = unquote(text)
     for p in patterns:
-        match = re.search(p, text)
+        match = re.search(p, decoded)
         if match:
             return float(match.group(1)), float(match.group(2))
 
