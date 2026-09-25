@@ -40,6 +40,8 @@ CLAIM_SQL = text("""
     RETURNING id
 """)
 
+MAP_RENDER_VERSION = 'ndvi-v1'
+
 BACKOFF_BASE_SECONDS = 30
 BACKOFF_CAP_SECONDS = 300
 
@@ -184,19 +186,19 @@ async def _process_single_job(job, application):
             # em app/whatsapp/trigger_handler.py (chamadas diretas dentro de handlers async).
             from app.whatsapp.sender import send_whatsapp_image, send_whatsapp_document
             send_whatsapp_image(job.chat_id, BytesIO(result['map_before_png']),
-                                 f"🛰️ Cena ANTES — análise PRODES #{job.id}")
+                                 f"🛰️ Cena ANTES (NDVI) — análise PRODES #{job.id}")
             send_whatsapp_image(job.chat_id, BytesIO(result['map_after_png']),
-                                 f"🛰️ Cena DEPOIS — análise PRODES #{job.id}")
+                                 f"🛰️ Cena DEPOIS (NDVI) — análise PRODES #{job.id}")
             send_whatsapp_document(job.chat_id, BytesIO(result['pdf_bytes']),
                                     filename=f"prodes_relatorio_{job.id}.pdf", caption="📄 Relatório PRODES")
         else:
             await application.bot.send_photo(
                 chat_id=job.chat_id, photo=BytesIO(result['map_before_png']),
-                caption=f"🛰️ Cena ANTES — análise PRODES #{job.id}",
+                caption=f"🛰️ Cena ANTES (NDVI) — análise PRODES #{job.id}",
             )
             await application.bot.send_photo(
                 chat_id=job.chat_id, photo=BytesIO(result['map_after_png']),
-                caption=f"🛰️ Cena DEPOIS — análise PRODES #{job.id}",
+                caption=f"🛰️ Cena DEPOIS (NDVI) — análise PRODES #{job.id}",
             )
             await application.bot.send_document(
                 chat_id=job.chat_id, document=BytesIO(result['pdf_bytes']),
@@ -230,7 +232,9 @@ def _run_job_pipeline(job) -> dict:
     apontamento_geometry = json.loads(job.apontamento_geometry_geojson)
     property_geometry = json.loads(job.car_perimeter_geojson)
 
-    cache_prefix = f"prodes/{job.idempotency_key}"
+    # Sufixo de versão da renderização: muda quando o conteúdo dos mapas muda
+    # (ex.: cor natural → NDVI), para não servir o PNG/PDF antigo do cache.
+    cache_prefix = f"prodes/{job.idempotency_key}/{MAP_RENDER_VERSION}"
     cached_pdf = prodes_storage.download_bytes(f"{cache_prefix}/report.pdf")
     cached_before = prodes_storage.download_bytes(f"{cache_prefix}/before.png")
     cached_after = prodes_storage.download_bytes(f"{cache_prefix}/after.png")
@@ -259,6 +263,22 @@ def _run_job_pipeline(job) -> dict:
     before_png = prodes_analysis.render_scene_visualization(scene_before, property_geometry)
     after_png = prodes_analysis.render_scene_visualization(scene_after, property_geometry)
 
+    # NDVI médio do apontamento dentro do imóvel, nas duas datas (evidência numérica
+    # além da imagem). Falha aqui não derruba o laudo — os mapas saem sem o número.
+    ndvi_before = ndvi_after = None
+    try:
+        from shapely.geometry import shape, mapping
+        target = shape(apontamento_geometry).intersection(shape(property_geometry))
+        target_geojson = mapping(target if not target.is_empty else shape(apontamento_geometry))
+        ndvi_before = prodes_analysis.compute_mean_ndvi(scene_before, target_geojson)
+        ndvi_after = prodes_analysis.compute_mean_ndvi(scene_after, target_geojson)
+    except Exception as e:
+        print(f"[PRODES WORKER] Job #{job.id}: NDVI médio indisponível ({e})", flush=True)
+    ndvi_scale = {
+        'min': prodes_analysis.NDVI_MIN, 'max': prodes_analysis.NDVI_MAX,
+        'palette': prodes_analysis.NDVI_PALETTE,
+    }
+
     # Áreas já vêm calculadas (WFS + shapely) no momento em que o usuário viu
     # a lista (job.area_total_ha/area_intersect_ha, gravadas por
     # find_intersecting_apontamentos) — não recalcula aqui, para o relatório
@@ -269,10 +289,12 @@ def _run_job_pipeline(job) -> dict:
     map_before_bytes = prodes_maps.compose_prodes_map(
         before_png, property_geometry, apontamento_geometry, scene_before,
         area_total_ha, area_intersect_ha, source_info, 'antes', footer_notes,
+        ndvi_info={**ndvi_scale, 'mean': ndvi_before},
     ).getvalue()
     map_after_bytes = prodes_maps.compose_prodes_map(
         after_png, property_geometry, apontamento_geometry, scene_after,
         area_total_ha, area_intersect_ha, source_info, 'depois', footer_notes,
+        ndvi_info={**ndvi_scale, 'mean': ndvi_after, 'before_mean': ndvi_before},
     ).getvalue()
 
     property_info = {

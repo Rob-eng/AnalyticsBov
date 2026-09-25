@@ -12,6 +12,8 @@ from io import BytesIO
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Rectangle, ConnectionPatch
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from shapely.geometry import shape
@@ -82,16 +84,49 @@ def _draw_zebra_frame(ax, n_segments: int = 20, thickness: float = 0.018):
         ax.add_patch(Rectangle((1.0, i * seg_w), thickness, seg_w, **kwargs))
 
 
+# Halo de contraste sob cada contorno: sobre o NDVI (marrom→verde) o vermelho
+# do apontamento some no solo exposto e o amarelo do imóvel no pasto claro.
+_RING_HALO = {'red': 'white', 'yellow': 'black'}
+
+
 def _draw_ring(ax, ring, minx, miny, w, h, color, linewidth):
     xs = [(x - minx) / w for x, y in ring]
     ys = [(y - miny) / h for x, y in ring]
-    ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle='-', zorder=6)
+    halo = _RING_HALO.get(color, 'white')
+    ax.plot(xs, ys, color=color, linewidth=linewidth, linestyle='-', zorder=6,
+            path_effects=[pe.Stroke(linewidth=linewidth + 1.6, foreground=halo), pe.Normal()])
+
+
+def _fmt_ndvi(value) -> str:
+    return f"{value:.2f}".replace('.', ',') if value is not None else '—'
+
+
+def _draw_ndvi_legend(ax_text, y, ndvi_info) -> float:
+    """Barra de cores do NDVI (faixa fixa) na coluna de texto. Devolve o novo y."""
+    cmap = LinearSegmentedColormap.from_list('ndvi', ['#' + c for c in ndvi_info['palette']])
+    bar = ax_text.inset_axes([0.02, y - 0.035, 0.78, 0.03])
+    bar.imshow([[i / 255 for i in range(256)]], aspect='auto', cmap=cmap,
+               extent=[ndvi_info['min'], ndvi_info['max'], 0, 1])
+    bar.set_yticks([])
+    ticks = [ndvi_info['min'], (ndvi_info['min'] + ndvi_info['max']) / 2, ndvi_info['max']]
+    bar.set_xticks(ticks)
+    bar.set_xticklabels([_fmt_ndvi(t) for t in ticks], fontsize=6)
+    bar.tick_params(length=2, pad=1)
+    ax_text.text(0.02, y - 0.085, "solo exposto", fontsize=6, va='top', color='#5a3a07',
+                 transform=ax_text.transAxes)
+    ax_text.text(0.80, y - 0.085, "vegetação densa", fontsize=6, va='top', ha='right',
+                 color='#00502b', transform=ax_text.transAxes)
+    return y - 0.115
 
 
 def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontamento_geometry: dict,
                         scene_meta: dict, area_total_ha: float, area_intersect_ha: float,
-                        source_info: dict, position: str, footer_notes: list = None) -> BytesIO:
+                        source_info: dict, position: str, footer_notes: list = None,
+                        ndvi_info: dict = None) -> BytesIO:
     """
+    ndvi_info (cena em NDVI): {'min', 'max', 'palette', 'mean', 'before_mean'} —
+    'mean' é o NDVI médio no apontamento nesta cena; 'before_mean' (só no
+    mapa "depois") permite mostrar a variação em relação ao "antes".
     Monta um mapa A5 paisagem (210x148mm, 300dpi): cena recortada no
     perímetro (metade esquerda), moldura zebrada com coordenadas em grau e
     minuto, perímetro do imóvel em amarelo / apontamento em vermelho (só
@@ -178,13 +213,24 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
     date_label = scene_meta['date'].strftime('%d/%m/%Y') if scene_meta.get('date') else 'data desconhecida'
     source_label = (source_info or {}).get('label') or 'TerraBrasilis/INPE'
 
+    title = f"Cena NDVI — {position.upper()}" if ndvi_info else f"Cena — {position.upper()}"
     blocks = [
-        (f"Cena — {position.upper()}", 12, 'bold'),
+        (title, 12, 'bold'),
         (date_label, 14, 'bold'),
         (f"Área do apontamento — {area_total_ha:.2f} ha ({area_intersect_ha:.2f} ha dentro do imóvel)", 9, 'normal'),
+    ]
+    if ndvi_info:
+        mean, before = ndvi_info.get('mean'), ndvi_info.get('before_mean')
+        ndvi_line = f"NDVI médio no apontamento: {_fmt_ndvi(mean)}"
+        if before is not None and mean is not None:
+            change = f" ({(mean - before) / before * 100:+.0f}%)".replace('.', ',') if before > 0 else ""
+            ndvi_line += f" — antes {_fmt_ndvi(before)}{change}"
+        blocks.append((ndvi_line, 9, 'bold'))
+    blocks += [
         ("Legenda", 9, 'bold'),
         ("— Perímetro do imóvel (amarelo)", 7.5, 'normal'),
         ("— Apontamento PRODES (vermelho)", 7.5, 'normal'),
+        ("__NDVI_LEGEND__", 0, 'normal'),
         ("Procedência da cena", 9, 'bold'),
         (f"ID: {scene_meta.get('system_index', '—')}", 7.5, 'normal'),
         (f"Coleção: {scene_meta.get('collection_id', '—')}", 7.5, 'normal'),
@@ -195,6 +241,10 @@ def compose_prodes_map(scene_png_bytes: bytes, property_geometry: dict, apontame
 
     y = 0.97
     for text_line, fontsize, weight in blocks:
+        if text_line == "__NDVI_LEGEND__":
+            if ndvi_info:
+                y = _draw_ndvi_legend(ax_text, y, ndvi_info)
+            continue
         for wl in (textwrap.wrap(text_line, width=44) or ['']):
             ax_text.text(0.02, y, wl, fontsize=fontsize, fontweight=weight,
                          va='top', ha='left', transform=ax_text.transAxes)

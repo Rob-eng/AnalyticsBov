@@ -1,7 +1,7 @@
 """
 Lógica de negócio da ferramenta PRODES: seleção de sensor/cena por data,
 leitura de nuvem/cobertura sobre o polígono, regra de "antes"/"depois",
-composição em cor natural, cruzamento espacial com a base PRODES e área
+composição em NDVI (cor natural disponível), cruzamento espacial com a base PRODES e área
 geodésica. Ver prompt_ferramenta_prodes_bot.md (raiz do repo) para as regras
 de negócio completas — este módulo é a implementação delas.
 
@@ -43,6 +43,20 @@ _COLLECTIONS = [
 _LANDSAT_LE07 = {
     'id': 'LANDSAT/LE07/C02/T1_L2', 'start': date(1999, 4, 15), 'end': date(2024, 4, 6),
     'resolution_m': 30, 'label': 'Landsat 7 (SLC-off)', 'slc_off_since': date(2003, 5, 31),
+}
+
+# NDVI = (NIR − Vermelho) / (NIR + Vermelho). Faixa e paleta FIXAS, idênticas
+# em qualquer data — mesma regra da cor natural (nunca realce por percentil),
+# para o antes/depois ser comparável. Marrom = solo exposto, verde = vegetação.
+NDVI_MIN = 0.0
+NDVI_MAX = 0.9
+NDVI_PALETTE = ['8c510a', 'bf812d', 'dfc27d', 'c2e699', '78c679', '31a354', '006837']
+_NDVI_BANDS = {  # (NIR, Vermelho)
+    'LANDSAT/LT05/C02/T1_L2': ('SR_B4', 'SR_B3'),
+    'LANDSAT/LE07/C02/T1_L2': ('SR_B4', 'SR_B3'),
+    'LANDSAT/LC08/C02/T1_L2': ('SR_B5', 'SR_B4'),
+    'LANDSAT/LC09/C02/T1_L2': ('SR_B5', 'SR_B4'),
+    'COPERNICUS/S2_SR_HARMONIZED': ('B8', 'B4'),
 }
 
 _BAND_MAPS = {
@@ -170,13 +184,32 @@ def reflectance_visualize_params(collection_id: str) -> dict:
     }
 
 
+def _scale_to_reflectance(selected, scale_type: str):
+    if scale_type == 'landsat_c2':
+        return selected.multiply(0.0000275).add(-0.2)
+    return selected.divide(10000)  # Sentinel-2 S2_SR_HARMONIZED
+
+
 def _to_reflectance_image(image, collection_id: str):
     """Converte a imagem crua (DN) em reflectância de superfície, pronta para visualize()."""
     params = reflectance_visualize_params(collection_id)
-    selected = image.select(params['bands'])
-    if params['scale_type'] == 'landsat_c2':
-        return selected.multiply(0.0000275).add(-0.2)
-    return selected.divide(10000)  # Sentinel-2 S2_SR_HARMONIZED
+    return _scale_to_reflectance(image.select(params['bands']), params['scale_type'])
+
+
+def ndvi_bands(collection_id: str) -> tuple:
+    """(NIR, Vermelho) da coleção."""
+    bands = _NDVI_BANDS.get(collection_id)
+    if not bands:
+        raise ValueError(f"Coleção não mapeada para NDVI: {collection_id}")
+    return bands
+
+
+def _to_ndvi_image(image, collection_id: str):
+    """NDVI a partir da reflectância de superfície (escala aplicada antes da razão)."""
+    nir, red = ndvi_bands(collection_id)
+    scale_type = _BAND_MAPS[collection_id]['scale_type']
+    refl = _scale_to_reflectance(image.select([nir, red]), scale_type)
+    return refl.normalizedDifference([nir, red]).rename('NDVI')
 
 
 # ── Avaliação de cenas candidatas (chama o GEE) ──────────────────────────────
@@ -345,11 +378,12 @@ def select_before_after_scenes(geometry_geojson: dict, apontamento: dict,
 
 
 def render_scene_visualization(scene_meta: dict, property_geometry_geojson: dict,
-                                dimensions: int = 1600) -> bytes:
+                                dimensions: int = 1600, mode: str = 'ndvi') -> bytes:
     """
-    Gera o PNG (bytes) da cena em cor natural, recortada no perímetro do
-    imóvel com fundo branco fora dele. Realce fixo (reflectância 0-0.35,
-    gamma 0.85), idêntico em qualquer data — nunca por percentil.
+    Gera o PNG (bytes) da cena recortada no perímetro do imóvel, com fundo
+    branco fora dele. mode='ndvi' (padrão): NDVI com faixa/paleta fixas
+    (NDVI_MIN..NDVI_MAX). mode='rgb': cor natural com realce fixo
+    (reflectância 0-0.35, gamma 0.85). Em ambos, idêntico em qualquer data.
     """
     if not initialize_gee():
         raise RuntimeError("Falha ao inicializar o Google Earth Engine.")
@@ -358,9 +392,14 @@ def render_scene_visualization(scene_meta: dict, property_geometry_geojson: dict
     system_index = scene_meta['system_index']
     image = ee.Image(f"{collection_id}/{system_index}")
 
-    refl = _to_reflectance_image(image, collection_id)
-    params = reflectance_visualize_params(collection_id)
-    visualized = refl.visualize(min=params['min'], max=params['max'], gamma=params['gamma'])
+    if mode == 'ndvi':
+        visualized = _to_ndvi_image(image, collection_id).visualize(
+            min=NDVI_MIN, max=NDVI_MAX, palette=NDVI_PALETTE,
+        )
+    else:
+        refl = _to_reflectance_image(image, collection_id)
+        params = reflectance_visualize_params(collection_id)
+        visualized = refl.visualize(min=params['min'], max=params['max'], gamma=params['gamma'])
 
     property_geom = ee.Geometry(property_geometry_geojson)
     region = property_geom.bounds()
@@ -372,6 +411,23 @@ def render_scene_visualization(scene_meta: dict, property_geometry_geojson: dict
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
     return resp.content
+
+
+def compute_mean_ndvi(scene_meta: dict, geometry_geojson: dict):
+    """NDVI médio da cena dentro da geometria (ex.: apontamento ∩ imóvel). None se sem pixels."""
+    if not initialize_gee():
+        raise RuntimeError("Falha ao inicializar o Google Earth Engine.")
+    collection_id = scene_meta['collection_id']
+    image = ee.Image(f"{collection_id}/{scene_meta['system_index']}")
+    scale = 10 if collection_id.startswith('COPERNICUS/S2') else 30
+    value = (
+        _to_ndvi_image(image, collection_id)
+        .reduceRegion(reducer=ee.Reducer.mean(), geometry=ee.Geometry(geometry_geojson),
+                      scale=scale, maxPixels=1e9, bestEffort=True)
+        .get('NDVI')
+        .getInfo()
+    )
+    return float(value) if value is not None else None
 
 
 # ── Cruzamento espacial com a base PRODES (consulta AO VIVO via WFS) ────────
@@ -599,6 +655,12 @@ def build_footer_notes(scenes_result: dict, source_info: dict) -> list:
     queried_at = (source_info or {}).get('queried_at')
     queried_str = queried_at.strftime('%d/%m/%Y %H:%M UTC') if queried_at else 'data não registrada'
     notes.append(f"Base PRODES/INPE: {label}, consultada ao vivo em {queried_str}.")
+    ndvi_range = f"{NDVI_MIN:.1f} a {NDVI_MAX:.1f}".replace('.', ',')
+    notes.append(
+        "Cenas em NDVI = (NIR − Vermelho) / (NIR + Vermelho), sobre reflectância de superfície, "
+        f"com a mesma escala fixa ({ndvi_range}) nas duas datas: tons marrons "
+        "indicam solo exposto e tons verdes, vegetação."
+    )
     notes.append(
         "Trabalho realizado em EPSG:4674 (SIRGAS 2000). O Google Earth Engine opera em "
         "WGS 84; a diferença é submétrica e irrelevante para esta análise."

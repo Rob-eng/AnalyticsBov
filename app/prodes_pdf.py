@@ -107,10 +107,10 @@ def build_prodes_report(job, apontamento: dict, property_info: dict,
     # ── Mapas ────────────────────────────────────────────────────────────────
     map_width = 165 * mm
     map_height = map_width * (148 / 210)
-    story.append(Paragraph("Mapa — cena ANTES", h2_style))
+    story.append(Paragraph("Mapa — cena ANTES (NDVI)", h2_style))
     story.append(RLImage(BytesIO(map_before_png), width=map_width, height=map_height))
     story.append(Spacer(1, 8))
-    story.append(Paragraph("Mapa — cena DEPOIS", h2_style))
+    story.append(Paragraph("Mapa — cena DEPOIS (NDVI)", h2_style))
     story.append(RLImage(BytesIO(map_after_png), width=map_width, height=map_height))
     story.append(Spacer(1, 10))
 

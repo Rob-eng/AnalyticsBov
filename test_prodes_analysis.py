@@ -18,6 +18,7 @@ from app.prodes_analysis import (
     select_before_after_scenes,
     geodesic_area_ha,
     reflectance_visualize_params,
+    ndvi_bands,
     LEGAL_CONSOLIDATION_MARK,
     _parse_flexible_date,
 )
@@ -107,6 +108,23 @@ class TestReflectanceVisualizeParams(unittest.TestCase):
     def test_unknown_collection_raises(self):
         with self.assertRaises(ValueError):
             reflectance_visualize_params('UNKNOWN/COLLECTION')
+
+
+class TestNdviBands(unittest.TestCase):
+    def test_landsat5_and_7_nir_red(self):
+        self.assertEqual(ndvi_bands('LANDSAT/LT05/C02/T1_L2'), ('SR_B4', 'SR_B3'))
+        self.assertEqual(ndvi_bands('LANDSAT/LE07/C02/T1_L2'), ('SR_B4', 'SR_B3'))
+
+    def test_landsat8_and_9_nir_red(self):
+        self.assertEqual(ndvi_bands('LANDSAT/LC08/C02/T1_L2'), ('SR_B5', 'SR_B4'))
+        self.assertEqual(ndvi_bands('LANDSAT/LC09/C02/T1_L2'), ('SR_B5', 'SR_B4'))
+
+    def test_sentinel2_nir_red(self):
+        self.assertEqual(ndvi_bands('COPERNICUS/S2_SR_HARMONIZED'), ('B8', 'B4'))
+
+    def test_unknown_collection_raises(self):
+        with self.assertRaises(ValueError):
+            ndvi_bands('UNKNOWN/COLLECTION')
 
 
 class TestSelectBeforeAfterScenes(unittest.TestCase):
