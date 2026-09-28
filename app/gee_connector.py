@@ -95,7 +95,14 @@ def get_ndvi_image(geometry_geojson):
                 scale=20,  # SCL is 20m resolution
                 maxPixels=1e8
             )
-            cloud_fraction = ee.Number(cloud_stat.get('SCL')).multiply(100)
+            # Cena sem nenhum pixel sobre o polígono (footprint errado no catálogo —
+            # ex.: tile T39WXT do norte da Rússia voltando no filterBounds do MS) dá
+            # média nula; sem este guard o .multiply(null) derruba a coleção inteira.
+            # Tratada como 100% nuvem, ela sai no filtro abaixo.
+            stat = cloud_stat.get('SCL')
+            cloud_fraction = ee.Algorithms.If(
+                ee.Algorithms.IsEqual(stat, None), 100, ee.Number(stat).multiply(100)
+            )
             return img.set('cloud_fraction_polygon', cloud_fraction)
         
         # Map and filter: keep only images with < 15% cloud IN the polygon
