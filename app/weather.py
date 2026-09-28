@@ -228,7 +228,10 @@ def generate_weather_map_with_title(lat, lon, title=None):
         resp = requests.get(map_url, timeout=15)
         if resp.status_code != 200:
             return None
-        img = plt.imread(BytesIO(resp.content), format='png')
+        # O Yandex responde em JPEG (antes era PNG) — PIL detecta o formato sozinho.
+        from PIL import Image as PILImage
+        import numpy as np
+        img = np.asarray(PILImage.open(BytesIO(resp.content)).convert('RGB'))
         
         fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
         ax.imshow(img)

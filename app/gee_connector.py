@@ -289,15 +289,19 @@ def get_precipitation_heatmap(lat, lon):
         def daily_total(offset):
             d = start_date_ee.advance(offset, 'day')
             daily = collection.filterDate(d, d.advance(1, 'day'))
+            # Dia sem imagens (latência do GPM na borda da janela) viraria uma imagem
+            # sem bandas e o .multiply quebraria o thumbnail inteiro — marca e descarta.
             # sum of mm/hr × 0.5hr = total mm for the day
-            return (daily.reduce(ee.Reducer.sum())
-                         .multiply(0.5)
-                         .rename('precipitation')
-                         .set('system:time_start', d.millis()))
+            return ee.Image(ee.Algorithms.If(
+                daily.size().gt(0),
+                daily.reduce(ee.Reducer.sum()).multiply(0.5).rename('precipitation')
+                     .set('system:time_start', d.millis(), 'n_images', daily.size()),
+                ee.Image.constant(0).rename('precipitation').set('n_images', 0),
+            ))
 
         daily_col = ee.ImageCollection(
             ee.List.sequence(0, n_days - 1).map(daily_total)
-        )
+        ).filter(ee.Filter.gt('n_images', 0))
         total_precip = daily_col.reduce(ee.Reducer.sum())
 
         print("Daily aggregation done. Getting thumbnail URL...", flush=True)
