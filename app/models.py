@@ -20,6 +20,7 @@ class User(Base):
     stripe_subscription_id = Column(String, nullable=True)
     trial_expires_at = Column(DateTime, nullable=True)  # Data de expiração do trial/promo grátis
     last_message_at = Column(DateTime, nullable=True)   # Última vez que o usuário enviou mensagem (WA 24h window)
+    trial_notice_stage = Column(Integer, default=0)     # Aviso de fim de teste já enviado: 0 nenhum, 1 = D-3, 2 = no dia
 
     
     locations = relationship("FavoriteLocation", backref="user", cascade="all, delete-orphan")
@@ -289,6 +290,7 @@ def init_db():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_expires_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP;"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_notice_stage INTEGER DEFAULT 0;"))
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))

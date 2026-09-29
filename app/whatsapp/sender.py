@@ -467,10 +467,12 @@ def is_within_session_window(last_message_at) -> bool:
 
 
 def send_whatsapp_template(to_phone: str, template_name: str, body_params: dict = None,
-                           header_image_id: str = None, language: str = "pt_BR") -> bool:
+                           header_image_id: str = None, language: str = "pt_BR",
+                           button_url_suffix: str = None) -> bool:
     """
     Envia um template aprovado. body_params: {nome_do_parametro: valor} — a ordem
     não importa (parâmetros nomeados). header_image_id: media_id já enviado via _upload_media.
+    button_url_suffix: parte variável do 1º botão de URL (ex.: "PRO_MONTHLY/5567...").
     """
     if not _check_credentials():
         return False
@@ -488,6 +490,12 @@ def send_whatsapp_template(to_phone: str, template_name: str, body_params: dict 
                 {"type": "text", "parameter_name": name, "text": str(value)[:1024] or "-"}
                 for name, value in body_params.items()
             ],
+        })
+
+    if button_url_suffix:
+        components.append({
+            "type": "button", "sub_type": "url", "index": "0",
+            "parameters": [{"type": "text", "text": button_url_suffix}],
         })
 
     payload = {
@@ -521,3 +529,30 @@ def send_whatsapp_market_template(to_phone: str, media_id: str, variables: list 
     template_name = os.getenv("WHATSAPP_MARKET_TEMPLATE_NAME", "alerta_cotacao_semanal")
     params = dict(zip(MARKET_TEMPLATE_PARAMS, variables or []))
     return send_whatsapp_template(to_phone, template_name, params, header_image_id=media_id)
+
+
+def _get_last_message_at(chat_id: str):
+    from app.models import SessionLocal, User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(chat_id=str(chat_id)).first()
+        return user.last_message_at if user else None
+    finally:
+        db.close()
+
+
+def send_whatsapp_text_or_template(to_phone: str, text: str, template_name: str,
+                                   template_params: dict = None, button_url_suffix: str = None) -> bool:
+    """
+    Mensagem proativa (não é resposta a algo que o usuário acabou de pedir):
+    dentro da janela de 24h manda o texto livre; fora dela, o template aprovado
+    equivalente. Se o texto livre falhar mesmo dentro da janela, tenta o template.
+    """
+    if is_within_session_window(_get_last_message_at(to_phone)):
+        if send_whatsapp_text(to_phone, text):
+            return True
+        print(f"[WA] Texto livre falhou para {to_phone} → template '{template_name}'", flush=True)
+    else:
+        print(f"[WA] Janela de 24h fechada para {to_phone} → template '{template_name}'", flush=True)
+    return send_whatsapp_template(to_phone, template_name, template_params,
+                                  button_url_suffix=button_url_suffix)

@@ -142,6 +142,28 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
+    # ── Avisos de fim do período de teste (09:00 local) ────────────────────
+    async def trial_notices_job():
+        from app.saas.trial import run_trial_notices
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, run_trial_notices)
+        except Exception as e:
+            import traceback
+            print(f"[Scheduler] ❌ Trial notices FAILED: {traceback.format_exc()}", flush=True)
+            try:
+                from app.notifications import notify_admin
+                notify_admin(f"❌ *Falha nos avisos de fim de teste*\n\nErro: `{e}`")
+            except Exception:
+                pass
+
+    scheduler.add_job(
+        trial_notices_job,
+        CronTrigger(hour=9, minute=0, timezone=USER_TZ),
+        id='trial_notices',
+        replace_existing=True,
+    )
+
     # ── Health probes a cada 30 minutos ──────────────────────────────────
     async def health_probe_job():
         try:
@@ -184,7 +206,7 @@ def setup_scheduler(application):
         f"✓ Scheduler configured (tz={USER_TZ}): "
         "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) "
         "+ cda_daily_ingest (daily 05:30) + datagro_daily_ingest (08:00/20:00) "
-        "+ b3_futures_ingest (Mon-Fri 21:00) "
+        "+ b3_futures_ingest (Mon-Fri 21:00) + trial_notices (daily 09:00) "
         "+ health_probes (every 30min) "
         f"+ prodes_job_poll (every {Config.PRODES_POLL_INTERVAL_SECONDS}s)",
         flush=True

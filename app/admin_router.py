@@ -702,8 +702,10 @@ async def send_message_to_user(
 
     try:
         if platform == "whatsapp":
-            from app.whatsapp.sender import send_whatsapp_text
-            success = send_whatsapp_text(str(chat_id), message)
+            from app.whatsapp.sender import send_whatsapp_text_or_template
+            success = send_whatsapp_text_or_template(
+                str(chat_id), message, template_name="mensagem_equipe", template_params={"mensagem": message},
+            )
             if success:
                 return {"status": "success", "platform": "whatsapp", "message": "Mensagem enviada!"}
             else:

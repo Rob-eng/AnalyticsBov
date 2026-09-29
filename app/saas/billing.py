@@ -137,6 +137,7 @@ async def stripe_webhook(request: Request):
                     old_plan = user.plan_type
                     user.plan_type = plan
                     user.stripe_subscription_id = sub_id
+                    user.trial_expires_at = None  # assinou: sem avisos de fim de teste
                     db.commit()
                     logging.info(f"✅ Usuário {chat_id} promovido de {old_plan} para {plan}!")
 
@@ -147,8 +148,10 @@ async def stripe_webhook(request: Request):
                         plan_display = plan_names.get(plan, plan)
 
                         if user_platform == 'whatsapp':
-                            from app.whatsapp.sender import send_whatsapp_text
-                            send_whatsapp_text(
+                            # O pagamento pode acontecer horas depois da última conversa —
+                            # fora da janela de 24h só o template é entregue.
+                            from app.whatsapp.sender import send_whatsapp_text_or_template
+                            send_whatsapp_text_or_template(
                                 str(chat_id),
                                 f"🎉 *Pagamento confirmado!*\n\n"
                                 f"Seu plano foi atualizado para *{plan_display}*.\n"
@@ -156,8 +159,11 @@ async def stripe_webhook(request: Request):
                                 f"🌿 Alertas NDVI automáticos\n"
                                 f"📊 Relatório semanal de cotação\n"
                                 f"🏔️ MDT 3D e mais\n\n"
-                                f"Obrigado por assinar o Agro Analytics! 🐂"
+                                f"Obrigado por assinar o Agro Analytics! 🐂",
+                                template_name="confirmacao_assinatura",
+                                template_params={"plano": plan_display},
                             )
+
                         logging.info(f"✅ Notificação de upgrade enviada para {chat_id}")
                     except Exception as notify_err:
                         logging.warning(f"Notificação de upgrade falhou para {chat_id}: {notify_err}")
