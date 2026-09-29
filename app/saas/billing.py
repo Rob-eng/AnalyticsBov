@@ -138,6 +138,7 @@ async def stripe_webhook(request: Request):
                     user.plan_type = plan
                     user.stripe_subscription_id = sub_id
                     user.trial_expires_at = None  # assinou: sem avisos de fim de teste
+                    user.trial_notice_stage = 0
                     db.commit()
                     logging.info(f"✅ Usuário {chat_id} promovido de {old_plan} para {plan}!")
 
@@ -174,6 +175,24 @@ async def stripe_webhook(request: Request):
                 db.rollback()
             finally:
                 db.close()
+
+    elif event_type == 'customer.subscription.deleted':
+        # Assinatura encerrada (fim do período cancelado ou cobrança desistida pelo Stripe)
+        sub = event.get('data', {}).get('object', {}) if isinstance(event, dict) else event['data']['object']
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter_by(stripe_subscription_id=sub.get('id')).first()
+            if user:
+                from datetime import datetime
+                from app.saas.trial import downgrade_to_free
+                downgrade_to_free(user, datetime.utcnow().strftime('%d/%m/%Y'))
+                db.commit()
+                logging.info(f"✅ Assinatura {sub.get('id')} encerrada: {user.chat_id} voltou para FREE")
+        except Exception as e:
+            logging.error(f"Database error on subscription.deleted: {e}")
+            db.rollback()
+        finally:
+            db.close()
 
     return {"status": "success"}
 

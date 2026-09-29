@@ -114,7 +114,7 @@ def generate_chart(data):
     
     # --- STYLING ---
     
-    plt.title('🐂 Preço da @ em Dólar 📊', fontsize=26, fontweight='bold', 
+    plt.title('Preço da @ em Dólar', fontsize=26, fontweight='bold', 
               color=TEXT_COLOR, loc='center', pad=50) # TITLE
     
     ax.yaxis.tick_right()
@@ -218,7 +218,7 @@ def generate_future_table(data_dict):
     ax.axis('off')
     
     # Title
-    plt.title(f'🔮 Mercado Futuro do Boi Gordo 🐂\n{date_info}', 
+    plt.title(f'Mercado Futuro do Boi Gordo\n{date_info}', 
               fontsize=20, fontweight='bold', color=TEXT_COLOR, pad=20)
     
     # Create Table
@@ -326,7 +326,7 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
     ax.set_facecolor(BG_COLOR)
     
     # Title
-    plt.title(f'🌧️ {title}', fontsize=20, fontweight='bold', color=TEXT_COLOR, pad=20)
+    plt.title(f'{title}', fontsize=20, fontweight='bold', color=TEXT_COLOR, pad=20)
     
     # Bars
     bars = ax.bar(dates, values, color=BAR_COLOR, alpha=0.9, width=0.6, edgecolor='white', linewidth=1, zorder=3)
