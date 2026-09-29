@@ -444,112 +444,80 @@ def send_whatsapp_menu(to_phone: str):
         print(f"✅ WA Menu enviado para {to_phone}", flush=True)
     return success
 
-def send_whatsapp_template_alert(to_phone: str, media_id: str, prop_nome: str, data_str: str, ndvi_val: str):
+# ── Templates (únicas mensagens entregues fora da janela de 24h) ─────────────
+#
+# Os templates aprovados na Meta usam parâmetros NOMEADOS ({{prop_nome}}...).
+# Nesse formato a Cloud API exige "parameter_name" em cada parâmetro — sem ele
+# responde (#100) "Parameter name is missing or empty" e nada é entregue.
+# Os nomes abaixo espelham exatamente os templates cadastrados na Meta.
+
+NDVI_TEMPLATE_PARAMS = ("prop_nome", "data_imagem", "ndvi_medio")
+MARKET_TEMPLATE_PARAMS = (
+    "data_cotacao", "preco_china", "preco_eua", "preco_irlanda", "preco_argentina",
+    "preco_australia", "preco_uruguai", "preco_paraguai", "preco_brasil",
+)
+
+WA_SESSION_WINDOW_HOURS = 23  # margem de 1h sobre as 24h da Meta
+
+
+def is_within_session_window(last_message_at) -> bool:
+    """True se o usuário mandou mensagem há menos de ~24h (texto livre é entregue)."""
+    from datetime import datetime, timedelta
+    return last_message_at is not None and (datetime.utcnow() - last_message_at) < timedelta(hours=WA_SESSION_WINDOW_HOURS)
+
+
+def send_whatsapp_template(to_phone: str, template_name: str, body_params: dict = None,
+                           header_image_id: str = None, language: str = "pt_BR") -> bool:
     """
-    Envia um Message Template contendo mídia e variáveis, usado para alertas fora da janela de 24h.
-    O template 'alerta_ndvi_satelite' precisa estar criado e aprovado na Meta Business Suite.
+    Envia um template aprovado. body_params: {nome_do_parametro: valor} — a ordem
+    não importa (parâmetros nomeados). header_image_id: media_id já enviado via _upload_media.
     """
     if not _check_credentials():
         return False
 
-    template_name = os.getenv("WHATSAPP_NDVI_TEMPLATE_NAME", "alerta_ndvi_satelite")
+    components = []
+    if header_image_id:
+        components.append({
+            "type": "header",
+            "parameters": [{"type": "image", "image": {"id": header_image_id}}],
+        })
+    if body_params:
+        components.append({
+            "type": "body",
+            "parameters": [
+                {"type": "text", "parameter_name": name, "text": str(value)[:1024] or "-"}
+                for name, value in body_params.items()
+            ],
+        })
 
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": to_phone,
         "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {
-                "code": "pt_BR"
-            },
-            "components": [
-                {
-                    "type": "header",
-                    "parameters": [
-                        {
-                            "type": "image",
-                            "image": {
-                                "id": media_id
-                            }
-                        }
-                    ]
-                },
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "text": str(prop_nome)[:128]
-                        },
-                        {
-                            "type": "text",
-                            "text": str(data_str)[:128]
-                        },
-                        {
-                            "type": "text",
-                            "text": str(ndvi_val)[:128]
-                        }
-                    ]
-                }
-            ]
-        }
+        "template": {"name": template_name, "language": {"code": language}, "components": components},
     }
-
     success = _send_message(payload)
     if success:
-        print(f"✅ WA template enviado para {to_phone}", flush=True)
+        print(f"✅ WA template '{template_name}' enviado para {to_phone}", flush=True)
     return success
+
+
+def send_whatsapp_template_alert(to_phone: str, media_id: str, prop_nome: str, data_str: str, ndvi_val: str):
+    """Alerta NDVI fora da janela de 24h (template 'alerta_ndvi_satelite', header com imagem)."""
+    template_name = os.getenv("WHATSAPP_NDVI_TEMPLATE_NAME", "alerta_ndvi_satelite")
+    values = (prop_nome, data_str, ndvi_val)
+    return send_whatsapp_template(
+        to_phone, template_name, dict(zip(NDVI_TEMPLATE_PARAMS, values)), header_image_id=media_id,
+    )
+
 
 def send_whatsapp_market_template(to_phone: str, media_id: str, variables: list = None):
     """
-    Envia um Message Template para o relatório de mercado semanal.
-    O template 'alerta_cotacao_semanal' deve ter um Header de Mídia (Imagem) e variáveis de texto no Corpo.
+    Relatório semanal de cotação fora da janela (template 'alerta_cotacao_semanal').
+    variables: valores na ordem de MARKET_TEMPLATE_PARAMS (data, China, EUA, Irlanda,
+    Argentina, Austrália, Uruguai, Paraguai, Brasil).
     """
-    if not _check_credentials():
-        return False
-
     template_name = os.getenv("WHATSAPP_MARKET_TEMPLATE_NAME", "alerta_cotacao_semanal")
-
-    parameters = []
-    if variables:
-        for var in variables:
-            parameters.append({"type": "text", "text": str(var)[:32768]})
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {
-                "code": "pt_BR"
-            },
-            "components": [
-                {
-                    "type": "header",
-                    "parameters": [
-                        {
-                            "type": "image",
-                            "image": {
-                                "id": media_id
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-    }
-    
-    if parameters:
-        payload["template"]["components"].append({
-            "type": "body",
-            "parameters": parameters
-        })
-
-    success = _send_message(payload)
-    if success:
-        print(f"✅ WA Market template enviado para {to_phone}", flush=True)
-    return success
+    params = dict(zip(MARKET_TEMPLATE_PARAMS, variables or []))
+    return send_whatsapp_template(to_phone, template_name, params, header_image_id=media_id)
