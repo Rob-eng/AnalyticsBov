@@ -368,6 +368,8 @@ def scrape_mercado_futuro():
                 break
         
         if not target_table:
+            print(f"[SCOT] Tabela do mercado futuro não encontrada (HTTP {response.status_code}, "
+                  f"{len(response.content)} bytes)", flush=True)
             return None
 
         # Extract date (usually in a span or paragraph above/below)
@@ -423,4 +425,26 @@ def scrape_mercado_futuro():
 
     except Exception as e:
         print(f"Error scraping mercado futuro: {e}")
+        return None
+
+
+def get_futures_table():
+    """
+    Tabela do Mercado Futuro para o bot: Scot Consultoria (2 tentativas);
+    se indisponível, ajustes B3 gravados no banco. None se nenhuma fonte responder.
+    """
+    import time
+    for attempt in (1, 2):
+        data = scrape_mercado_futuro()
+        if data and data.get('rows'):
+            data['source'] = "Scot Consultoria"
+            return data
+        if attempt == 1:
+            time.sleep(2)
+    print("[FUTURO] Scot indisponível — usando ajustes B3 do banco", flush=True)
+    try:
+        from app.scraper_b3 import load_b3_futures_table
+        return load_b3_futures_table()
+    except Exception as e:
+        print(f"[FUTURO] Tabela B3 indisponível: {e}", flush=True)
         return None

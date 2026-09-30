@@ -25,7 +25,7 @@ def get_tools_definition():
                         "uf": {
                             "type": "string",
                             "enum": ["BA", "GO", "MG", "MS", "MT", "PA", "RO", "SP", "TO"],
-                            "description": "Praça (UF) da curva projetada. Omita se o usuário não citar um estado (padrão MS)."
+                            "description": "Praça (UF) da curva projetada. Parâmetro OPCIONAL: se o usuário não citou um estado, NÃO pergunte — omita e o padrão MS é usado."
                         }
                     },
                     "required": []
@@ -442,7 +442,10 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "SUAS REGRAS DE OURO:\n"
             "1. NÃO ofereça cotação de Milho/Soja. Atenda exclusivamente pecuaristas (BOI GORDO).\n"
             "2. Responda amigavelmente (Use CADASTRADO como 'Patrão', SEMPRE chame o usuário de Patrão). Resuma listas B3.\n"
-            "3. Use `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro` para cotações.\n"
+            "3. Use `obter_cotacao_fisica_atual` ou `consultar_mercado_futuro` para cotações. "
+            "Pedido de 'futuro', 'mercado futuro', 'B3' ou 'curva de preço': chame `consultar_mercado_futuro` "
+            "IMEDIATAMENTE, SEM perguntar a UF — se o Patrão não citou um estado, chame sem o parâmetro 'uf' "
+            "(o padrão é MS). Só passe 'uf' quando ele citar o estado.\n"
             "4. Se o produtor pedir Previsão de Chuva, NDVI ou MDT (Terreno):\n"
             "   - Use as ferramentas correspondentes (`verificar_previsao_chuva` ou `analisar_saude_pasto_ndvi`).\n"
             "5. Se o produtor perguntar sobre Preços, Planos, Assinatura ou 'qual meu plano':\n"

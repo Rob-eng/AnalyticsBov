@@ -607,51 +607,41 @@ async def future_market(update: Update, context: ContextTypes.DEFAULT_TYPE, uf: 
     if uf is None and getattr(context, "args", None):
         uf = context.args[0]
     _log_tg_activity(update, "MERCADO_FUTURO")
-    
-    await update.message.reply_text("🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
-    
+
+    await update.message.reply_text("🔮 Buscando o Mercado Futuro do Boi Gordo... Aguarde.")
+    loop = asyncio.get_running_loop()
+    sent_any = False
+
+    # 1-2. Tabela: Scot Consultoria, ou ajustes B3 se a Scot estiver fora.
+    # Falha aqui não impede a curva projetada (dados próprios da B3/DATAGRO).
     try:
-        from app.scraper import scrape_mercado_futuro
-        
-        loop = asyncio.get_running_loop()
-        # 1. Scrape data
-        data_dict = await loop.run_in_executor(None, scrape_mercado_futuro)
-        
-        if not data_dict:
-             await update.message.reply_text("⚠️ Não foi possível coletar os dados do Mercado Futuro no momento.")
-             return
-
-        # 2. Generate table image
-        chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict))
-        
-        if not chart_path:
-             await update.message.reply_text("⚠️ Erro ao gerar a tabela do Mercado Futuro.")
-             return
-
-        caption = (
-            "🔮 *Mercado Futuro - Boi Gordo*\n\n"
-            "Valores para os próximos vencimentos obtidos agora.\n\n"
-            "*Fonte:* Scot Consultoria"
-        )
-        
-        await update.message.reply_photo(
-            photo=open(chart_path, 'rb'),
-            caption=caption,
-            parse_mode='Markdown'
-        )
-
-        # 3. Curva projetada boi/vaca/novilha (B3 + DATAGRO) — opcional, não bloqueia a tabela
-        try:
-            from app.futures_projection import build_bot_projection
-            proj_path, proj_caption = await loop.run_in_executor(None, lambda: build_bot_projection(uf))
-            with open(proj_path, 'rb') as f:
-                await update.message.reply_photo(photo=f, caption=proj_caption, parse_mode='Markdown')
-        except Exception as e:
-            print(f"[future_market] Curva projetada indisponível: {e}", flush=True)
-
+        from app.scraper import get_futures_table
+        data_dict = await loop.run_in_executor(None, get_futures_table)
+        chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict)) if data_dict else None
+        if chart_path:
+            caption = (
+                "🔮 *Mercado Futuro - Boi Gordo*\n\n"
+                "Valores para os próximos vencimentos.\n\n"
+                f"*Fonte:* {data_dict.get('source', 'Scot Consultoria')}"
+            )
+            with open(chart_path, 'rb') as f:
+                await update.message.reply_photo(photo=f, caption=caption, parse_mode='Markdown')
+            sent_any = True
     except Exception as e:
-        print(f"Error in future_market: {e}")
-        await update.message.reply_text("❌ Ocorreu um erro ao processar sua solicitação.")
+        print(f"Error in future_market (tabela): {e}", flush=True)
+
+    # 3. Curva projetada boi/vaca/novilha (B3 + DATAGRO)
+    try:
+        from app.futures_projection import build_bot_projection
+        proj_path, proj_caption = await loop.run_in_executor(None, lambda: build_bot_projection(uf))
+        with open(proj_path, 'rb') as f:
+            await update.message.reply_photo(photo=f, caption=proj_caption, parse_mode='Markdown')
+        sent_any = True
+    except Exception as e:
+        print(f"[future_market] Curva projetada indisponível: {e}", flush=True)
+
+    if not sent_any:
+        await update.message.reply_text("⚠️ Não consegui buscar o Mercado Futuro agora. Tente novamente em alguns minutos.")
 
 async def sync_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)

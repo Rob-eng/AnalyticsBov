@@ -261,18 +261,15 @@ def generate_future_table(data_dict):
                     clean_val = text_val.replace(',', '.').replace('%', '').strip()
                     val = float(clean_val)
                     
+                    # Variação é em R$/@ (ajuste atual − anterior), não em %
                     if val > 0:
-                        cell.get_text().set_color('#00FF00') # Vibrant Green
-                        if '%' not in text_val:
-                            cell.get_text().set_text(f"+{text_val}%")
+                        cell.get_text().set_color('#1a9641')
+                        if not text_val.startswith('+'):
+                            cell.get_text().set_text(f"+{text_val}")
                     elif val < 0:
-                        cell.get_text().set_color('#FF4444') # Vibrant Red
-                        if '%' not in text_val:
-                            cell.get_text().set_text(f"{text_val}%")
+                        cell.get_text().set_color('#d7191c')
                     else:
                         cell.get_text().set_color(TEXT_COLOR)
-                        if '%' not in text_val:
-                            cell.get_text().set_text(f"{text_val}%")
                 except:
                     cell.get_text().set_color(TEXT_COLOR)
             else:
@@ -292,7 +289,7 @@ def generate_future_table(data_dict):
             pass
             
     # Source Footnote
-    plt.figtext(0.5, 0.05, "Fonte: Scot Consultoria", 
+    plt.figtext(0.5, 0.05, f"Fonte: {data_dict.get('source') or 'Scot Consultoria'}", 
                 ha='center', fontsize=10, color='#AAAAAA', style='italic')
 
     output_path = '/tmp/future_table.png'

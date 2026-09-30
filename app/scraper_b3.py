@@ -127,3 +127,43 @@ def run_b3_futures_cycle(days_back: int = 3) -> dict:
 
 def run_b3_futures_backfill() -> dict:
     return run_b3_futures_cycle(days_back=HISTORY_DAYS + 10)
+
+
+_MES_PT = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+
+def load_b3_futures_table(max_rows: int = 9):
+    """
+    Tabela do Mercado Futuro no formato de generate_future_table, a partir dos
+    ajustes B3 gravados (último pregão). Usada quando a Scot está indisponível.
+    """
+    from app.models import SessionLocal, FuturesSettlement
+
+    def br(v, d=2):
+        return f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".") if v is not None else "—"
+
+    db = SessionLocal()
+    try:
+        last = db.query(FuturesSettlement.ref_date).order_by(FuturesSettlement.ref_date.desc()).first()
+        if not last:
+            return None
+        rows = (db.query(FuturesSettlement).filter(FuturesSettlement.ref_date == last[0])
+                .order_by(FuturesSettlement.contract_month).limit(max_rows).all())
+    finally:
+        db.close()
+
+    table = []
+    for r in rows:
+        var = r.settle - r.prev_settle if r.prev_settle is not None else None
+        table.append([
+            f"{_MES_PT[r.contract_month.month]}/{r.contract_month.year % 100}",
+            br(r.settle), br(r.prev_settle),
+            (f"{'+' if var > 0 else ''}{br(var)}" if var is not None else "—"),
+            str(r.trades or 0),
+        ])
+    return {
+        'date_raw': f"Ajustes B3 — pregão de {last[0].strftime('%d/%m/%Y')}",
+        'headers': ["Vencimento", "Ajuste (R$/@)", "Ajuste anterior", "Variação (R$/@)", "Negócios"],
+        'rows': table,
+        'source': "B3 (ajustes do Boi Gordo BGI)",
+    }

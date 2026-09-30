@@ -578,38 +578,29 @@ async def _handle_cotacao(phone, loop):
     print("[WA TRIGGER] Cotação enviada com sucesso!", flush=True)
 
 async def _handle_mercado_futuro(phone, loop, uf=None):
-    """Pipeline Mercado Futuro → envia tabela + curva projetada via WhatsApp."""
-    send_whatsapp_text(phone, "🔮 Coletando dados do Mercado Futuro (Scot Consultoria)... Aguarde.")
-    
-    from app.scraper import scrape_mercado_futuro
+    """Pipeline Mercado Futuro → tabela (Scot, ou B3 de reserva) + curva projetada via WhatsApp."""
+    send_whatsapp_text(phone, "🔮 Buscando o Mercado Futuro do Boi Gordo... Aguarde.")
+
+    from app.scraper import get_futures_table
     from app.charts import generate_future_table
-    
-    # 1. Scrape data
-    data_dict = await loop.run_in_executor(None, scrape_mercado_futuro)
-    if not data_dict:
-        send_whatsapp_text(phone, "⚠️ Não foi possível coletar os dados do Mercado Futuro no momento.")
-        return
 
-    # 2. Generate table image
-    chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict))
-    
-    if not chart_path:
-        send_whatsapp_text(phone, "⚠️ Erro ao gerar a tabela do Mercado Futuro.")
-        return
+    # 1-2. Tabela: Scot Consultoria, ou ajustes B3 se a Scot estiver fora.
+    # Falha aqui não impede a curva projetada (dados próprios da B3/DATAGRO).
+    data_dict = await loop.run_in_executor(None, get_futures_table)
+    chart_path = await loop.run_in_executor(None, lambda: generate_future_table(data_dict)) if data_dict else None
 
-    # 3. Format caption
-    caption = (
-        "🔮 *Mercado Futuro - Boi Gordo*\n\n"
-        "Valores para os próximos vencimentos obtidos agora.\n\n"
-        "*Fonte:* Scot Consultoria"
-    )
-
-    # 4. Send
-    with open(chart_path, "rb") as f:
-        img_bytes = f.read()
-
-    send_whatsapp_image(phone, img_bytes, caption)
-    print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)
+    if chart_path:
+        caption = (
+            "🔮 *Mercado Futuro - Boi Gordo*\n\n"
+            "Valores para os próximos vencimentos.\n\n"
+            f"*Fonte:* {data_dict.get('source', 'Scot Consultoria')}"
+        )
+        with open(chart_path, "rb") as f:
+            send_whatsapp_image(phone, f.read(), caption)
+        print("[WA TRIGGER] Mercado futuro enviado com sucesso!", flush=True)
+    else:
+        print("[WA TRIGGER] Tabela do mercado futuro indisponível (Scot e B3)", flush=True)
+    sent_any = bool(chart_path)
 
     # 5. Curva projetada boi/vaca/novilha (B3 + DATAGRO) — opcional, não bloqueia a tabela
     try:
@@ -617,9 +608,13 @@ async def _handle_mercado_futuro(phone, loop, uf=None):
         proj_path, proj_caption = await loop.run_in_executor(None, lambda: build_bot_projection(uf))
         with open(proj_path, "rb") as f:
             send_whatsapp_image(phone, f.read(), proj_caption)
+        sent_any = True
         print("[WA TRIGGER] Curva projetada enviada com sucesso!", flush=True)
     except Exception as e:
         print(f"[WA TRIGGER] Curva projetada indisponível: {e}", flush=True)
+
+    if not sent_any:
+        send_whatsapp_text(phone, "⚠️ Não consegui buscar o Mercado Futuro agora. Tente novamente em alguns minutos.")
 
 
 async def _handle_cda_chart(phone, loop):
