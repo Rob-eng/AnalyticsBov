@@ -630,14 +630,14 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     }
     rows = [f"{name:<20}{areas_ha[k]:>10.2f}".replace(f"{areas_ha[k]:.2f}", f"{areas_ha[k]:.2f}".replace('.', ','))
             for k, name in labels_friendly.items() if areas_ha.get(k, 0) > 0]
-    areas_box = panel.text(0.0, y, "QUADRO DE ÁREAS (ha)\n" + "\n".join(rows), transform=panel.transAxes,
-                           fontsize=9.5, ha='left', va='top', fontfamily='monospace',
+    areas_box = panel.text(0.5, y, "QUADRO DE ÁREAS (ha)\n" + "\n".join(rows), transform=panel.transAxes,
+                           fontsize=9.5, ha='center', va='top', multialignment='left', fontfamily='monospace',
                            bbox=dict(boxstyle='round,pad=0.6', facecolor='#f1f3f5', edgecolor='#adb5bd'))
     artists['quadro de áreas'] = areas_box
     y = next_y(areas_box, gap=0.035)
 
     # 5.3 Legenda (só camadas presentes; itens montados antes do painel)
-    legend = panel.legend(handles=handles, loc='upper left', bbox_to_anchor=(0.0, y),
+    legend = panel.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, y),
                           ncol=2 if long_legend else 1, fontsize=8.5 if long_legend else 9.5, frameon=True, facecolor='white', edgecolor='#ced4da',
                           title="Legenda", title_fontsize=10, alignment='left')
     artists['legenda'] = legend
@@ -657,14 +657,18 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     bar_frac = s_m * px_per_m / panel_box.width
     bar_h = 0.012
     divs = 4
+    north_gap = 0.10                              # espaço entre a barra e a seta de norte
+    bx = 0.5 - (bar_frac + north_gap) / 2         # conjunto escala + norte centralizado
     for i in range(divs):
-        panel.add_patch(Rectangle((i * bar_frac / divs, y - bar_h), bar_frac / divs, bar_h,
+        panel.add_patch(Rectangle((bx + i * bar_frac / divs, y - bar_h), bar_frac / divs, bar_h,
                                   transform=panel.transAxes, facecolor='black' if i % 2 == 0 else 'white',
                                   edgecolor='black', lw=1, clip_on=False))
-    scale_title = panel.text(0.0, y + 0.006, "Escala", transform=panel.transAxes, fontsize=9, fontweight='bold', va='bottom')
-    scale_0 = panel.text(0.0, y - bar_h - 0.006, "0", transform=panel.transAxes, fontsize=8, ha='center', va='top')
-    scale_end = panel.text(bar_frac, y - bar_h - 0.006, s_lab, transform=panel.transAxes, fontsize=8, ha='center', va='top')
-    north = panel.annotate('N', xy=(0.93, y + 0.005), xytext=(0.93, y - 0.055), xycoords='axes fraction',
+    scale_title = panel.text(bx + bar_frac / 2, y + 0.006, "Escala", transform=panel.transAxes,
+                             fontsize=9, fontweight='bold', ha='center', va='bottom')
+    scale_0 = panel.text(bx, y - bar_h - 0.006, "0", transform=panel.transAxes, fontsize=8, ha='center', va='top')
+    scale_end = panel.text(bx + bar_frac, y - bar_h - 0.006, s_lab, transform=panel.transAxes, fontsize=8, ha='center', va='top')
+    nx = bx + bar_frac + north_gap
+    north = panel.annotate('N', xy=(nx, y + 0.02), xytext=(nx, y - 0.04), xycoords='axes fraction',
                            ha='center', va='center', fontsize=15, fontweight='bold',
                            arrowprops=dict(facecolor='black', width=3, headwidth=10))
     artists['escala'] = scale_end
@@ -674,10 +678,10 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
 
     # 5.5 Dados do imóvel
     info = panel.text(
-        0.0, y,
+        0.5, y,
         f"Propriedade: {prop_name}\nCódigo CAR:\n{cod_car}\n"
         f"Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nSistema: SIRGAS 2000",
-        transform=panel.transAxes, fontsize=9, ha='left', va='top', fontfamily='monospace',
+        transform=panel.transAxes, fontsize=9, ha='center', va='top', multialignment='left', fontfamily='monospace',
         bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', edgecolor='#ced4da'))
     artists['dados do imóvel'] = info
 
