@@ -551,7 +551,8 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     for spine in ax.spines.values():
         spine.set_edgecolor('#424242')
 
-    fig.suptitle("RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=19, fontweight='bold', color='#1a1a1a', y=0.965)
+    title_name = prop_name if prop_name and prop_name != "Propriedade Privada" else cod_car
+    fig.suptitle(f"Mapa CAR – {title_name}", fontsize=19, fontweight='bold', color='#1a1a1a', y=0.965)
 
     # 5. Painel lateral — blocos empilhados de cima para baixo (coordenadas do painel)
     fig.canvas.draw()
@@ -644,7 +645,18 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     fig.canvas.draw()
     y = next_y(legend, gap=0.04)
 
-    # 5.4 Escala gráfica (mesmo comprimento que teria no mapa) + Norte
+    # 5.4 Dados do imóvel (carimbo)
+    info = panel.text(
+        0.5, y,
+        f"Propriedade: {prop_name}\nCódigo CAR:\n{cod_car}\n"
+        f"Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nSistema: SIRGAS 2000",
+        transform=panel.transAxes, fontsize=9, ha='center', va='top', multialignment='left', fontfamily='monospace',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', edgecolor='#ced4da'))
+    artists['dados do imóvel'] = info
+
+    fig.canvas.draw()
+
+    # 5.5 Escala gráfica (mesmo comprimento que teria no mapa) + Norte — no pé do painel
     center = main_gdf.geometry.centroid.iloc[0]
     m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
     map_box = ax.get_window_extent(renderer)
@@ -655,6 +667,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         if s_m * px_per_m <= panel_box.width * 0.62:
             break
     bar_frac = s_m * px_per_m / panel_box.width
+    y = min(next_y(info, gap=0.06), 0.08)
     bar_h = 0.012
     divs = 4
     north_gap = 0.10                              # espaço entre a barra e a seta de norte
@@ -673,17 +686,6 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
                            arrowprops=dict(facecolor='black', width=3, headwidth=10))
     artists['escala'] = scale_end
     artists['norte'] = north
-    fig.canvas.draw()
-    y = min(next_y(scale_end, gap=0.045), next_y(north, gap=0.045))
-
-    # 5.5 Dados do imóvel
-    info = panel.text(
-        0.5, y,
-        f"Propriedade: {prop_name}\nCódigo CAR:\n{cod_car}\n"
-        f"Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nSistema: SIRGAS 2000",
-        transform=panel.transAxes, fontsize=9, ha='center', va='top', multialignment='left', fontfamily='monospace',
-        bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', edgecolor='#ced4da'))
-    artists['dados do imóvel'] = info
 
     footer = fig.text(0.5, 0.02, "Processado com Agro Analytics Bot · Fonte: Consulta Pública do CAR (consulta.car.gov.br)",
                       ha='center', va='bottom', fontsize=8.5, color='gray')
