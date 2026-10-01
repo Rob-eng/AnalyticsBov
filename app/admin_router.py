@@ -344,6 +344,21 @@ def get_projection_chart(
     return FileResponse(path, media_type="image/png")
 
 
+@router.post("/qa/tools")
+async def run_qa_tools(api_key: str = Depends(get_api_key)):
+    """Roda agora a checagem funcional das ferramentas (~2 min) e devolve o resultado."""
+    import asyncio
+    from app.qa.tool_checks import run_tool_checks
+    return await asyncio.to_thread(run_tool_checks, True, False)
+
+
+@router.post("/qa/agent")
+async def run_qa_agent(api_key: str = Depends(get_api_key)):
+    """Roda agora as conversas-modelo do agente e devolve o resultado por cenário."""
+    from app.qa.agent_eval import run_agent_eval_async
+    return await run_agent_eval_async(notify=False)
+
+
 @router.post("/ingest/mt")
 async def trigger_mt_ingestion(background_tasks: BackgroundTasks, api_key: str = Depends(get_api_key)):
     """

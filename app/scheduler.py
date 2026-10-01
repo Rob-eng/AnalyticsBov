@@ -164,6 +164,29 @@ def setup_scheduler(application):
         replace_existing=True,
     )
 
+    # ── QA: ferramentas todo dia 07:00; conversas-modelo do agente seg 07:30 ─
+    async def qa_tools_job():
+        from app.qa.tool_checks import run_tool_checks
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, run_tool_checks)
+        except Exception:
+            import traceback
+            print(f"[Scheduler] ❌ QA tools FAILED: {traceback.format_exc()}", flush=True)
+
+    async def qa_agent_job():
+        from app.qa.agent_eval import run_agent_eval_async
+        try:
+            await run_agent_eval_async()
+        except Exception:
+            import traceback
+            print(f"[Scheduler] ❌ QA agent FAILED: {traceback.format_exc()}", flush=True)
+
+    scheduler.add_job(qa_tools_job, CronTrigger(hour=7, minute=0, timezone=USER_TZ),
+                      id='qa_tools', replace_existing=True)
+    scheduler.add_job(qa_agent_job, CronTrigger(day_of_week='mon', hour=7, minute=30, timezone=USER_TZ),
+                      id='qa_agent', replace_existing=True)
+
     # ── Health probes a cada 30 minutos ──────────────────────────────────
     async def health_probe_job():
         try:
@@ -207,6 +230,7 @@ def setup_scheduler(application):
         "weekly_report (Mon 08:00) + ndvi_alert_scan (daily 06:00) "
         "+ cda_daily_ingest (daily 05:30) + datagro_daily_ingest (08:00/20:00) "
         "+ b3_futures_ingest (Mon-Fri 21:00) + trial_notices (daily 09:00) "
+        "+ qa_tools (daily 07:00) + qa_agent (Mon 07:30) "
         "+ health_probes (every 30min) "
         f"+ prodes_job_poll (every {Config.PRODES_POLL_INTERVAL_SECONDS}s)",
         flush=True
