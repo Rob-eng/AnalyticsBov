@@ -122,6 +122,19 @@ def check_prodes():
     return _ok(f"{len(aps)} apontamentos PRODES no imóvel de referência")
 
 
+def check_car_wfs():
+    from app.car_wfs import get_car_package
+    gdfs, zip_bytes, err = get_car_package(REF_CAR)
+    if err:
+        return _fail(err)
+    missing = {"imovel", "reserva", "app", "vegetacao"} - set(gdfs)
+    if missing:
+        return _fail(f"camadas ausentes: {sorted(missing)}")
+    if len(zip_bytes) < 20_000:
+        return _fail(f"ZIP pequeno demais ({len(zip_bytes)} bytes)")
+    return _ok(f"{len(gdfs)} categorias, ZIP {len(zip_bytes)//1024} KB")
+
+
 CHECKS = {
     "Cotação (Scot)": check_cotacao,
     "Mercado Futuro": check_mercado_futuro,
@@ -130,6 +143,7 @@ CHECKS = {
     "Clima": check_clima,
     "Leilão CDA": check_cda,
     "PRODES": check_prodes,
+    "CAR (WFS oficial)": check_car_wfs,
 }
 
 

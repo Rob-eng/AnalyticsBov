@@ -772,95 +772,75 @@ async def process_whatsapp_zip_upload(phone, media_id):
 
 async def process_whatsapp_car_request(phone, car_code):
     """
-    Fluxo do DESAFIO: 
-    1. Recebe o código CAR puro via texto.
-    2. Aciona o Scraper Fantasma (SICAR).
-    3. Baixa o ZIP.
-    4. Gera o Mapa Pro.
+    Código CAR recebido por texto → camadas oficiais do imóvel (WFS público da
+    Consulta Pública do CAR, sem captcha) → mapa profissional + ZIP com os shapefiles.
     """
-    from app.whatsapp.sender import send_whatsapp_text, send_whatsapp_image
-    from app.sicar_scraper import download_car_shapefile
-    from app.environmental import process_car_zip
+    from app.whatsapp.sender import send_whatsapp_text, send_whatsapp_image, send_whatsapp_document
+    from app.car_wfs import get_car_package
     from app.charts import generate_pro_car_map
     import asyncio
-    
+    from io import BytesIO
+
     loop = asyncio.get_running_loop()
-    
-    # 1. Avisa o início
-    msg_init = (
-        f"🔍 *Localizando imóvel na base do governo...*\n"
-        f"Código: `{car_code}`\n\n"
-        f"Estou resolvendo os sistemas de segurança (Captcha) e preparando seu mapa profissional. "
-        f"Isso leva cerca de 20 a 40 segundos. ⏳"
-    )
-    send_whatsapp_text(phone, msg_init)
-    
-    # 2. Scraper (Download do ZIP)
-    zip_bytes, error = await loop.run_in_executor(None, download_car_shapefile, car_code)
-    
-    if not zip_bytes:
-        msg_err = (
-            f"⚠️ *Não foi possível obter os dados oficiais agora.*\n\n"
-            f"O servidor do governo (SICAR) está instável ou recusando conexões automáticas.\n\n"
-            f"Vou monitorar e o senhor pode tentar novamente em alguns minutos. "
-            f"Se tiver o arquivo .zip em mãos, pode me enviar aqui!"
-        )
-        send_whatsapp_text(phone, msg_err)
+    send_whatsapp_text(phone, f"🔍 *Buscando o imóvel na base oficial do CAR...*\nCódigo: `{car_code}`")
+
+    # 1. Camadas oficiais (perímetro, APP, reserva legal, vegetação, consolidada, hidrografia...)
+    try:
+        gdfs, zip_bytes, error = await loop.run_in_executor(None, get_car_package, car_code)
+    except Exception as e:
+        print(f"[WA CAR REQ] Falha no WFS do CAR: {e}", flush=True)
+        gdfs, zip_bytes, error = None, None, "A base pública do CAR não respondeu agora."
+    if error:
+        send_whatsapp_text(phone, f"⚠️ {error}\n\nSe tiver o arquivo .zip do CAR em mãos, pode me enviar aqui!")
         return
 
-    # 3. Processa o ZIP
-    send_whatsapp_text(phone, "✅ *Dados vinculados!* Gerando seu relatório profissional... 🚜")
-    
-    gdfs, zip_err = await loop.run_in_executor(None, process_car_zip, zip_bytes)
-    if zip_err:
-        send_whatsapp_text(phone, f"⚠️ Erro ao processar dados do governo: {zip_err}")
-        return
-
-    # 4. Satélite e Mapa Pro (Reaproveita lógica do Zip Upload)
+    # 2. Satélite de fundo (imóvel e região)
     bg_bytes, bg_extent = None, None
     reg_bg_bytes, reg_bg_extent = None, None
     try:
-        main_gdf = gdfs.get('imovel')
-        if main_gdf is not None:
-            from app.gee_connector import get_satellite_thumbnail
-            import json
-            import requests
-            geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
-            
-            # Backgrounds
-            b_bounds = main_gdf.buffer(0.015).total_bounds
-            bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
-            turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
-            
-            r_bounds = main_gdf.buffer(0.10).total_bounds
-            reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
-            rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
-            
-            if turl:
-                resp = await loop.run_in_executor(None, lambda: requests.get(turl, timeout=30))
-                if resp.status_code == 200: bg_bytes = resp.content
-            if rturl:
-                rresp = await loop.run_in_executor(None, lambda: requests.get(rturl, timeout=30))
-                if rresp.status_code == 200: reg_bg_bytes = rresp.content
+        from app.gee_connector import get_satellite_thumbnail
+        import json
+        import requests
+        main_gdf = gdfs['imovel']
+        geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
+
+        b_bounds = main_gdf.buffer(0.015).total_bounds
+        bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
+        turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
+
+        r_bounds = main_gdf.buffer(0.10).total_bounds
+        reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
+        rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
+
+        if turl:
+            resp = await loop.run_in_executor(None, lambda: requests.get(turl, timeout=30))
+            if resp.status_code == 200: bg_bytes = resp.content
+        if rturl:
+            rresp = await loop.run_in_executor(None, lambda: requests.get(rturl, timeout=30))
+            if rresp.status_code == 200: reg_bg_bytes = rresp.content
     except Exception as ge:
         print(f"[WA CAR REQ] Erro GEE: {ge}", flush=True)
 
-    # 5. Renderiza Mapa Pro
+    # 3. Mapa profissional
     map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
-    if not map_bytes:
-        send_whatsapp_text(phone, "⚠️ Erro ao renderizar o mapa final.")
-        return
+    if map_bytes:
+        caption = (
+            f"🗺️ *Mapa ambiental do imóvel*\n"
+            f"📍 CAR `{car_code}`\n\n"
+            "Camadas oficiais da Consulta Pública do CAR: perímetro, APP, reserva legal, "
+            "vegetação nativa, área consolidada e hidrografia."
+        )
+        send_whatsapp_image(phone, map_bytes, caption)
+    else:
+        send_whatsapp_text(phone, "⚠️ Não consegui renderizar o mapa, mas segue o arquivo com as camadas.")
 
-    # 6. Envio Final
-    caption = (
-        f"🗺️ *RELATÓRIO AMBIENTAL AUTOMÁTICO*\n\n"
-        f"🚀 *Extração Fantasma Concluída!*\n"
-        f"📍 Imóvel: `{car_code}`\n\n"
-        f"Este mapa foi gerado buscando os dados direto na fonte do governo. "
-        f"Tudo pronto para sua análise! 🐂💨"
+    # 4. ZIP com todas as camadas (shapefiles para QGIS/ArcGIS)
+    send_whatsapp_document(
+        phone, BytesIO(zip_bytes), filename=f"CAR_{car_code}.zip",
+        caption="📦 Todas as camadas do CAR em shapefile (SIRGAS 2000)",
     )
-    send_whatsapp_image(phone, map_bytes, caption)
     print(f"[WA CAR REQ] Processo finalizado para {phone}", flush=True)
+
 
 async def _handle_premium(phone):
     """Apresenta os planos de assinatura no WhatsApp com links de pagamento."""

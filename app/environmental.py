@@ -718,6 +718,17 @@ def process_car_zip(zip_bytes):
                             if c_up in ['NUM_CAR', 'COD_IMOVEL', 'COD_IMOV', 'NUM_CERTIF', 'RECIBO']:
                                 gdf['COD_IMOVEL_MAP'] = gdf[col]
 
+                        # --- 0. ZIP gerado por app/car_wfs.py: a pasta é o tema da plataforma ---
+                        # (o campo temas_ambientais tem texto como "rio", que confundiria a busca abaixo)
+                        from app.car_wfs import THEME_CATEGORY
+                        folder = os.path.basename(root)
+                        if folder in THEME_CATEGORY:
+                            cat = THEME_CATEGORY[folder]
+                            gdfs[cat] = pd.concat([gdfs[cat], gdf], ignore_index=True) if cat in gdfs else gdf
+                            found_any = True
+                            print(f"[ZIP] Camada '{cat}' (tema {folder}) capturada: '{file}'")
+                            continue
+
                         # --- 1. CAPTURA DO PERIMETRO (Prioridade Zero) ---
                         fname_norm = normalize_str(file)
                         assigned_via_file = False

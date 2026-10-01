@@ -285,10 +285,12 @@ def send_whatsapp_video(to_phone: str, video_buffer, caption: str = ""):
     return success
 
 
-def send_whatsapp_document(to_phone: str, doc_buffer, filename: str = "documento.pdf", caption: str = ""):
+def send_whatsapp_document(to_phone: str, doc_buffer, filename: str = "documento.pdf", caption: str = "",
+                           mime_type: str = None):
     """
-    Envia um documento (ex.: PDF) via WhatsApp Cloud API.
+    Envia um documento (ex.: PDF, ZIP) via WhatsApp Cloud API.
     doc_buffer: BytesIO ou bytes contendo o arquivo (recomendado <16MB)
+    mime_type: deduzido da extensão do filename se não informado.
     """
     if not _check_credentials():
         return False
@@ -297,7 +299,10 @@ def send_whatsapp_document(to_phone: str, doc_buffer, filename: str = "documento
     if len(caption) > 1024:
         caption = caption[:1020] + "..."
 
-    media_id = _upload_media(doc_buffer, "application/pdf", filename)
+    if not mime_type:
+        import mimetypes
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    media_id = _upload_media(doc_buffer, mime_type, filename)
     if not media_id:
         print("⚠️ WA: Upload de documento falhou, enviando só texto", flush=True)
         return send_whatsapp_text(to_phone, caption or "Não foi possível enviar o documento.")
