@@ -200,3 +200,65 @@ def get_car_package(car_code: str, property_name: str = None):
     if property_name:
         gdfs["imovel"]["NOM_IMOVEL"] = property_name
     return gdfs, build_car_zip(layers, car_code), None
+
+
+# ── Mapa ambiental pronto para o bot (Telegram e WhatsApp) ────────────────────
+
+def resolve_car_code(lat: float, lon: float):
+    """Código CAR no ponto: base do GEE (mesma do NDVI/PRODES) e, se não achar, API da Consulta Pública."""
+    try:
+        from app.gee_connector import find_car_at_coordinate_gee
+        prop = find_car_at_coordinate_gee(lat, lon)
+        if prop and prop.get("cod_imovel"):
+            return prop["cod_imovel"]
+    except Exception as e:
+        print(f"[CAR-WFS] GEE indisponível para achar o CAR: {e}", flush=True)
+    found = find_car_by_coordinate(lat, lon)
+    return found["codeProperty"] if found else None
+
+
+def build_car_map(car_code: str, property_name: str = None):
+    """
+    (map_png_bytes, zip_bytes, erro). Camadas oficiais do imóvel + fundo de
+    satélite (GEE) + generate_pro_car_map. Sem fundo de satélite o mapa sai igual.
+    """
+    import json as _json
+    from app.charts import generate_pro_car_map
+
+    gdfs, zip_bytes, error = get_car_package(car_code, property_name)
+    if error:
+        return None, None, error
+
+    bg_bytes = bg_extent = reg_bg_bytes = reg_bg_extent = None
+    try:
+        from app.gee_connector import get_satellite_thumbnail
+        main_gdf = gdfs["imovel"]
+        geom = _json.loads(main_gdf.to_json())["features"][0]["geometry"]
+        b = main_gdf.buffer(0.015).total_bounds
+        bg_extent = [b[0], b[2], b[1], b[3]]
+        r = main_gdf.buffer(0.10).total_bounds
+        reg_bg_extent = [r[0], r[2], r[1], r[3]]
+        turl = get_satellite_thumbnail(geom, 1024, 1500)
+        rturl = get_satellite_thumbnail(geom, 800, 10000)
+        if turl:
+            resp = requests.get(turl, timeout=30)
+            bg_bytes = resp.content if resp.ok else None
+        if rturl:
+            resp = requests.get(rturl, timeout=30)
+            reg_bg_bytes = resp.content if resp.ok else None
+    except Exception as e:
+        print(f"[CAR-WFS] Fundo de satélite indisponível: {e}", flush=True)
+
+    map_out = generate_pro_car_map(gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
+    map_bytes = map_out.getvalue() if hasattr(map_out, "getvalue") else map_out
+    return map_bytes, zip_bytes, None
+
+
+def car_map_caption(car_code: str, property_name: str = None) -> str:
+    name = f"*{property_name}*\n" if property_name else ""
+    return (
+        f"🗺️ *Mapa ambiental do imóvel*\n{name}"
+        f"📍 CAR `{car_code}`\n\n"
+        "Camadas oficiais da Consulta Pública do CAR: perímetro, APP, reserva legal, "
+        "vegetação nativa, área consolidada e hidrografia."
+    )

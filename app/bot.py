@@ -904,8 +904,6 @@ async def receive_weather_location(update: Update, context: ContextTypes.DEFAULT
                 if car_result and car_result[0]:
                     geometry, status, cod_imovel = car_result
                     polygon = _json.dumps(geometry)
-                    if cod_imovel:
-                        await _send_tg_car_zip_guide(update, context, cod_imovel)
                     print(f"  CAR polygon found ({status})", flush=True)
             except Exception as poly_err:
                 print(f"  CAR polygon unavailable: {poly_err}", flush=True)
@@ -1063,11 +1061,11 @@ async def receive_forecast_period(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def start_env_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start environmental analysis — show NDVI vs MDT sub-menu."""
+    """Start environmental analysis — show NDVI / MDT / Mapa CAR sub-menu."""
     mode_keyboard = ReplyKeyboardMarkup(
         [
             [KeyboardButton("🌿 NDVI (Vegetação)"), KeyboardButton("🏔️ Terreno (MDT)")],
-            [KeyboardButton("🔙 Voltar ao Menu")]
+            [KeyboardButton("🗺️ Mapa CAR (camadas)"), KeyboardButton("🔙 Voltar ao Menu")]
         ],
         resize_keyboard=True, one_time_keyboard=True
     )
@@ -1172,6 +1170,9 @@ async def receive_env_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'MDT' in text or 'Terreno' in text:
         context.user_data['env_mode'] = 'mdt'
         mode_label = "🏔️ *Terreno (MDT)*"
+    elif 'CAR' in text or 'Mapa' in text:
+        context.user_data['env_mode'] = 'car'
+        mode_label = "🗺️ *Mapa ambiental do CAR* (APP, reserva legal, vegetação + arquivo ZIP)"
     else:
         context.user_data['env_mode'] = 'ndvi'
         mode_label = "🌿 *NDVI*"
@@ -1221,11 +1222,34 @@ async def receive_env_location(update: Update, context: ContextTypes.DEFAULT_TYP
         # 2. Fetch CAR Perimeter
         geometry, is_real_car, cod_imovel = fetch_car_perimeter(lat, lon)
         
-        if cod_imovel:
-            await _send_tg_car_zip_guide(update, context, cod_imovel)
-
         env_mode = context.user_data.pop('env_mode', 'ndvi')
         prop_name = context.user_data.pop('prop_name', None)
+
+        # ── Mapa ambiental do CAR (camadas oficiais + ZIP) ────────────────
+        if env_mode == 'car':
+            _log_tg_activity(update, "MAPA_CAR", details=prop_name or cod_imovel or "MAPA_CAR")
+            loop = asyncio.get_running_loop()
+            from io import BytesIO
+            from app.car_wfs import resolve_car_code, build_car_map, car_map_caption
+            car_code = cod_imovel or await loop.run_in_executor(None, resolve_car_code, lat, lon)
+            if not car_code:
+                await status_msg.edit_text("⚠️ Não encontrei um imóvel do CAR nessa localização.")
+                return ConversationHandler.END
+            await status_msg.edit_text(f"🗺️ Buscando as camadas oficiais do CAR `{car_code}`...", parse_mode='Markdown')
+            map_bytes, zip_bytes, error = await loop.run_in_executor(None, build_car_map, car_code, prop_name)
+            if error:
+                await status_msg.edit_text(f"⚠️ {error}")
+                return ConversationHandler.END
+            await status_msg.delete()
+            if map_bytes:
+                await context.bot.send_photo(chat_id=chat_id, photo=BytesIO(map_bytes),
+                                             caption=car_map_caption(car_code, prop_name), parse_mode='Markdown')
+            await context.bot.send_document(
+                chat_id=chat_id, document=BytesIO(zip_bytes), filename=f"CAR_{car_code}.zip",
+                caption="📦 Todas as camadas do CAR em shapefile (SIRGAS 2000)",
+                reply_markup=get_keyboard(chat_id),
+            )
+            return ConversationHandler.END
 
         # ── MDT branch ────────────────────────────────────────────────────
         if env_mode == 'mdt':
@@ -2536,26 +2560,6 @@ async def receive_voice_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"[TG VOICE] Erro: {e}")
         await status_msg.edit_text("❌ Ocorreu um erro ao processar seu áudio.")
-
-async def _send_tg_car_zip_guide(update, context, cod_imovel):
-    """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional no Telegram."""
-    msg = (
-        f"📊 *Dica do AnalyticsBov (Relatório Pro)*\n\n"
-        f"Patrão, identifiquei o código oficial desta área no SICAR:\n"
-        f"👉 `{cod_imovel}`\n\n"
-        f"Para gerar um *Mapa Profissional* (com escala, grades e legendas), siga este passo a passo:\n"
-        f"1️⃣ Clique no link: [Portal SICAR](https://consultapublica.car.gov.br/publico/imoveis/index)\n"
-        f"2️⃣ Cole o código acima no campo de busca.\n"
-        f"3️⃣ Resolva o Captcha e faça o download do arquivo *ZIP*.\n"
-        f"4️⃣ Me envie o arquivo .zip aqui no chat!\n\n"
-        f"Assim que receber, eu monto o seu mapa de alta qualidade. 🚜💨"
-    )
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=msg,
-        parse_mode='Markdown',
-        disable_web_page_preview=True
-    )
 
 async def receive_car_zip_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Lida com arquivos ZIP do CAR enviados pelo usuário no Telegram."""

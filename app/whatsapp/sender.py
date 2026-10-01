@@ -425,6 +425,10 @@ def send_whatsapp_menu(to_phone: str):
                                 "title": "🏔️ Terreno (MDT)"
                             },
                             {
+                                "id": "TRIGGER_MAPA_CAR",
+                                "title": "🗺️ Mapa Ambiental CAR"
+                            },
+                            {
                                 "id": "TRIGGER_PRODES",
                                 "title": "🌳 Análise PRODES"
                             }

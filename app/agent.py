@@ -141,6 +141,23 @@ def get_tools_definition():
         {
              "type": "function",
              "function": {
+                 "name": "gerar_mapa_car",
+                 "description": "Gera o MAPA AMBIENTAL do CAR do imóvel (perímetro, APP, reserva legal, vegetação nativa, área consolidada, hidrografia) com quadro de áreas, e envia também o ZIP com todas as camadas em shapefile. Use para 'mapa ambiental', 'mapa do CAR', 'reserva legal', 'APP', 'camadas do CAR', 'shapefile', 'arquivo do CAR'. Passe o código CAR se o usuário informar; senão, lat/lon da propriedade.",
+                 "parameters": {
+                     "type": "object",
+                     "properties": {
+                         "codigo_car": {"type": "string", "description": "Código do CAR (ex.: MS-5001102-F4C2...), se o usuário informou"},
+                         "lat": {"type": "number", "description": "Latitude"},
+                         "lon": {"type": "number", "description": "Longitude"},
+                         "nome_propriedade": {"type": "string", "description": "Nome da propriedade"}
+                     },
+                     "required": []
+                 }
+             }
+        },
+        {
+             "type": "function",
+             "function": {
                  "name": "analisar_terreno_mdt",
                  "description": "Gera mapa MDT (Modelo Digital de Terreno) com curvas de nível 2D e modelo 3D. Use para 'MDT', 'terreno', 'elevação', 'relevo', 'curvas de nível', 'topografia'. NÃO use para vegetação/NDVI.",
                  "parameters": {
@@ -284,6 +301,17 @@ async def run_tool(name: str, arguments: dict, media_list: list, user_id: str) -
             nome = arguments.get("nome_propriedade", "Local Selecionado")
             if not lat or not lon: return "Coordenadas inválidas."
             return f"TRIGGER_FLOW: NDVI | {lat} | {lon} | {nome}"
+
+        elif name == "gerar_mapa_car":
+            codigo = (arguments.get("codigo_car") or "").strip().upper()
+            if codigo:
+                return f"TRIGGER_FLOW: MAPA_CAR_CODIGO | {codigo}"
+            lat = arguments.get("lat")
+            lon = arguments.get("lon")
+            nome = arguments.get("nome_propriedade", "Local Selecionado")
+            if not lat or not lon:
+                return "Preciso do código do CAR ou da localização da propriedade (use listar_propriedades)."
+            return f"TRIGGER_FLOW: MAPA_CAR | {lat} | {lon} | {nome}"
 
         elif name == "analisar_terreno_mdt":
             lat = arguments.get("lat")
@@ -446,8 +474,10 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "Pedido de 'futuro', 'mercado futuro', 'B3' ou 'curva de preço': chame `consultar_mercado_futuro` "
             "IMEDIATAMENTE, SEM perguntar a UF — se o Patrão não citou um estado, chame sem o parâmetro 'uf' "
             "(o padrão é MS). Só passe 'uf' quando ele citar o estado.\n"
-            "4. Se o produtor pedir Previsão de Chuva, NDVI ou MDT (Terreno):\n"
-            "   - Use as ferramentas correspondentes (`verificar_previsao_chuva` ou `analisar_saude_pasto_ndvi`).\n"
+            "4. Se o produtor pedir Previsão de Chuva, NDVI, MDT (Terreno) ou MAPA AMBIENTAL / mapa do CAR:\n"
+            "   - Use as ferramentas correspondentes (`verificar_previsao_chuva`, `analisar_saude_pasto_ndvi`, "
+            "`analisar_terreno_mdt` ou `gerar_mapa_car`). 'Mapa ambiental', 'reserva legal', 'APP' ou "
+            "'camadas/arquivo do CAR' = `gerar_mapa_car` (não ofereça NDVI/MDT no lugar).\n"
             "5. Se o produtor perguntar sobre Preços, Planos, Assinatura ou 'qual meu plano':\n"
             "   - Use `consultar_meu_plano` IMEDIATAMENTE.\n"
             "   - Informe o plano atual ao Patrão e pergunte se quer ver opções de upgrade.\n"
@@ -459,6 +489,8 @@ async def get_agent_response(user_id: str, user_text: str, context_info: str = "
             "(NDVI, clima, MDT, PRODES). Só use direto se houver exatamente uma propriedade cadastrada.\n"
             "7. Ofereça sempre o canal de feedback (`enviar_feedback_admin`) se o Patrão quiser sugerir algo.\n"
             "8. NUNCA invente números.\n"
+            "8b. Saudação sem pedido concreto ('oi', 'bom dia', 'olá', 'e aí'): chame `mostrar_menu_principal` "
+            "para o Patrão ver as opções, em vez de só responder com texto.\n"
             "9. Se o Patrão mencionar 'leilão', 'CDA', 'Correa da Costa', 'preço arroba leilão' ou pedir gráfico de leilão, use `consultar_leilao_cda` IMEDIATAMENTE.\n"
             "10. Se o Patrão mencionar 'PRODES' (mesmo sozinho, sem mais nada), 'desmatamento', 'autuação "
             "ambiental', 'multa ambiental', 'defesa ambiental' ou pedir laudo/análise de desmatamento, use "
@@ -595,6 +627,8 @@ async def process_whatsapp_message(sender_phone: str, user_text: str):
             user_text = "Quero a previsão de chuva. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
         elif user_text == "TRIGGER_NDVI":
             user_text = "Quero o mapa de saúde do pasto NDVI. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
+        elif user_text == "TRIGGER_MAPA_CAR":
+            user_text = "Quero o mapa ambiental do CAR do meu imóvel. (Se eu não fornecer o código do CAR, as coordenadas ou o nome da propriedade, me peça)"
         elif user_text == "TRIGGER_MDT":
             user_text = "Quero o mapa de topografia MDT. (Se eu não fornecer as coordenadas ou nome da propriedade, me peça)"
         elif user_text == "TRIGGER_PRODES":

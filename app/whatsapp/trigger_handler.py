@@ -97,6 +97,12 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
             await _handle_prodes_escolha(sender_phone, lat, lon, nome, escolha, loop)
             return
 
+        if fluxo == 'MAPA_CAR_CODIGO' and len(parts) > 1:
+            from app.models import log_activity
+            log_activity(sender_phone, "MAPA_CAR", details=parts[1])
+            await process_whatsapp_car_request(sender_phone, parts[1].strip().upper())
+            return
+
         if len(parts) < 3:
             send_whatsapp_text(sender_phone, "⚠️ Comando inválido. Tente novamente.")
             return
@@ -110,11 +116,13 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         loop = asyncio.get_running_loop()
         
         # Avisa que está processando
-        send_whatsapp_text(sender_phone, f"⏳ Processando {fluxo}... Aguarde um momento.")
+        flow_label = {"MAPA_CAR": "o mapa ambiental do CAR", "CLIMA": "a previsão de chuva",
+                      "HISTORICO": "o histórico de chuva"}.get(fluxo, fluxo)
+        send_whatsapp_text(sender_phone, f"⏳ Gerando {flow_label}... Aguarde um momento.")
         
         from app.models import log_activity
         
-        if fluxo in ['NDVI', 'CLIMA', 'HISTORICO', 'MDT']:
+        if fluxo in ['NDVI', 'CLIMA', 'HISTORICO', 'MDT', 'MAPA_CAR']:
             from app.saas.limit_engine import can_perform_action
             can_do, msg_limit = can_perform_action(sender_phone, 'LOOKUP')
             if not can_do:
@@ -134,6 +142,9 @@ async def handle_wa_trigger_flow(sender_phone: str, trigger_string: str):
         elif fluxo == 'MDT':
             log_activity(sender_phone, "MDT", details=f"{nome} ({lat},{lon})")
             await _handle_mdt(sender_phone, lat, lon, nome, loop)
+        elif fluxo == 'MAPA_CAR':
+            log_activity(sender_phone, "MAPA_CAR", details=f"{nome} ({lat},{lon})")
+            await _handle_mapa_car(sender_phone, lat, lon, nome, loop)
         else:
             send_whatsapp_text(sender_phone, f"⚠️ Fluxo '{fluxo}' não reconhecido.")
         
@@ -670,21 +681,6 @@ async def _handle_cda_chart(phone, loop):
         send_whatsapp_image(phone, img_bytes, legend)
         print("[WA TRIGGER] Gráfico CDA enviado!", flush=True)
 
-async def _send_car_zip_guide(phone, cod_imovel):
-    """Envia instruções de como baixar o ZIP do CAR para gerar o mapa profissional."""
-    msg = (
-        f"📊 *Dica do AnalyticsBov (Relatório Pro)*\n\n"
-        f"Patrão, identifiquei o código oficial desta área no SICAR:\n"
-        f"👉 `{cod_imovel}`\n\n"
-        f"Para gerar um *Mapa Profissional* (com escala, grades e legendas), siga este passo a passo:\n"
-        f"1️⃣ Clique no link: https://consultapublica.car.gov.br/publico/imoveis/index\n"
-        f"2️⃣ Cole o código acima no campo de busca.\n"
-        f"3️⃣ Resolva o Captcha e faça o download do arquivo *ZIP* (Contendo Shapefiles).\n"
-        f"4️⃣ Me envie o arquivo .zip aqui no chat!\n\n"
-        f"Assim que receber, eu monto o seu mapa de alta qualidade. 🚜💨"
-    )
-    send_whatsapp_text(phone, msg)
-
 async def process_whatsapp_zip_upload(phone, media_id):
     """Downloads ZIP, processes it, and sends the Pro Map."""
     from app.whatsapp.sender import download_whatsapp_media, send_whatsapp_text, send_whatsapp_image
@@ -770,76 +766,49 @@ async def process_whatsapp_zip_upload(phone, media_id):
     print(f"[WA] Relatório Profissional enviado para {phone}", flush=True)
 
 
-async def process_whatsapp_car_request(phone, car_code):
+async def process_whatsapp_car_request(phone, car_code, property_name=None):
     """
-    Código CAR recebido por texto → camadas oficiais do imóvel (WFS público da
-    Consulta Pública do CAR, sem captcha) → mapa profissional + ZIP com os shapefiles.
+    Mapa ambiental do CAR → camadas oficiais do imóvel (WFS público da Consulta
+    Pública do CAR, sem captcha) → mapa profissional + ZIP com os shapefiles.
+    Chamado pelo código CAR enviado por texto e pelo fluxo MAPA_CAR (menu/agente).
     """
     from app.whatsapp.sender import send_whatsapp_text, send_whatsapp_image, send_whatsapp_document
-    from app.car_wfs import get_car_package
-    from app.charts import generate_pro_car_map
+    from app.car_wfs import build_car_map, car_map_caption
     import asyncio
     from io import BytesIO
 
     loop = asyncio.get_running_loop()
     send_whatsapp_text(phone, f"🔍 *Buscando o imóvel na base oficial do CAR...*\nCódigo: `{car_code}`")
 
-    # 1. Camadas oficiais (perímetro, APP, reserva legal, vegetação, consolidada, hidrografia...)
     try:
-        gdfs, zip_bytes, error = await loop.run_in_executor(None, get_car_package, car_code)
+        map_bytes, zip_bytes, error = await loop.run_in_executor(None, build_car_map, car_code, property_name)
     except Exception as e:
-        print(f"[WA CAR REQ] Falha no WFS do CAR: {e}", flush=True)
-        gdfs, zip_bytes, error = None, None, "A base pública do CAR não respondeu agora."
+        print(f"[WA CAR REQ] Falha no mapa CAR: {e}", flush=True)
+        map_bytes, zip_bytes, error = None, None, "A base pública do CAR não respondeu agora. Tente em alguns minutos."
     if error:
         send_whatsapp_text(phone, f"⚠️ {error}\n\nSe tiver o arquivo .zip do CAR em mãos, pode me enviar aqui!")
         return
 
-    # 2. Satélite de fundo (imóvel e região)
-    bg_bytes, bg_extent = None, None
-    reg_bg_bytes, reg_bg_extent = None, None
-    try:
-        from app.gee_connector import get_satellite_thumbnail
-        import json
-        import requests
-        main_gdf = gdfs['imovel']
-        geom_json = json.loads(main_gdf.to_json())['features'][0]['geometry']
-
-        b_bounds = main_gdf.buffer(0.015).total_bounds
-        bg_extent = [b_bounds[0], b_bounds[2], b_bounds[1], b_bounds[3]]
-        turl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 1024, 1500)
-
-        r_bounds = main_gdf.buffer(0.10).total_bounds
-        reg_bg_extent = [r_bounds[0], r_bounds[2], r_bounds[1], r_bounds[3]]
-        rturl = await loop.run_in_executor(None, get_satellite_thumbnail, geom_json, 800, 10000)
-
-        if turl:
-            resp = await loop.run_in_executor(None, lambda: requests.get(turl, timeout=30))
-            if resp.status_code == 200: bg_bytes = resp.content
-        if rturl:
-            rresp = await loop.run_in_executor(None, lambda: requests.get(rturl, timeout=30))
-            if rresp.status_code == 200: reg_bg_bytes = rresp.content
-    except Exception as ge:
-        print(f"[WA CAR REQ] Erro GEE: {ge}", flush=True)
-
-    # 3. Mapa profissional
-    map_bytes = await loop.run_in_executor(None, generate_pro_car_map, gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
     if map_bytes:
-        caption = (
-            f"🗺️ *Mapa ambiental do imóvel*\n"
-            f"📍 CAR `{car_code}`\n\n"
-            "Camadas oficiais da Consulta Pública do CAR: perímetro, APP, reserva legal, "
-            "vegetação nativa, área consolidada e hidrografia."
-        )
-        send_whatsapp_image(phone, map_bytes, caption)
+        send_whatsapp_image(phone, map_bytes, car_map_caption(car_code, property_name))
     else:
         send_whatsapp_text(phone, "⚠️ Não consegui renderizar o mapa, mas segue o arquivo com as camadas.")
-
-    # 4. ZIP com todas as camadas (shapefiles para QGIS/ArcGIS)
     send_whatsapp_document(
         phone, BytesIO(zip_bytes), filename=f"CAR_{car_code}.zip",
         caption="📦 Todas as camadas do CAR em shapefile (SIRGAS 2000)",
     )
     print(f"[WA CAR REQ] Processo finalizado para {phone}", flush=True)
+
+
+async def _handle_mapa_car(phone, lat, lon, nome, loop):
+    """Fluxo MAPA_CAR (menu/agente): acha o código CAR no ponto e gera mapa + ZIP."""
+    from app.car_wfs import resolve_car_code
+    car_code = await loop.run_in_executor(None, resolve_car_code, lat, lon)
+    if not car_code:
+        send_whatsapp_text(phone, "⚠️ Não encontrei um imóvel do CAR nessa localização. "
+                                  "Confira a coordenada ou me mande o código do CAR (ex.: MS-5001102-…).")
+        return
+    await process_whatsapp_car_request(phone, car_code, None if nome == "Local Selecionado" else nome)
 
 
 async def _handle_premium(phone):

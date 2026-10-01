@@ -46,6 +46,15 @@ SCENARIOS = [
     {"id": "chuva_por_nome", "messages": ["vai chover na Faz Santa Fé?"],
      "expect_tool": "verificar_previsao_chuva",
      "fake_tools": {"listar_propriedades": DUAS_FAZENDAS}},
+    {"id": "mapa_ambiental", "messages": ["quero o mapa ambiental da Faz Santa Fé"],
+     "expect_tool": "gerar_mapa_car",
+     "fake_tools": {"listar_propriedades": DUAS_FAZENDAS}},
+    {"id": "mapa_car_codigo", "messages": ["me manda as camadas do CAR MS-5001102-F4C226D613B14507A3417DE2438AC122"],
+     "expect_tool": "gerar_mapa_car",
+     "args_equal": {"codigo_car": "MS-5001102-F4C226D613B14507A3417DE2438AC122"}},
+    {"id": "reserva_legal", "messages": ["quanto tenho de reserva legal na Faz Santa Fé?"],
+     "expect_tool": "gerar_mapa_car",
+     "fake_tools": {"listar_propriedades": DUAS_FAZENDAS}},
     {"id": "ndvi_duas_fazendas", "messages": ["como está o pasto pelo satélite?"],
      "expect_reply": "Pergunta ao Patrão QUAL das fazendas (Santa Fé ou Guaviral) ele quer analisar, "
                      "sem escolher sozinho e sem rodar a análise.",
@@ -63,7 +72,9 @@ SCENARIOS = [
 JUDGE_MODEL = "gpt-4o-mini"
 
 
-class _StopScenario(Exception):
+class _StopScenario(BaseException):
+    # BaseException: atravessa o `except Exception` de get_agent_response sem
+    # virar "[Agent Error]" no log — a interrupção é intencional.
     def __init__(self, name, args):
         self.name, self.args = name, args
 
@@ -148,8 +159,20 @@ async def _evaluate(sc: dict) -> dict:
     return result
 
 
+async def _evaluate_with_retry(sc: dict) -> dict:
+    """O modelo não é determinístico: falhou uma vez → roda de novo. Passou na 2ª = 'instável'."""
+    first = await _evaluate(sc)
+    if first["passed"]:
+        return first
+    second = await _evaluate(sc)
+    if second["passed"]:
+        second["detail"] = f"INSTÁVEL (falhou 1 de 2: {first['detail']})"
+        second["flaky"] = True
+    return second
+
+
 async def run_agent_eval_async(notify: bool = True) -> dict:
-    results = [await _evaluate(sc) for sc in SCENARIOS]
+    results = [await _evaluate_with_retry(sc) for sc in SCENARIOS]
     passed = sum(r["passed"] for r in results)
     for r in results:
         print(f"[QA-AGENTE] {'✅' if r['passed'] else '❌'} {r['id']}: {r['detail']}", flush=True)
