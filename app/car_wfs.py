@@ -232,21 +232,27 @@ def build_car_map(car_code: str, property_name: str = None):
     bg_bytes = bg_extent = reg_bg_bytes = reg_bg_extent = None
     try:
         from app.gee_connector import get_satellite_thumbnail
-        main_gdf = gdfs["imovel"]
-        geom = _json.loads(main_gdf.dissolve().to_json())["features"][0]["geometry"]
-        # extents = moldura EXATA de cada imagem (senão o quadro fica deslocado/cortado)
-        main_thumb = get_satellite_thumbnail(geom, 1024, 1500, return_bounds=True)
-        reg_thumb = get_satellite_thumbnail(geom, 800, 10000, return_bounds=True)
-        if main_thumb:
-            resp = requests.get(main_thumb[0], timeout=30)
-            if resp.ok:
-                bg_bytes, bg_extent = resp.content, main_thumb[1]
-        if reg_thumb:
-            resp = requests.get(reg_thumb[0], timeout=30)
-            if resp.ok:
-                reg_bg_bytes, reg_bg_extent = resp.content, reg_thumb[1]
+        geom = _json.loads(gdfs["imovel"].dissolve().to_json())["features"][0]["geometry"]
     except Exception as e:
-        print(f"[CAR-WFS] Fundo de satélite indisponível: {e}", flush=True)
+        print(f"[CAR-WFS] Geometria para satélite indisponível: {e}", flush=True)
+        geom = None
+
+    def _fetch_thumb(dimensions, padding_m):
+        # Uma tentativa por imagem: o mosaico regional pode levar >30 s para
+        # renderizar no GEE e não deve derrubar a imagem principal junto.
+        try:
+            thumb = get_satellite_thumbnail(geom, dimensions, padding_m, return_bounds=True)
+            if thumb:
+                resp = requests.get(thumb[0], timeout=120)
+                if resp.ok:
+                    return resp.content, thumb[1]
+        except Exception as e:
+            print(f"[CAR-WFS] Satélite (padding {padding_m} m) indisponível: {e}", flush=True)
+        return None, None
+
+    if geom:
+        bg_bytes, bg_extent = _fetch_thumb(1024, 1500)
+        reg_bg_bytes, reg_bg_extent = _fetch_thumb(800, 10000)
 
     map_out = generate_pro_car_map(gdfs, bg_bytes, bg_extent, reg_bg_bytes, reg_bg_extent)
     map_bytes = map_out.getvalue() if hasattr(map_out, "getvalue") else map_out

@@ -358,33 +358,81 @@ def generate_precipitation_chart(daily_history, title="Histórico de Chuva (7 di
     plt.close()
     
     return output_path
+LAST_LAYOUT_ISSUES = []  # preenchido por generate_pro_car_map (QA de layout)
+
+
+def check_map_layout(fig, map_ax, panel_artists):
+    """
+    Controle de qualidade do layout: elementos do painel não podem se sobrepor,
+    invadir o mapa nem sair da figura. Devolve lista de problemas (vazia = OK).
+    panel_artists: {nome: artista (Text, Legend, Axes...)}.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    fig_box = fig.bbox
+    map_box = map_ax.get_window_extent(renderer)
+    boxes = {}
+    for name, art in panel_artists.items():
+        try:
+            boxes[name] = art.get_window_extent(renderer)
+        except Exception:
+            continue
+    issues = []
+    # rótulos dos eixos do mapa não podem se atropelar (mapa muito estreito/baixo)
+    for axis_name, labels in (("x", map_ax.get_xticklabels()), ("y", map_ax.get_yticklabels())):
+        tick_boxes = [t.get_window_extent(renderer) for t in labels if t.get_visible() and t.get_text()]
+        for a_box, b_box in zip(tick_boxes, tick_boxes[1:]):
+            if a_box.overlaps(b_box):
+                issues.append(f"rótulos do eixo {axis_name} sobrepostos")
+                break
+    names = list(boxes)
+    for i, a in enumerate(names):
+        b = boxes[a]
+        if b.x0 < fig_box.x0 - 1 or b.y0 < fig_box.y0 - 1 or b.x1 > fig_box.x1 + 1 or b.y1 > fig_box.y1 + 1:
+            issues.append(f"'{a}' sai da figura")
+        if b.overlaps(map_box):
+            issues.append(f"'{a}' sobrepõe o mapa")
+        for c in names[i + 1:]:
+            if b.overlaps(boxes[c]):
+                issues.append(f"'{a}' sobrepõe '{c}'")
+    return issues
+
+
 def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=None, reg_bg_extent=None):
     """
-    Gera um mapa cartográfico profissional.
-    background_img: bytes do zoom principal (ex: 1km padding)
-    reg_bg_img: bytes do zoom regional (ex: 20km padding)
+    Mapa cartográfico profissional do CAR (paisagem): mapa do imóvel à esquerda,
+    SEM nada por cima; à direita, painel com mapa regional (perímetro em amarelo),
+    quadro de áreas, legenda, escala + norte e dados do imóvel. Os blocos do painel
+    são empilhados medindo o tamanho real de cada um, então nada se sobrepõe
+    qualquer que seja o formato do imóvel. Ao final, check_map_layout() confere
+    o resultado e grava os problemas em LAST_LAYOUT_ISSUES.
     """
-    import os
+    global LAST_LAYOUT_ISSUES
+    import math
     import matplotlib.pyplot as plt
-    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
     from io import BytesIO
     import numpy as np
     from datetime import datetime
-    
-    # 1. Configuração da Figura
-    fig, ax = plt.subplots(figsize=(12, 12), facecolor='white')
-    
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch, Rectangle, FancyArrow
+
+    fig = plt.figure(figsize=(16, 10), facecolor='white')
+    gs = fig.add_gridspec(1, 2, width_ratios=[2.15, 1], wspace=0.04, left=0.06, right=0.98, top=0.90, bottom=0.08)
+    ax = fig.add_subplot(gs[0, 0])
+    panel = fig.add_subplot(gs[0, 1])
+    panel.axis('off')
+
     # Cores Oficiais SICAR (Ajustadas para máximo contraste sobre fundo Branco)
     COLORS = {
-        'imovel': {'edgecolor': '#000000', 'facecolor': 'none', 'linewidth': 3.0, 'linestyle': '--', 'label': 'Perimetro do Imovel'},
+        'imovel': {'edgecolor': '#000000', 'facecolor': 'none', 'linewidth': 3.0, 'linestyle': '--', 'label': 'Perímetro do imóvel'},
         'reserva': {'edgecolor': '#003300', 'facecolor': '#1b5e20', 'alpha': 0.7, 'hatch': '///', 'label': 'Reserva Legal (RL)'},
         'app': {'edgecolor': '#01579b', 'facecolor': '#03a9f4', 'alpha': 0.6, 'label': 'A.P.P.'},
-        'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Remanescente Nativa'},
-        'agua': {'edgecolor': '#01579b', 'facecolor': '#4fc3f7', 'linewidth': 1.5, 'alpha': 1.0, 'label': 'Corpo d\'Agua'},
-        'uso_restrito': {'edgecolor': '#f57f17', 'facecolor': '#fff59d', 'alpha': 0.8, 'hatch': '\\\\', 'label': 'Uso Restrito'},
-        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Area Antropizada (Consol)'},
+        'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Remanescente nativo'},
+        'agua': {'edgecolor': '#01579b', 'facecolor': '#4fc3f7', 'linewidth': 1.5, 'alpha': 1.0, 'label': 'Corpo d\'água'},
+        'uso_restrito': {'edgecolor': '#f57f17', 'facecolor': '#fff59d', 'alpha': 0.8, 'hatch': '\\\\', 'label': 'Uso restrito'},
+        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Área antropizada (consolidada)'},
         'sem_classificacao': {'edgecolor': '#9e9e9e', 'facecolor': '#eeeeee', 'alpha': 0.9, 'hatch': '...',
-                              'linewidth': 0.3, 'label': 'Sem classificacao no CAR'}
+                              'linewidth': 0.3, 'label': 'Sem classificação no CAR'}
     }
     
     main_gdf = gdfs.get('imovel')
@@ -454,191 +502,201 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
             except Exception as e:
                 print(f"Erro ao plotar {layer}: {e}")
 
-    # 3.1 AJUSTE CRÍTICO: Zoom focado no imóvel
-    bounds = main_gdf.total_bounds # [minx, miny, maxx, maxy]
-    padx = max((bounds[2] - bounds[0]) * 0.15, 0.001)
-    pady = max((bounds[3] - bounds[1]) * 0.15, 0.001)
+    # 4. Enquadramento: só o imóvel, proporção real (1° lon = cos(lat) × 1° lat)
+    bounds = main_gdf.total_bounds  # [minx, miny, maxx, maxy]
+    padx = max((bounds[2] - bounds[0]) * 0.08, 0.001)
+    pady = max((bounds[3] - bounds[1]) * 0.08, 0.001)
     ax.set_xlim(bounds[0] - padx, bounds[2] + padx)
-    # Margem maior em cima: o quadro de áreas e o mapa regional ficam no topo
-    # e não devem cobrir o imóvel.
-    ax.set_ylim(bounds[1] - pady, bounds[3] + pady * 2.6)
-    # Proporção real em distância (1° de longitude = cos(lat) × 1° de latitude)
-    import math
+    ax.set_ylim(bounds[1] - pady, bounds[3] + pady)
     ax.set_aspect(1 / math.cos(math.radians((bounds[1] + bounds[3]) / 2)), adjustable='box')
+    ax.set_anchor('C')
 
-    # 4. Estética Cartográfica
-    ax.set_title("RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=20, fontweight='bold', color='#1a1a1a', pad=30)
     ax.grid(True, linestyle=':', color='gray', alpha=0.4, zorder=0)
-    ax.set_xlabel('Longitude', fontsize=10, color='gray')
-    ax.set_ylabel('Latitude', fontsize=10, color='gray')
-    
-    # Formatar Eixos em Graus e Minutos
-    from matplotlib.ticker import FuncFormatter
-    def deg_min_fmt(x, pos):
-        deg = int(x)
-        min_dec = abs(x - deg) * 60
-        mins = int(min_dec)
-        # Handle sign
-        sign = "-" if x < 0 else ""
-        return f"{sign}{abs(deg)}°{mins:02d}'"
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
 
+    def deg_min_fmt(v, pos):
+        sign = "-" if v < 0 else ""
+        v = abs(v)
+        deg = int(v)
+        mins = (v - deg) * 60
+        return f"{sign}{deg}°{mins:04.1f}'".replace('.', ',')
+
+    # Nº de marcações conforme o tamanho real do mapa na figura (mapa estreito → menos rótulos)
+    fig.canvas.draw()
+    _box = ax.get_window_extent(fig.canvas.get_renderer())
+    ax.xaxis.set_major_locator(MaxNLocator(max(2, min(6, int(_box.width / fig.dpi / 1.1)))))
+    ax.yaxis.set_major_locator(MaxNLocator(max(2, min(6, int(_box.height / fig.dpi / 1.1)))))
     ax.xaxis.set_major_formatter(FuncFormatter(deg_min_fmt))
     ax.yaxis.set_major_formatter(FuncFormatter(deg_min_fmt))
-    
-    # Rotação da grade Y (alinhada verticalmente)
-    ax.tick_params(axis='y', labelrotation=90, labelsize=9)
-    ax.tick_params(axis='x', labelsize=9)
-    
-    # Norte
-    x, y, arrow_length = 0.96, 0.94, 0.05
-    ax.annotate('N', xy=(x, y), xytext=(x, y-arrow_length),
-                arrowprops=dict(facecolor='black', width=3, headwidth=10),
-                ha='center', va='center', fontsize=18, fontweight='bold', xycoords='axes fraction')
-    
-    # 5. Escala Gráfica Cartográfica (com divisões)
-    try:
-        center = main_gdf.geometry.centroid.iloc[0]
-        m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
-        total_ha = areas_ha.get('imovel', 0)
-        
-        if total_ha > 1500: s_m, s_lab = 2000, "2 km"
-        elif total_ha > 300: s_m, s_lab = 1000, "1 km"
-        elif total_ha > 80: s_m, s_lab = 500, "500 m"
-        else: s_m, s_lab = 200, "200 m"
-        
-        s_deg = s_m / m_per_deg_lon
-        ax_xmin, ax_xmax = ax.get_xlim()
-        ax_ymin, ax_ymax = ax.get_ylim()
-        
-        # Posição: inferior esquerda
-        bx = ax_xmin + (ax_xmax - ax_xmin) * 0.05
-        by = ax_ymin + (ax_ymax - ax_ymin) * 0.05
-        
-        # Desenhar barra de escala segmentada
-        divs = 4
-        segment = s_deg / divs
-        for i in range(divs):
-            color = 'black' if i % 2 == 0 else 'white'
-            ax.plot([bx + i*segment, bx + (i+1)*segment], [by, by], color='black', lw=6, solid_capstyle='butt', zorder=20)
-            ax.plot([bx + i*segment, bx + (i+1)*segment], [by, by], color=color, lw=4, solid_capstyle='butt', zorder=21)
-        
-        # Característica: uma antes do zero e 3 depois
-        # ... Simplificando: Marca 0, meio e fim
-        ax.text(bx, by - (ax_ymax-ax_ymin)*0.015, "0", ha='center', fontsize=8, fontweight='bold')
-        ax.text(bx + s_deg, by - (ax_ymax-ax_ymin)*0.015, s_lab, ha='center', fontsize=8, fontweight='bold')
-        ax.text(bx + s_deg/2, by + (ax_ymax-ax_ymin)*0.015, "Escala", ha='center', fontsize=9, fontweight='bold')
-    except: pass
+    ax.tick_params(axis='y', labelrotation=90, labelsize=8)
+    ax.tick_params(axis='x', labelsize=8)
 
-    # 6. Mapa de Localização (Inset)
-    try:
-        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        # Quadrado maior para o contexto
-        ax_inset = inset_axes(ax, width="25%", height="25%", loc='upper right', borderpad=1)
-        ax_inset.set_facecolor('#ffffff')
-        
-        # Se tiver imagem regional, trava os limites EXATAMENTE nela para preencher o box
-        try:
-            from matplotlib.image import imread
-            import io
-            if reg_bg_img and reg_bg_extent:
-                img_reg = imread(io.BytesIO(reg_bg_img), format='png')
-                ax_inset.imshow(img_reg, extent=reg_bg_extent, zorder=0)
-                ax_inset.set_xlim(reg_bg_extent[0], reg_bg_extent[1])
-                ax_inset.set_ylim(reg_bg_extent[2], reg_bg_extent[3])
-            elif background_img and bg_extent:
-                img_data = imread(io.BytesIO(background_img), format='png')
-                ax_inset.imshow(img_data, extent=bg_extent)
-                ax_inset.set_xlim(bg_extent[0], bg_extent[1])
-                ax_inset.set_ylim(bg_extent[2], bg_extent[3])
-        except Exception as e:
-            print(f"Erro no mapa de contexto: {e}")
-            
-        # Perímetro do imóvel (só a linha, amarelo) + ponto no centro
-        main_gdf.boundary.plot(ax=ax_inset, color='#ffeb3b', linewidth=1.4, zorder=9)
-        main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=30, zorder=10)
-        
-        ax_inset.set_xticks([]); ax_inset.set_yticks([])
-        # Borda preta forte
-        for spine in ax_inset.spines.values():
-            spine.set_visible(True)
-            spine.set_edgecolor('black')
-            spine.set_linewidth(1.5)
+    def _ticks_overlap(labels):
+        r = fig.canvas.get_renderer()
+        bbs = [t.get_window_extent(r) for t in labels if t.get_visible() and t.get_text()]
+        return any(a.overlaps(b) for a, b in zip(bbs, bbs[1:]))
 
-        st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
-        # Title movido pra baixo para evitar sobreposição
-        ax_inset.text(0.5, -0.1, f"Regional ({st_code})", transform=ax_inset.transAxes, 
-                      fontsize=11, fontweight='bold', ha='center', va='top')
-    except: pass
+    # Rótulos ainda se atropelando (mapa estreito/baixo) → menos marcações; no limite, inclina
+    for axis, getter in ((ax.xaxis, ax.get_xticklabels), (ax.yaxis, ax.get_yticklabels)):
+        nbins = axis.get_major_locator()._nbins if hasattr(axis.get_major_locator(), '_nbins') else 5
+        fig.canvas.draw()
+        while _ticks_overlap(getter()) and nbins > 2:
+            nbins -= 1
+            axis.set_major_locator(MaxNLocator(nbins))
+            fig.canvas.draw()
+        if axis is ax.xaxis and _ticks_overlap(getter()):
+            ax.tick_params(axis='x', labelrotation=35)
+            for t in ax.get_xticklabels():
+                t.set_ha('right')
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#424242')
 
-    # 7. Quadro de Informações
-    info_text = (
-        f"Propriedade: {prop_name}\n"
-        f"Código CAR:   {cod_car}\n"
-        f"Emissão:      {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"Sistema:      SIRGAS 2000"
-    )
-    plt.text(0.98, 0.02, info_text, transform=ax.transAxes, fontsize=10, ha='right', va='bottom', fontfamily='monospace',
-             zorder=25, bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', alpha=0.9, edgecolor='#ced4da'))
+    fig.suptitle("RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=19, fontweight='bold', color='#1a1a1a', y=0.965)
 
-    # Adicionando texto de logo / marca no topo ou base
-    plt.text(0.5, -0.27, "Processado com Agro Analytics Bot · Fonte: Consulta Pública do CAR", transform=ax.transAxes, 
-             fontsize=9, color='gray', ha='center', va='top', zorder=25)
+    # 5. Painel lateral — blocos empilhados de cima para baixo (coordenadas do painel)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    panel_box = panel.get_window_extent(renderer)
 
-    # 8. Quadro de Áreas (Recuado para não sobrepor)
-    areas_text = "QUADRO DE ÁREAS (ha)\n" + "=" * 22 + "\n"
-    # Filtrar apenas o que tem área e nome amigável
-    labels_friendly = {
-        'imovel': 'Total Imovel', 'reserva': 'Reserva Legal', 'app': 'A.P.P.', 
-        'vegetacao': 'Remanescente', 'uso_restrito': 'Uso Restrito', 'consolidada': 'Area Antrop.',
-        'sem_classificacao': 'Sem classif.'
-    }
-    
-    # Exibir no quadro apenas as principais
-    for key, friendly in labels_friendly.items():
-        if key in areas_ha and areas_ha[key] > 0:
-            areas_text += f"{friendly:<15}: {areas_ha[key]:>8.2f}\n"
+    def next_y(artist, gap=0.025):
+        bb = artist.get_window_extent(renderer)
+        return (bb.y0 - panel_box.y0) / panel_box.height - gap
 
-    plt.text(0.02, 0.98, areas_text, transform=ax.transAxes, fontsize=11, ha='left', va='top', fontfamily='monospace',
-             zorder=25, bbox=dict(boxstyle='round,pad=0.8', facecolor='#f1f3f5', alpha=0.95, edgecolor='#adb5bd'))
+    artists = {}
+    y = 1.0
 
-    # 9. Legenda DINÂMICA (Lida com camadas extras)
-    from matplotlib.lines import Line2D
-    from matplotlib.patches import Patch
-    legend_elements = []
-    
-    # Prioridade de exibição na legenda
+    # Itens da legenda (definem o espaço do painel)
     display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'uso_restrito', 'agua', 'sem_classificacao', 'imovel']
-    # Adicionar camadas "extra" que foram detectadas no ZIP
-    for key in gdfs.keys():
-        if key not in display_order:
-            display_order.append(key)
-            
+    display_order += [k for k in gdfs if k not in display_order]
+    handles = []
     for l in display_order:
-        if l in gdfs and not gdfs[l].empty:
-            label_text = COLORS.get(l, {}).get('label', l.replace('extra_', '').replace('_', ' ').title())
-            if l in COLORS:
-                style = COLORS[l]
-                if 'facecolor' in style:
-                    legend_elements.append(Patch(facecolor=style['facecolor'], edgecolor=style['edgecolor'], 
-                                               alpha=style.get('alpha', 1.0), hatch=style.get('hatch'), label=label_text))
-                else:
-                    legend_elements.append(Line2D([0], [0], color=style['edgecolor'], lw=2, label=label_text))
-            else:
-                # Cor genérica para camadas extras
-                legend_elements.append(Patch(facecolor='#9e9e9e', edgecolor='#424242', alpha=0.5, label=label_text))
-    
-    # Legenda em colunas no rodapé
-    ax.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=10, 
-              frameon=True, facecolor='white', framealpha=1, shadow=True)
+        if l not in gdfs or gdfs[l].empty:
+            continue
+        extra_names = {'extra_servidao': 'Servidão administrativa', 'extra_pousio': 'Área de pousio'}
+        label_text = COLORS.get(l, {}).get('label') or extra_names.get(l) or l.replace('extra_', '').replace('_', ' ').capitalize()
+        style = COLORS.get(l)
+        if style and style.get('facecolor') not in (None, 'none'):
+            handles.append(Patch(facecolor=style['facecolor'], edgecolor=style['edgecolor'],
+                                 alpha=style.get('alpha', 1.0), hatch=style.get('hatch'), label=label_text))
+        elif style:
+            handles.append(Line2D([0], [0], color=style['edgecolor'], lw=2.2,
+                                  linestyle=style.get('linestyle', '-'), label=label_text))
+        else:
+            handles.append(Patch(facecolor='#9e9e9e', edgecolor='#424242', alpha=0.5, label=label_text))
+    # Muitas camadas → legenda em 2 colunas e mapa regional menor, para caber tudo
+    long_legend = len(handles) > 6
 
-    # Finalização
-    plt.tight_layout()
+    # 5.1 Mapa regional (Sentinel-2) com o perímetro em amarelo
+    st_code = str(main_gdf.iloc[0].get('COD_IMOVEL') or 'CAR')[:2]
+    inset_h = 0.28 if long_legend else 0.36
+    ax_inset = panel.inset_axes([0.0, y - inset_h, 1.0, inset_h])
+    ax_inset.set_facecolor('#ffffff')
+    try:
+        from PIL import Image as _PILImage
+        import io as _io
+        if reg_bg_img and reg_bg_extent:
+            ax_inset.imshow(np.asarray(_PILImage.open(_io.BytesIO(reg_bg_img)).convert('RGB')), extent=reg_bg_extent, zorder=0)
+            ax_inset.set_xlim(reg_bg_extent[0], reg_bg_extent[1]); ax_inset.set_ylim(reg_bg_extent[2], reg_bg_extent[3])
+        elif background_img and bg_extent:
+            ax_inset.imshow(np.asarray(_PILImage.open(_io.BytesIO(background_img)).convert('RGB')), extent=bg_extent, zorder=0)
+            ax_inset.set_xlim(bg_extent[0], bg_extent[1]); ax_inset.set_ylim(bg_extent[2], bg_extent[3])
+        else:
+            rb = main_gdf.buffer(0.08).total_bounds
+            ax_inset.set_xlim(rb[0], rb[2]); ax_inset.set_ylim(rb[1], rb[3])
+    except Exception as e:
+        print(f"Erro no mapa de contexto: {e}")
+    main_gdf.boundary.plot(ax=ax_inset, color='#ffeb3b', linewidth=1.4, zorder=9)
+    main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=25, zorder=10)
+    # adjustable='box': a caixa segue a proporção da imagem (sem faixas brancas)
+    ax_inset.set_aspect(1 / math.cos(math.radians((bounds[1] + bounds[3]) / 2)), adjustable='box')
+    ax_inset.set_anchor('N')
+    ax_inset.set_xticks([]); ax_inset.set_yticks([])
+    for spine in ax_inset.spines.values():
+        spine.set_edgecolor('black'); spine.set_linewidth(1.2)
+    fig.canvas.draw()
+    inset_box = ax_inset.get_window_extent(renderer)
+    reg_label = panel.text(0.5, (inset_box.y0 - panel_box.y0) / panel_box.height - 0.008,
+                           f"Localização regional ({st_code})", ha='center', va='top',
+                           fontsize=10, fontweight='bold', transform=panel.transAxes)
+    artists['mapa regional'] = ax_inset
+    artists['título regional'] = reg_label
+    y = next_y(reg_label)
+
+    # 5.2 Quadro de áreas
+    labels_friendly = {
+        'imovel': 'Total do imóvel', 'reserva': 'Reserva Legal', 'app': 'A.P.P.',
+        'vegetacao': 'Remanescente nativo', 'uso_restrito': 'Uso restrito', 'consolidada': 'Área antropizada',
+        'sem_classificacao': 'Sem classificação',
+    }
+    rows = [f"{name:<20}{areas_ha[k]:>10.2f}".replace(f"{areas_ha[k]:.2f}", f"{areas_ha[k]:.2f}".replace('.', ','))
+            for k, name in labels_friendly.items() if areas_ha.get(k, 0) > 0]
+    areas_box = panel.text(0.0, y, "QUADRO DE ÁREAS (ha)\n" + "\n".join(rows), transform=panel.transAxes,
+                           fontsize=9.5, ha='left', va='top', fontfamily='monospace',
+                           bbox=dict(boxstyle='round,pad=0.6', facecolor='#f1f3f5', edgecolor='#adb5bd'))
+    artists['quadro de áreas'] = areas_box
+    y = next_y(areas_box, gap=0.035)
+
+    # 5.3 Legenda (só camadas presentes; itens montados antes do painel)
+    legend = panel.legend(handles=handles, loc='upper left', bbox_to_anchor=(0.0, y),
+                          ncol=2 if long_legend else 1, fontsize=8.5 if long_legend else 9.5, frameon=True, facecolor='white', edgecolor='#ced4da',
+                          title="Legenda", title_fontsize=10, alignment='left')
+    artists['legenda'] = legend
+    fig.canvas.draw()
+    y = next_y(legend, gap=0.04)
+
+    # 5.4 Escala gráfica (mesmo comprimento que teria no mapa) + Norte
+    center = main_gdf.geometry.centroid.iloc[0]
+    m_per_deg_lon = 111320 * np.cos(np.radians(center.y))
+    map_box = ax.get_window_extent(renderer)
+    x0, x1 = ax.get_xlim()
+    px_per_m = map_box.width / ((x1 - x0) * m_per_deg_lon)
+    for s_m, s_lab in ((10000, "10 km"), (5000, "5 km"), (2000, "2 km"), (1000, "1 km"),
+                       (500, "500 m"), (200, "200 m"), (100, "100 m")):
+        if s_m * px_per_m <= panel_box.width * 0.62:
+            break
+    bar_frac = s_m * px_per_m / panel_box.width
+    bar_h = 0.012
+    divs = 4
+    for i in range(divs):
+        panel.add_patch(Rectangle((i * bar_frac / divs, y - bar_h), bar_frac / divs, bar_h,
+                                  transform=panel.transAxes, facecolor='black' if i % 2 == 0 else 'white',
+                                  edgecolor='black', lw=1, clip_on=False))
+    scale_title = panel.text(0.0, y + 0.006, "Escala", transform=panel.transAxes, fontsize=9, fontweight='bold', va='bottom')
+    scale_0 = panel.text(0.0, y - bar_h - 0.006, "0", transform=panel.transAxes, fontsize=8, ha='center', va='top')
+    scale_end = panel.text(bar_frac, y - bar_h - 0.006, s_lab, transform=panel.transAxes, fontsize=8, ha='center', va='top')
+    north = panel.annotate('N', xy=(0.93, y + 0.005), xytext=(0.93, y - 0.055), xycoords='axes fraction',
+                           ha='center', va='center', fontsize=15, fontweight='bold',
+                           arrowprops=dict(facecolor='black', width=3, headwidth=10))
+    artists['escala'] = scale_end
+    artists['norte'] = north
+    fig.canvas.draw()
+    y = min(next_y(scale_end, gap=0.045), next_y(north, gap=0.045))
+
+    # 5.5 Dados do imóvel
+    info = panel.text(
+        0.0, y,
+        f"Propriedade: {prop_name}\nCódigo CAR:\n{cod_car}\n"
+        f"Emissão: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nSistema: SIRGAS 2000",
+        transform=panel.transAxes, fontsize=9, ha='left', va='top', fontfamily='monospace',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', edgecolor='#ced4da'))
+    artists['dados do imóvel'] = info
+
+    footer = fig.text(0.5, 0.02, "Processado com Agro Analytics Bot · Fonte: Consulta Pública do CAR (consulta.car.gov.br)",
+                      ha='center', va='bottom', fontsize=8.5, color='gray')
+    artists['rodapé'] = footer
+
+    # 6. Controle de qualidade do layout
+    LAST_LAYOUT_ISSUES = check_map_layout(fig, ax, artists)
+    if not ax_inset.images:
+        LAST_LAYOUT_ISSUES.append("mapa regional sem imagem de satélite")
+    if LAST_LAYOUT_ISSUES:
+        print(f"[MAPA CAR] ⚠️ Layout com problemas: {LAST_LAYOUT_ISSUES}", flush=True)
+
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=120, bbox_inches='tight')
-    plt.close()
+    fig.savefig(buf, format='png', dpi=120, facecolor='white')
+    plt.close(fig)
     buf.seek(0)
     return buf.read()
-
 
 def generate_cda_summary_card(summary: dict):
     """

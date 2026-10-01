@@ -135,6 +135,27 @@ def check_car_wfs():
     return _ok(f"{len(gdfs)} categorias, ZIP {len(zip_bytes)//1024} KB")
 
 
+LAYOUT_REF_CARS = {
+    "alto e estreito (Faz Reato)": "MS-5001102-5A3E68BEE8EC468482B6833F0BAC15A2",
+    "largo (Faz Santa Fé)": REF_CAR,
+}
+
+
+def check_car_map_layout():
+    from app.car_wfs import build_car_map
+    from app import charts
+    problems = []
+    for label, code in LAYOUT_REF_CARS.items():
+        map_bytes, _, err = build_car_map(code, label)
+        if err or not map_bytes:
+            problems.append(f"{label}: {err or 'mapa não gerado'}")
+        elif charts.LAST_LAYOUT_ISSUES:
+            problems.append(f"{label}: {'; '.join(charts.LAST_LAYOUT_ISSUES)}")
+    if problems:
+        return _fail(" | ".join(problems))
+    return _ok(f"layout OK em {len(LAYOUT_REF_CARS)} formatos de imóvel")
+
+
 CHECKS = {
     "Cotação (Scot)": check_cotacao,
     "Mercado Futuro": check_mercado_futuro,
@@ -144,6 +165,7 @@ CHECKS = {
     "Leilão CDA": check_cda,
     "PRODES": check_prodes,
     "CAR (WFS oficial)": check_car_wfs,
+    "Mapa CAR (layout)": check_car_map_layout,
 }
 
 
