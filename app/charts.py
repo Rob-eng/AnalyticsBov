@@ -382,7 +382,9 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         'vegetacao': {'edgecolor': '#2e7d32', 'facecolor': '#4caf50', 'alpha': 0.5, 'label': 'Remanescente Nativa'},
         'agua': {'edgecolor': '#01579b', 'facecolor': '#4fc3f7', 'linewidth': 1.5, 'alpha': 1.0, 'label': 'Corpo d\'Agua'},
         'uso_restrito': {'edgecolor': '#f57f17', 'facecolor': '#fff59d', 'alpha': 0.8, 'hatch': '\\\\', 'label': 'Uso Restrito'},
-        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Area Antropizada (Consol)'}
+        'consolidada': {'edgecolor': '#4e342e', 'facecolor': '#ff3d00', 'alpha': 0.7, 'label': 'Area Antropizada (Consol)'},
+        'sem_classificacao': {'edgecolor': '#9e9e9e', 'facecolor': '#eeeeee', 'alpha': 0.9, 'hatch': '...',
+                              'linewidth': 0.3, 'label': 'Sem classificacao no CAR'}
     }
     
     main_gdf = gdfs.get('imovel')
@@ -392,6 +394,21 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # Merge de múltiplos polígonos do imóvel para não duplicar áreas/bordas
     main_gdf = main_gdf.dissolve()
     gdfs['imovel'] = main_gdf
+
+    # Área do imóvel que o proprietário não declarou em nenhum tema do CAR:
+    # sem isso ela aparecia como "buraco" branco e parecia camada faltante.
+    gdfs.pop('sem_classificacao', None)
+    try:
+        themed = [g for k, g in gdfs.items() if k != 'imovel' and not g.empty]
+        if themed:
+            import geopandas as gpd
+            from shapely.ops import unary_union
+            covered = unary_union([g.to_crs(main_gdf.crs).geometry.buffer(0).unary_union for g in themed])
+            rest = main_gdf.geometry.buffer(0).unary_union.difference(covered)
+            if not rest.is_empty and rest.area > main_gdf.geometry.area.sum() * 0.005:
+                gdfs['sem_classificacao'] = gpd.GeoDataFrame(geometry=[rest], crs=main_gdf.crs)
+    except Exception as ue:
+        print(f"Área sem classificação não calculada: {ue}")
 
     # Tenta obter nome e código de forma robusta
     row = main_gdf.iloc[0]
@@ -419,7 +436,8 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
 
     # 3. Plotagem das camadas
     # Ordem base (extras primeiro para ficarem por baixo, imovel por ultimo)
-    plot_order = [l for l in gdfs.keys() if l not in ['imovel', 'agua', 'reserva', 'app', 'vegetacao', 'uso_restrito', 'consolidada']]
+    plot_order = ['sem_classificacao']
+    plot_order += [l for l in gdfs.keys() if l not in ['imovel', 'agua', 'reserva', 'app', 'vegetacao', 'uso_restrito', 'consolidada', 'sem_classificacao']]
     plot_order += ['consolidada', 'uso_restrito', 'vegetacao', 'app', 'reserva', 'agua', 'imovel']
     
     for layer in plot_order:
@@ -441,8 +459,12 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     padx = max((bounds[2] - bounds[0]) * 0.15, 0.001)
     pady = max((bounds[3] - bounds[1]) * 0.15, 0.001)
     ax.set_xlim(bounds[0] - padx, bounds[2] + padx)
-    ax.set_ylim(bounds[1] - pady, bounds[3] + pady)
-    ax.set_aspect('equal', adjustable='box')
+    # Margem maior em cima: o quadro de áreas e o mapa regional ficam no topo
+    # e não devem cobrir o imóvel.
+    ax.set_ylim(bounds[1] - pady, bounds[3] + pady * 2.6)
+    # Proporção real em distância (1° de longitude = cos(lat) × 1° de latitude)
+    import math
+    ax.set_aspect(1 / math.cos(math.radians((bounds[1] + bounds[3]) / 2)), adjustable='box')
 
     # 4. Estética Cartográfica
     ax.set_title("RELATÓRIO AMBIENTAL GEOESTATÍSTICO", fontsize=20, fontweight='bold', color='#1a1a1a', pad=30)
@@ -531,8 +553,9 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
         except Exception as e:
             print(f"Erro no mapa de contexto: {e}")
             
-        # Ponto marcador no centro do imóvel
-        main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=50, zorder=10)
+        # Perímetro do imóvel (só a linha, amarelo) + ponto no centro
+        main_gdf.boundary.plot(ax=ax_inset, color='#ffeb3b', linewidth=1.4, zorder=9)
+        main_gdf.centroid.plot(ax=ax_inset, color='red', edgecolor='white', markersize=30, zorder=10)
         
         ax_inset.set_xticks([]); ax_inset.set_yticks([])
         # Borda preta forte
@@ -558,7 +581,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
              zorder=25, bbox=dict(boxstyle='round,pad=0.5', facecolor='#ffffff', alpha=0.9, edgecolor='#ced4da'))
 
     # Adicionando texto de logo / marca no topo ou base
-    plt.text(0.5, -0.12, "🗺️ Processado com Agro Analytics Bot", transform=ax.transAxes, 
+    plt.text(0.5, -0.27, "Processado com Agro Analytics Bot · Fonte: Consulta Pública do CAR", transform=ax.transAxes, 
              fontsize=9, color='gray', ha='center', va='top', zorder=25)
 
     # 8. Quadro de Áreas (Recuado para não sobrepor)
@@ -566,7 +589,8 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     # Filtrar apenas o que tem área e nome amigável
     labels_friendly = {
         'imovel': 'Total Imovel', 'reserva': 'Reserva Legal', 'app': 'A.P.P.', 
-        'vegetacao': 'Remanescente', 'uso_restrito': 'Uso Restrito', 'consolidada': 'Area Antrop.'
+        'vegetacao': 'Remanescente', 'uso_restrito': 'Uso Restrito', 'consolidada': 'Area Antrop.',
+        'sem_classificacao': 'Sem classif.'
     }
     
     # Exibir no quadro apenas as principais
@@ -583,7 +607,7 @@ def generate_pro_car_map(gdfs, background_img=None, bg_extent=None, reg_bg_img=N
     legend_elements = []
     
     # Prioridade de exibição na legenda
-    display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'uso_restrito', 'agua', 'imovel']
+    display_order = ['consolidada', 'vegetacao', 'app', 'reserva', 'uso_restrito', 'agua', 'sem_classificacao', 'imovel']
     # Adicionar camadas "extra" que foram detectadas no ZIP
     for key in gdfs.keys():
         if key not in display_order:

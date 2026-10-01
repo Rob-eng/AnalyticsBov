@@ -630,11 +630,13 @@ def get_terrain_data(geometry_geojson):
         print(traceback.format_exc(), flush=True)
         return None
 
-def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
+def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000, return_bounds=False):
     """
     Gera uma URL de miniatura RGB (Sentinel-2) para a geometria fornecida.
     dimensoes: 1024 (alta qualidade)
     padding_m: buffer em metros ao redor da area
+    return_bounds: devolve (url, [minx, maxx, miny, maxy]) com a moldura EXATA da
+        imagem — use como extent no imshow para o mapa não ficar desalinhado.
     """
     try:
         if not initialize_gee():
@@ -658,9 +660,13 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
                       .sort('CLOUDY_PIXEL_PERCENTAGE')) # Pega a com menos nuvem do ano
         
         if collection.size().getInfo() > 0:
-            image = collection.first()
+            # Mosaico (mediana das cenas com pouca nuvem): uma cena só não cobre a
+            # região inteira quando ela passa da borda do tile — o quadro saía cortado.
+            low_cloud = collection.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+            n_low = low_cloud.size().getInfo()
+            image = low_cloud.median() if n_low > 0 else collection.mosaic()
             v_params = {'bands': ['B4', 'B3', 'B2'], 'min': 0, 'max': 3500, 'gamma': 1.3}
-            print(f"[GEE] Usando Sentinel-2 (Nuvens: {image.get('CLOUDY_PIXEL_PERCENTAGE').getInfo()}%)", flush=True)
+            print(f"[GEE] Usando Sentinel-2 (mosaico de {n_low} cenas com nuvem < 20%)", flush=True)
         else:
             # Fallback para Landsat 8 (30m)
             collection = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
@@ -698,6 +704,10 @@ def get_satellite_thumbnail(geometry_geojson, dimensions=1024, padding_m=1000):
         })
         
         print(f"[GEE] URL Gerada: {thumb_url[:100]}...", flush=True)
+        if return_bounds:
+            coords = region.coordinates().getInfo()[0]
+            xs, ys = [c[0] for c in coords], [c[1] for c in coords]
+            return thumb_url, [min(xs), max(xs), min(ys), max(ys)]
         return thumb_url
 
     except Exception as e:

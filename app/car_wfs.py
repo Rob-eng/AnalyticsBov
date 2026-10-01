@@ -233,19 +233,18 @@ def build_car_map(car_code: str, property_name: str = None):
     try:
         from app.gee_connector import get_satellite_thumbnail
         main_gdf = gdfs["imovel"]
-        geom = _json.loads(main_gdf.to_json())["features"][0]["geometry"]
-        b = main_gdf.buffer(0.015).total_bounds
-        bg_extent = [b[0], b[2], b[1], b[3]]
-        r = main_gdf.buffer(0.10).total_bounds
-        reg_bg_extent = [r[0], r[2], r[1], r[3]]
-        turl = get_satellite_thumbnail(geom, 1024, 1500)
-        rturl = get_satellite_thumbnail(geom, 800, 10000)
-        if turl:
-            resp = requests.get(turl, timeout=30)
-            bg_bytes = resp.content if resp.ok else None
-        if rturl:
-            resp = requests.get(rturl, timeout=30)
-            reg_bg_bytes = resp.content if resp.ok else None
+        geom = _json.loads(main_gdf.dissolve().to_json())["features"][0]["geometry"]
+        # extents = moldura EXATA de cada imagem (senão o quadro fica deslocado/cortado)
+        main_thumb = get_satellite_thumbnail(geom, 1024, 1500, return_bounds=True)
+        reg_thumb = get_satellite_thumbnail(geom, 800, 10000, return_bounds=True)
+        if main_thumb:
+            resp = requests.get(main_thumb[0], timeout=30)
+            if resp.ok:
+                bg_bytes, bg_extent = resp.content, main_thumb[1]
+        if reg_thumb:
+            resp = requests.get(reg_thumb[0], timeout=30)
+            if resp.ok:
+                reg_bg_bytes, reg_bg_extent = resp.content, reg_thumb[1]
     except Exception as e:
         print(f"[CAR-WFS] Fundo de satélite indisponível: {e}", flush=True)
 
