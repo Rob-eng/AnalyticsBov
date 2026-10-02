@@ -41,6 +41,16 @@ export type Property = {
 export type PaddockProps = { id: number; name: string; area_ha: number; pasture_ha: number; excluded_ha: number; ndvi?: number | null }
 export type Paddocks = GeoJSON.FeatureCollection<GeoJSON.Polygon, PaddockProps> & { exclusions?: GeoJSON.FeatureCollection }
 export type Paddock = GeoJSON.Feature<GeoJSON.Polygon, PaddockProps> & { id: number }
+export type Lot = { id: number; name: string; category: string; category_label: string; head_count: number; avg_weight_kg: number | null; default_weight_kg: number; ua: number; notes: string | null; paddock_id: number | null; paddock_name: string | null; since: string | null }
+export type Herd = { lots: Lot[]; summary: { heads: number; ua: number; ua_ha: number | null; area_ha: number; area_base: string }; categories: { key: string; label: string; default_weight_kg: number }[] }
+export type GrazingStatus = 'em_uso' | 'descanso' | 'pronto' | 'descanso_longo' | 'sem_registro'
+export type GrazingPaddock = {
+  id: number; name: string; pasture_ha: number; status: GrazingStatus; days?: number; since?: string
+  lots?: { id: number; name: string; heads: number; ua: number }[]; ua?: number; ua_ha?: number | null; ndvi: number | null
+  flag: { level: 'alerta' | 'atencao' | 'info'; text: string } | null
+  history: { lot: string; entered_on: string; left_on: string | null; days: number; heads: number; ua: number; source: string }[]
+}
+export type Grazing = { paddocks: GrazingPaddock[]; rest_window: [number, number]; ndvi_date: string | null }
 export type Alerts = { ndvi: boolean; rain: boolean; prodes: boolean }
 export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null; alerts: Alerts }
 export type HistoryItem = { id: number; kind: string; title: string; detail: string | null; created_at: string; file_type: string | null; file_url: string | null }
@@ -81,6 +91,12 @@ export const api = {
   createPaddock: (id: number, name: string, geometry: GeoJSON.Polygon) => request<Paddock>(`/properties/${id}/paddocks`, { method: 'POST', body: JSON.stringify({ name, geometry }) }),
   editPaddock: (id: number, pid: number, body: { name?: string; geometry?: GeoJSON.Polygon }) => request<Paddock>(`/properties/${id}/paddocks/${pid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePaddock: (id: number, pid: number) => request<void>(`/properties/${id}/paddocks/${pid}`, { method: 'DELETE' }),
+  herd: (id: number) => request<Herd>(`/properties/${id}/herd`),
+  createLot: (id: number, body: { name: string; category: string; head_count: number; avg_weight_kg?: number | null; notes?: string }) => request<Herd>(`/properties/${id}/lots`, { method: 'POST', body: JSON.stringify(body) }),
+  editLot: (id: number, lot: number, body: Partial<{ name: string; category: string; head_count: number; avg_weight_kg: number | null; notes: string }>) => request<Herd>(`/properties/${id}/lots/${lot}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteLot: (id: number, lot: number) => request<void>(`/properties/${id}/lots/${lot}`, { method: 'DELETE' }),
+  moveLot: (id: number, lot: number, paddock_id: number | null, on: string) => request<Herd>(`/properties/${id}/lots/${lot}/move`, { method: 'POST', body: JSON.stringify({ paddock_id, on }) }),
+  grazing: (id: number) => request<Grazing>(`/properties/${id}/grazing`),
   cutPaddock: (id: number, pid: number, body: { geometry: GeoJSON.Polygon } | { source: 'car' }) => request<Paddock>(`/properties/${id}/paddocks/${pid}/cut`, { method: 'POST', body: JSON.stringify(body) }),
   clearCuts: (id: number, pid: number) => request<Paddock>(`/properties/${id}/paddocks/${pid}/cut`, { method: 'DELETE' }),
   paddockSeries: (id: number, pid: number) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/paddocks/${pid}/ndvi/series`),

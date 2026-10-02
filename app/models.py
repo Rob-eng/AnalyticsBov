@@ -205,6 +205,40 @@ class PropertyPaddock(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class PropertyLot(Base):
+    """Lote do rebanho (categoria, cabeças, peso médio) — base da lotação (UA/ha) e da rotação de pastejo."""
+    __tablename__ = 'property_lots'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=False)              # vaca | touro | boi | novilho | novilha | bezerro
+    head_count = Column(Integer, nullable=False)
+    avg_weight_kg = Column(Float, nullable=True)            # vazio = peso padrão da categoria
+    notes = Column(Text, nullable=True)
+    current_paddock_id = Column(Integer, ForeignKey('property_paddocks.id', ondelete='SET NULL'), nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PaddockOccupation(Base):
+    """Entrada/saída de um lote num piquete (registro manual hoje; automático com a telemetria depois)."""
+    __tablename__ = 'paddock_occupations'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    paddock_id = Column(Integer, ForeignKey('property_paddocks.id', ondelete='CASCADE'), nullable=False, index=True)
+    lot_id = Column(Integer, ForeignKey('property_lots.id', ondelete='CASCADE'), nullable=False, index=True)
+    entered_on = Column(Date, nullable=False)
+    left_on = Column(Date, nullable=True)                   # vazio = lote ainda no piquete
+    head_count = Column(Integer, nullable=False)            # foto do lote na entrada (para o histórico)
+    ua = Column(Float, nullable=False)
+    source = Column(String, default='manual')               # manual | telemetria
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Organization(Base):
     """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
     __tablename__ = 'organizations'

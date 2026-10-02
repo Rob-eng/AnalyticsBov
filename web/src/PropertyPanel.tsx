@@ -10,6 +10,7 @@ import ProdesSection from './ProdesSection'
 import AlertsSection from './AlertsSection'
 import HistorySection from './HistorySection'
 import PaddocksSection, { type PaddockLayer } from './PaddocksSection'
+import HerdSection from './HerdSection'
 import type { ProdesList } from './api'
 
 export type Pick = { active: boolean; point: { lat: number; lon: number } | null }
@@ -24,7 +25,7 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
   const [ndvi, setNdvi] = useState<Ndvi | null>(null)
   const [prodes, setProdes] = useState<{ fc: ProdesList | null; selected: Set<string> }>({ fc: null, selected: new Set() })
   const onProdes = useCallback((fc: ProdesList | null, selected: Set<string>) => setProdes({ fc, selected }), [])
-  const [tab, setTab] = useState<'analises' | 'piquetes' | 'alertas' | 'historico'>('analises')
+  const [tab, setTab] = useState<'analises' | 'piquetes' | 'rebanho' | 'alertas' | 'historico'>('analises')
   const [paddockLayer, setPaddockLayer] = useState<PaddockLayer | null>(null)
   const [code, setCode] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
@@ -83,9 +84,10 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
         {p.car_code && <p className="mono small">{p.car_code}</p>}
       </div>
 
-      <div className="mode mode-4" role="tablist" aria-label="Seções da propriedade">
+      <div className="mode mode-5" role="tablist" aria-label="Seções da propriedade">
         <button role="tab" aria-selected={tab === 'analises'} onClick={() => setTab('analises')}>Análises</button>
         <button role="tab" aria-selected={tab === 'piquetes'} onClick={() => setTab('piquetes')}>Piquetes</button>
+        <button role="tab" aria-selected={tab === 'rebanho'} onClick={() => setTab('rebanho')}>Rebanho</button>
         <button role="tab" aria-selected={tab === 'alertas'} onClick={() => setTab('alertas')}>Alertas</button>
         <button role="tab" aria-selected={tab === 'historico'} onClick={() => setTab('historico')}>Histórico</button>
       </div>
@@ -93,6 +95,7 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
       <div hidden={tab !== 'piquetes'}>
         <PaddocksSection propertyId={id} hasPerimeter={p.has_perimeter} active={tab === 'piquetes'} onLayer={setPaddockLayer} />
       </div>
+      <div hidden={tab !== 'rebanho'}><HerdSection propertyId={id} active={tab === 'rebanho'} /></div>
       <div hidden={tab !== 'alertas'}><AlertsSection property={p} /></div>
       <div hidden={tab !== 'historico'}><HistorySection propertyId={id} active={tab === 'historico'} /></div>
 

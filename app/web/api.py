@@ -394,3 +394,69 @@ async def paddock_cut_clear(property_id: int, paddock_id: int, user=Depends(curr
 async def paddock_series(property_id: int, paddock_id: int, months: int = 24, user=Depends(current_user)):
     _own(property_id, user)
     return await _call(P.paddock_series_for, user.chat_id, property_id, paddock_id, max(6, min(months, 60)))
+
+
+# ── Rebanho, rotação e lotação ───────────────────────────────────────────────
+
+from datetime import date as _date
+
+from app.web import herd as H
+
+
+class LotIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    category: str
+    head_count: int
+    avg_weight_kg: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class LotEdit(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    head_count: Optional[int] = None
+    avg_weight_kg: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class LotMove(BaseModel):
+    paddock_id: Optional[int] = None      # None = lote saiu (sem piquete)
+    on: Optional[_date] = None             # padrão: hoje
+
+
+@router.get("/properties/{property_id}/herd")
+def herd(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return H.herd_for(property_id)
+
+
+@router.post("/properties/{property_id}/lots", status_code=201)
+async def create_lot(property_id: int, body: LotIn, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(H.create_lot, user.chat_id, property_id, body.name, body.category, body.head_count,
+                       body.avg_weight_kg, body.notes)
+
+
+@router.patch("/properties/{property_id}/lots/{lot_id}")
+async def edit_lot(property_id: int, lot_id: int, body: LotEdit, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(H.update_lot, property_id, lot_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/properties/{property_id}/lots/{lot_id}", status_code=204)
+def remove_lot(property_id: int, lot_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    H.delete_lot(property_id, lot_id)
+    return RawResponse(status_code=204)
+
+
+@router.post("/properties/{property_id}/lots/{lot_id}/move")
+async def move_lot(property_id: int, lot_id: int, body: LotMove, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(H.move_lot, user.chat_id, property_id, lot_id, body.paddock_id, body.on or _date.today())
+
+
+@router.get("/properties/{property_id}/grazing")
+def grazing(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return H.grazing_for(property_id)

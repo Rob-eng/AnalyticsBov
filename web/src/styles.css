@@ -193,3 +193,23 @@ p { margin: 0; }
 .paddock-on { border-color: var(--ipe, #E8B730); box-shadow: inset 3px 0 0 var(--ipe, #E8B730); }
 .paddock-main { display: grid; gap: 1px; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; }
 .paddock-detail { display: grid; gap: 6px; }
+.mode-5 { grid-template-columns: repeat(5, 1fr); }
+.mode-5 button { padding: 8px 1px; font-size: .7rem; }
+.herd-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.herd-summary div { display: grid; padding: 8px 10px; background: #fff; border: 1px solid var(--linha); border-radius: 9px; }
+.herd-summary strong { font: 700 1.15rem var(--display, inherit); font-variant-numeric: tabular-nums; }
+.herd-summary span { font-size: .72rem; color: var(--apoio); }
+.lot-head { display: grid; gap: 1px; }
+.move-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.status-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: .72rem; font-weight: 600; }
+.st-em_uso { background: #fbe9b7; color: #6b4e00; }
+.st-descanso { background: #e3e7e1; color: #46524a; }
+.st-pronto { background: #d5ecd4; color: #1f5f23; }
+.st-descanso_longo { background: #dde8f3; color: #234a73; }
+.st-sem_registro { background: transparent; color: var(--apoio); padding-left: 0; }
+.flag { font-size: .78rem; padding: 4px 8px; border-radius: 6px; }
+.flag-alerta { background: #fde2df; color: #8a1c12; }
+.flag-atencao { background: #fff1d6; color: #7a4d00; }
+.flag-info { background: #e3eef8; color: #234a73; }
+.occ-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: .78rem; color: var(--apoio); }
+.status-legend { display: flex; flex-wrap: wrap; gap: 6px; }

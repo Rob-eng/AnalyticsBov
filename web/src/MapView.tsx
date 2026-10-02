@@ -125,8 +125,11 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       m.on('mouseleave', 'overview-fill', () => { if (!pickRef.current) m.getCanvas().style.cursor = '' })
       m.addSource('paddocks', { type: 'geojson', data: EMPTY })
       m.addLayer({ id: 'paddock-fill', type: 'fill', source: 'paddocks', paint: {
-        'fill-color': ['case', ['has', 'ndvi'], NDVI_FILL, IPE],
-        'fill-opacity': ['case', ['has', 'ndvi'], 0.6, ['==', ['get', 'id'], -1], 0.3, 0.12] } })
+        // NDVI (quando pedido) > situação do pastejo > neutro
+        'fill-color': ['case', ['has', 'ndvi'], NDVI_FILL, ['has', 'status'], ['match', ['get', 'status'],
+          'em_uso', '#E8B730', 'pronto', '#1a9641', 'descanso', '#9aa59c', 'descanso_longo', '#2A6FB0', IPE], IPE],
+        'fill-opacity': ['case', ['has', 'ndvi'], 0.6, ['==', ['get', 'id'], -1], 0.3,
+          ['all', ['has', 'status'], ['!=', ['get', 'status'], 'sem_registro']], 0.45, 0.12] } })
       m.addLayer({ id: 'paddock-line', type: 'line', source: 'paddocks', paint: {
         'line-color': ['case', ['boolean', ['get', 'selected'], false], IPE, '#ffffff'],
         'line-width': ['case', ['boolean', ['get', 'selected'], false], 3.5, 1.6],

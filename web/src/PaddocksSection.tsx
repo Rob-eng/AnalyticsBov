@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, fmtHa, fmtMonth, fmtNdvi, type Paddocks } from './api'
+import { api, fmtHa, fmtMonth, fmtNdvi, type GrazingPaddock, type Paddocks } from './api'
 import NdviChart from './NdviChart'
 
 export type PaddockLayer = {
@@ -9,6 +9,13 @@ export type PaddockLayer = {
   editing: { id: number; geometry: GeoJSON.Polygon } | null; onEdited: (g: GeoJSON.Polygon) => void
 }
 const LATEST = 'latest'
+const STATUS_LABEL: Record<string, string> = { em_uso: 'Em uso', descanso: 'Descanso', pronto: 'Pronto para entrada', descanso_longo: 'Descanso longo', sem_registro: 'Sem registro' }
+const statusText = (g?: GrazingPaddock) => {
+  if (!g) return null
+  if (g.status === 'em_uso') return `Em uso · ${g.days} d${g.ua_ha != null ? ` · ${g.ua_ha.toFixed(2).replace('.', ',')} UA/ha` : ''}`
+  if (g.status === 'sem_registro') return 'Sem registro de uso'
+  return `${STATUS_LABEL[g.status]} · ${g.days} d`
+}
 const fmtDay = (d?: string | null) => d ? d.split('-').reverse().join('/') : ''
 type Props = { propertyId: number; hasPerimeter: boolean; active: boolean; onLayer: (l: PaddockLayer | null) => void }
 
@@ -22,6 +29,8 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   const qc = useQueryClient()
   const key = ['paddocks', propertyId]
   const list = useQuery({ queryKey: key, queryFn: () => api.paddocks(propertyId), enabled: hasPerimeter })
+  // piquete criado/editado/recortado/excluído muda a área de pasto → lotação (UA/ha) também
+  const refresh = () => { qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['grazing', propertyId] }); qc.invalidateQueries({ queryKey: ['herd', propertyId] }) }
   const [drawing, setDrawing] = useState(false)
   const [cutting, setCutting] = useState(false)   // desenho atual é um recorte (mata) do piquete selecionado
   const [pending, setPending] = useState<GeoJSON.Polygon | null>(null)
@@ -41,6 +50,10 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   const ndvi = useQuery({ queryKey: ['paddocks-ndvi', propertyId, colorBy, feats.map(f => `${f.id}:${f.properties.pasture_ha}`).join(',')],
     queryFn: () => api.paddocksNdvi(propertyId, colorBy!), enabled: !!colorBy && feats.length > 0, retry: false })
   const values = useMemo(() => ndvi.data?.result.values ?? {}, [ndvi.data])
+  const grazing = useQuery({ queryKey: ['grazing', propertyId], queryFn: () => api.grazing(propertyId), enabled: active && hasPerimeter })
+  const gmap = useMemo(() => new Map((grazing.data?.paddocks ?? []).map(g => [g.id, g])), [grazing.data])
+  // NDVI da última imagem recalculado → os alertas de lotação × NDVI usam o valor novo
+  useEffect(() => { if (colorBy === LATEST && ndvi.isSuccess) qc.invalidateQueries({ queryKey: ['grazing', propertyId] }) }, [colorBy, ndvi.isSuccess, ndvi.data, qc, propertyId])
   const farm = useQuery({ queryKey: ['ndvi-series', propertyId], queryFn: () => api.ndviSeries(propertyId, 24), enabled: selected != null })
   const sel = feats.find(f => f.properties.id === selected) ?? null
   // série só da área de pasto (contorno − recortes): a chave muda quando o formato ou os recortes mudam
@@ -49,15 +62,15 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
 
   const save = useMutation({
     mutationFn: () => api.createPaddock(propertyId, name.trim(), pending!),
-    onSuccess: p => { setPending(null); setName(''); setSelected(p.properties.id); qc.invalidateQueries({ queryKey: key }) },
+    onSuccess: p => { setPending(null); setName(''); setSelected(p.properties.id); refresh() },
   })
   const rename = useMutation({
     mutationFn: (r: { id: number; name: string }) => api.editPaddock(propertyId, r.id, { name: r.name.trim() }),
-    onSuccess: () => { setRenaming(null); qc.invalidateQueries({ queryKey: key }) },
+    onSuccess: () => { setRenaming(null); refresh() },
   })
   const reshape = useMutation({
     mutationFn: () => api.editPaddock(propertyId, editing!.id, { geometry: edited! }),
-    onSuccess: () => { setEditing(null); setEdited(null); qc.invalidateQueries({ queryKey: key }) },
+    onSuccess: () => { setEditing(null); setEdited(null); refresh() },
   })
   const startEdit = (id: number) => {
     const f = feats.find(x => x.properties.id === id)
@@ -65,16 +78,16 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   }
   const cut = useMutation({
     mutationFn: (body: { geometry: GeoJSON.Polygon } | { source: 'car' }) => api.cutPaddock(propertyId, selected!, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => refresh(),
   })
   const cutMutate = cut.mutate   // estável entre renders (o objeto da mutação não é)
   const clearCuts = useMutation({
     mutationFn: (pid: number) => api.clearCuts(propertyId, pid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => refresh(),
   })
   const remove = useMutation({
     mutationFn: (id: number) => api.deletePaddock(propertyId, id),
-    onSuccess: (_d, id) => { if (selected === id) setSelected(null); qc.invalidateQueries({ queryKey: key }) },
+    onSuccess: (_d, id) => { if (selected === id) setSelected(null); refresh() },
   })
 
   // camada do mapa: piquetes salvos (com NDVI do mês, se pedido) + o recém-desenhado
@@ -82,11 +95,12 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
     if (!active || !hasPerimeter) return null
     const base = feats.filter(f => f.properties.id !== editing?.id).map(f => {
       const v = values[String(f.properties.id)]
-      return { ...f, properties: { ...f.properties, ...(colorBy && v != null ? { ndvi: v } : {}) } }
+      const st = gmap.get(f.properties.id)?.status
+      return { ...f, properties: { ...f.properties, ...(colorBy && v != null ? { ndvi: v } : st ? { status: st } : {}) } }
     })
     if (pending) base.push({ type: 'Feature', id: -1, geometry: pending, properties: { id: -1, name: name || 'Novo piquete', area_ha: 0, pasture_ha: 0, excluded_ha: 0 } })
     return { type: 'FeatureCollection', features: base, exclusions: list.data?.exclusions }
-  }, [active, hasPerimeter, feats, values, colorBy, pending, name, editing, list.data])
+  }, [active, hasPerimeter, feats, values, colorBy, pending, name, editing, list.data, gmap])
 
   useEffect(() => {
     onLayer(active ? {
@@ -185,7 +199,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
                     </form>
                   ) : (
                     <button className="paddock-main" onClick={() => setSelected(s => (s === p.id ? null : p.id))}>
-                      <strong>{p.name}</strong>
+                      <span className="row"><strong>{p.name}</strong>{gmap.get(p.id) && <span className={`status-chip st-${gmap.get(p.id)!.status}`}>{statusText(gmap.get(p.id))}</span>}</span>
                       <span className="muted small">{fmtHa(p.area_ha)}{p.excluded_ha > 0 ? ` · pasto ${fmtHa(p.pasture_ha)}` : ''}{colorBy ? ` · NDVI ${fmtNdvi(v ?? null)}` : ''}</span>
                     </button>
                   )}
@@ -197,6 +211,14 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
                       </button>
                       {p.excluded_ha > 0 && <button className="link" disabled={clearCuts.isPending} onClick={() => clearCuts.mutate(p.id)}>Desfazer recortes</button>}
                     </span>
+                  )}
+                  {gmap.get(p.id)?.flag && <p className={`flag flag-${gmap.get(p.id)!.flag!.level}`}>{gmap.get(p.id)!.flag!.text}</p>}
+                  {p.id === selected && (gmap.get(p.id)?.history.length ?? 0) > 0 && (
+                    <ul className="occ-list" aria-label="Ocupações">
+                      {gmap.get(p.id)!.history.map((o, i) => (
+                        <li key={i}>{o.lot}: {o.entered_on.split('-').reverse().join('/')} → {o.left_on ? o.left_on.split('-').reverse().join('/') : 'hoje'} · {o.days} d · {o.ua.toLocaleString('pt-BR')} UA</li>
+                      ))}
+                    </ul>
                   )}
                   {p.id === selected && cut.isError && <p className="notice small">{(cut.error as Error).message}</p>}
                   {p.id === selected && p.excluded_ha > 0 && <p className="muted small">{fmtHa(p.excluded_ha)} de mata/água fora do cálculo de NDVI.</p>}
@@ -212,6 +234,18 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
             })}
           </ul>
           {colorBy && <p className="muted small">Ordenados do menor para o maior NDVI: os primeiros pedem atenção.</p>}
+          {!colorBy && grazing.data && grazing.data.paddocks.some(g => g.status !== 'sem_registro') && (
+            <div className="status-legend small">
+              <span className="status-chip st-em_uso">Em uso</span><span className="status-chip st-descanso">Descanso</span>
+              <span className="status-chip st-pronto">Pronto ({grazing.data.rest_window[0]}–{grazing.data.rest_window[1]} d)</span>
+              <span className="status-chip st-descanso_longo">Descanso longo</span>
+            </div>
+          )}
+          {grazing.data && grazing.data.paddocks.some(g => g.status !== 'sem_registro') && (
+            <p className="muted small">{grazing.data.ndvi_date
+              ? `Alertas de pasto usam o NDVI da imagem de ${fmtDay(grazing.data.ndvi_date)}. Para atualizar: Última imagem › Colorir por NDVI.`
+              : 'Para ver os alertas de pasto (lotação × NDVI), use Última imagem › Colorir por NDVI.'}</p>
+          )}
 
           {sel && (
             <div className="paddock-detail">
