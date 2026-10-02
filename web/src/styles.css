@@ -148,3 +148,9 @@ p { margin: 0; }
 .kpi { font: 800 1.05rem var(--display); letter-spacing: -.01em; }
 .media { display: block; width: 100%; border: 1px solid var(--linha); border-radius: 10px; background: #fff; overflow: hidden; }
 .media img, video.media { display: block; width: 100%; height: auto; }
+.prodes-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 260px; overflow-y: auto; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
+.dot-blue { background: #2b83ba; } .dot-red { background: #d7191c; }
+.ok { color: #1f6b35; font-weight: 600; font-size: .9rem; }
+.jobs { display: grid; gap: 4px; }
+.job { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px; background: #fff; border: 1px solid var(--linha); border-radius: 8px; font-size: .85rem; }

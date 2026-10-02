@@ -49,6 +49,9 @@ export type NdviMonth = { mean: number | null; images: number; coordinates: [num
 export type RainDay = { date: string; mm: number; prob: number | null }
 export type RainWeek = { start: string; end: string; mm: number }
 export type Rain = { forecast: RainDay[]; weeks: RainWeek[]; last30_mm: number; normal30_mm: number | null; pct_of_normal: number | null; next7_mm: number }
+export type ProdesProps = { uuid: string; class_name: string; year: number | null; image_date: string | null; area_total_ha: number; area_intersect_ha: number; biome: string | null }
+export type ProdesList = GeoJSON.FeatureCollection<GeoJSON.Geometry, ProdesProps> & { source_label: string; queried_at: string }
+export type ProdesJob = { id: number; status: 'PENDING' | 'PROCESSING' | 'DONE' | 'ERROR'; class_name: string; year: number | null; uuid: string; area_intersect_ha: number | null; created_at: string; finished_at: string | null; error: string | null; files: Partial<Record<'pdf' | 'antes' | 'depois', string>> }
 export type LoginStart = { code: string; expires_in: number; whatsapp_url: string | null; telegram_url: string }
 
 export const api = {
@@ -71,6 +74,9 @@ export const api = {
   ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
   rain: (id: number) => request<Analysis<Rain>>(`/properties/${id}/rain`),
   mdt: (id: number, kind: '2d' | '3d') => request<Analysis<{ elev_min: number; elev_max: number; source: string }>>(`/properties/${id}/mdt?kind=${kind}`),
+  prodes: (id: number, refresh = false) => request<Analysis<ProdesList>>(`/properties/${id}/prodes${refresh ? '?refresh=true' : ''}`),
+  prodesReport: (id: number, uuids: string[]) => request<{ job_id: number; class_name: string }[]>(`/properties/${id}/prodes/report`, { method: 'POST', body: JSON.stringify({ uuids }) }),
+  prodesJobs: (id: number) => request<ProdesJob[]>(`/properties/${id}/prodes/jobs`),
   analyses: (id: number) => request<Analysis[]>(`/properties/${id}/analyses`),
   zipUrl: (id: number) => `/api/v1/properties/${id}/car.zip`,
   mapUrl: (id: number) => `/api/v1/properties/${id}/map.png`,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, fmtHa, LAYER_ORDER, LAYER_STYLE, type Ndvi } from './api'
@@ -6,6 +6,8 @@ import type { Focus } from './MapView'
 import NdviSection from './NdviSection'
 import RainSection from './RainSection'
 import MdtSection from './MdtSection'
+import ProdesSection from './ProdesSection'
+import type { ProdesList } from './api'
 
 export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) => void }) {
   const id = Number(useParams().id)
@@ -15,6 +17,8 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
   const layers = useQuery({ queryKey: ['layers', id], queryFn: () => api.layers(id), enabled: !!prop.data?.has_perimeter })
   const [visible, setVisible] = useState<Set<string>>(new Set(LAYER_ORDER))
   const [ndvi, setNdvi] = useState<Ndvi | null>(null)
+  const [prodes, setProdes] = useState<{ fc: ProdesList | null; selected: Set<string> }>({ fc: null, selected: new Set() })
+  const onProdes = useCallback((fc: ProdesList | null, selected: Set<string>) => setProdes({ fc, selected }), [])
   const [code, setCode] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -23,7 +27,8 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
 
   const focus = useMemo<Focus | null>(() => prop.data ? {
     perimeter: prop.data.perimeter, bbox: prop.data.bbox, layers: layers.data ?? null, visible, ndvi,
-  } : null, [prop.data, layers.data, visible, ndvi])
+    prodes: prodes.fc, prodesSelected: prodes.selected,
+  } : null, [prop.data, layers.data, visible, ndvi, prodes])
   useEffect(() => { onFocus(focus); }, [focus, onFocus])
   useEffect(() => () => onFocus(null), [onFocus])
 
@@ -105,6 +110,8 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
           <RainSection propertyId={id} />
 
           <MdtSection propertyId={id} />
+
+          <ProdesSection propertyId={id} onLayer={onProdes} />
 
           <div className="block">
             <h3>Arquivos</h3>

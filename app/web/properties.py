@@ -466,3 +466,97 @@ def mdt_for(chat_id: str, property_id: int, kind: str = "2d") -> dict:
     result = {"elev_min": terrain.get("elev_min"), "elev_max": terrain.get("elev_max"), "source": terrain.get("source")}
     mime, ext = ("image/png", "png") if kind == "2d" else ("video/mp4", "mp4")
     return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, analysis_kind, {}, result, data, mime, ext)))
+
+
+# ── PRODES na web (mesma fila e laudo do bot; origin='web') ──────────────────
+
+def prodes_list_for(chat_id: str, property_id: int, refresh: bool = False) -> dict:
+    """Apontamentos PRODES/INPE que cruzam o perímetro (consulta ao vivo; cache de 1 dia)."""
+    from app.prodes_analysis import find_intersecting_apontamentos, PRODES_SOURCE_LABEL
+    cached = None if refresh else _cached_analysis(property_id, "prodes_list", {}, max_age_hours=24)
+    if cached:
+        return _analysis_dict(cached)
+    prop = get_property(property_id)
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para consultar o PRODES.")
+    try:
+        aps = find_intersecting_apontamentos(prop["perimeter"])
+    except RuntimeError as e:
+        raise PropertyError(f"Não consegui consultar a base PRODES/INPE agora ({e}).")
+    features = [{"type": "Feature", "geometry": a["geometry"], "properties": {
+        "uuid": a["uuid"], "class_name": a["class_name"], "year": a["year"],
+        "image_date": a["image_date"].isoformat() if a.get("image_date") else None,
+        "area_total_ha": round(a["area_total_ha"] or 0, 2), "area_intersect_ha": round(a["area_intersect_ha"] or 0, 2),
+        "biome": a.get("biome"),
+    }} for a in aps]
+    result = {"type": "FeatureCollection", "features": features, "source_label": PRODES_SOURCE_LABEL,
+              "queried_at": datetime.utcnow().isoformat()}
+    return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, "prodes_list", {}, result)))
+
+
+def prodes_report_for(chat_id: str, property_id: int, uuids: list) -> list:
+    """Enfileira o laudo (PDF + mapas antes/depois) dos apontamentos escolhidos."""
+    from app.prodes_worker import enqueue_prodes_jobs
+    from app.saas.limit_engine import can_perform_action
+    if not uuids:
+        raise PropertyError("Escolha ao menos um apontamento.")
+    if len(uuids) > 10:
+        raise PropertyError("Escolha no máximo 10 apontamentos por vez.")
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    listing = prodes_list_for(chat_id, property_id)
+    chosen = []
+    for f in listing["result"]["features"]:
+        p = f["properties"]
+        if p["uuid"] in uuids:
+            from datetime import date as _date
+            chosen.append({**p, "geometry": f["geometry"],
+                           "image_date": _date.fromisoformat(p["image_date"]) if p["image_date"] else None})
+    if not chosen:
+        raise PropertyError("Apontamento não encontrado — atualize a lista.")
+    prop = get_property(property_id)
+    source_info = {"label": listing["result"]["source_label"],
+                   "queried_at": datetime.fromisoformat(listing["result"]["queried_at"])}
+    entries = enqueue_prodes_jobs(chat_id, chat_id, prop["lat"], prop["lon"], prop["name"], prop["car_code"],
+                                  prop["perimeter"], source_info, chosen, origin="web", location_id=property_id)
+    return [{"job_id": jid, "class_name": cls} for jid, cls in entries]
+
+
+def prodes_jobs_for(property_id: int) -> list:
+    from app.models import ProdesJob
+    db = SessionLocal()
+    try:
+        rows = (db.query(ProdesJob).filter_by(location_id=property_id)
+                .order_by(ProdesJob.created_at.desc()).limit(30).all())
+        return [{
+            "id": j.id, "status": j.status, "class_name": j.apontamento_class_name, "year": j.apontamento_year,
+            "uuid": j.apontamento_uuid, "area_intersect_ha": j.area_intersect_ha,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+            "error": (j.last_error or "")[:200] if j.status == "ERROR" else None,
+            "files": {k: f"/api/v1/properties/{property_id}/prodes/jobs/{j.id}/{k}"
+                      for k, path in (("pdf", j.result_pdf_path), ("antes", j.result_png_before_path),
+                                      ("depois", j.result_png_after_path)) if path},
+        } for j in rows]
+    finally:
+        db.close()
+
+
+def prodes_job_file(property_id: int, job_id: int, which: str) -> tuple:
+    from app.models import ProdesJob
+    from app import prodes_storage
+    db = SessionLocal()
+    try:
+        j = db.query(ProdesJob).filter_by(id=job_id, location_id=property_id).first()
+    finally:
+        db.close()
+    if not j:
+        raise PropertyError("Laudo não encontrado.")
+    path, mime, ext = {"pdf": (j.result_pdf_path, "application/pdf", "pdf"),
+                       "antes": (j.result_png_before_path, "image/png", "png"),
+                       "depois": (j.result_png_after_path, "image/png", "png")}.get(which, (None, None, None))
+    data = prodes_storage.download_bytes(path) if path else None
+    if not data:
+        raise PropertyError("Arquivo do laudo indisponível.")
+    return data, mime, f"PRODES_{j.apontamento_class_name}_{which}.{ext}"

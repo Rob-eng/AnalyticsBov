@@ -261,3 +261,35 @@ async def property_mdt(property_id: int, kind: str = "2d", user=Depends(current_
         raise HTTPException(422, "Use kind=2d ou kind=3d")
     _rate_limit(f"mdt:{user.chat_id}", limit=20)
     return await _call(P.mdt_for, user.chat_id, property_id, kind)
+
+
+class ProdesReport(BaseModel):
+    uuids: list
+
+
+@router.get("/properties/{property_id}/prodes")
+async def prodes_list(property_id: int, refresh: bool = False, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.prodes_list_for, user.chat_id, property_id, refresh)
+
+
+@router.post("/properties/{property_id}/prodes/report", status_code=202)
+async def prodes_report(property_id: int, body: ProdesReport, user=Depends(current_user)):
+    _own(property_id, user)
+    _rate_limit(f"prodes:{user.chat_id}", limit=10)
+    return await _call(P.prodes_report_for, user.chat_id, property_id, [str(u) for u in body.uuids])
+
+
+@router.get("/properties/{property_id}/prodes/jobs")
+def prodes_jobs(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return P.prodes_jobs_for(property_id)
+
+
+@router.get("/properties/{property_id}/prodes/jobs/{job_id}/{which}")
+async def prodes_job_file(property_id: int, job_id: int, which: str, download: bool = False, user=Depends(current_user)):
+    _own(property_id, user)
+    data, mime, name = await _call(P.prodes_job_file, property_id, job_id, which)
+    if download:
+        return _download(data, name, mime)
+    return RawResponse(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})

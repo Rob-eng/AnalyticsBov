@@ -63,7 +63,8 @@ def compute_backoff_seconds(attempts: int) -> int:
 def enqueue_prodes_jobs(user_id: str, chat_id: str, location_lat: float, location_lon: float,
                          location_name: str, cod_imovel: str, geometry_geojson: dict,
                          source_info: dict, chosen_apontamentos: list,
-                         forced_before=None, forced_after=None) -> list:
+                         forced_before=None, forced_after=None,
+                         origin: str = 'bot', location_id: int = None) -> list:
     """
     Cria um ProdesJob por apontamento escolhido (chave de idempotência por
     apontamento+datas+versão da consulta). Compartilhado entre Telegram
@@ -101,6 +102,7 @@ def enqueue_prodes_jobs(user_id: str, chat_id: str, location_lat: float, locatio
                 area_total_ha=ap['area_total_ha'], area_intersect_ha=ap['area_intersect_ha'],
                 forced_before_date=forced_before, forced_after_date=forced_after,
                 status='PENDING', idempotency_key=idem_key,
+                origin=origin, location_id=location_id,
             )
             session.add(new_job)
             session.flush()
@@ -194,6 +196,12 @@ async def _process_single_job(job, application):
         tb = traceback.format_exc()
         print(f"[PRODES WORKER] Job #{job.id} erro no pipeline: {tb}", flush=True)
         _handle_job_error(job, str(e))
+        return
+
+    # Pedido feito pela plataforma web: o resultado fica na página da propriedade
+    if (getattr(job, 'origin', None) or 'bot') == 'web':
+        _mark_job_done(job.id, result)
+        print(f"[PRODES WORKER] Job #{job.id} (web) concluído — disponível na plataforma.", flush=True)
         return
 
     platform = await loop.run_in_executor(None, _get_user_platform, job.user_id)

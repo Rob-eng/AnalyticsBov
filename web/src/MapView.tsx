@@ -30,6 +30,8 @@ export type Focus = {
   layers: GeoJSON.FeatureCollection | null
   visible: Set<string>
   ndvi: Ndvi | null
+  prodes?: GeoJSON.FeatureCollection | null
+  prodesSelected?: Set<string>
 }
 
 type Props = {
@@ -74,6 +76,11 @@ export default function MapView({ properties, selectedId, onSelect, focus, pickM
         m.addLayer({ id: `car-${cat}-line`, type: 'line', source: 'car', filter: ['==', ['get', 'category'], cat],
           paint: { 'line-color': st.color, 'line-width': cat === 'agua' ? 2 : 0.8 } })
       }
+      // PRODES: azul até 2008 (marco legal 22/07/2008), vermelho depois
+      m.addSource('prodes', { type: 'geojson', data: EMPTY })
+      const prodesColor: maplibregl.ExpressionSpecification = ['case', ['<=', ['coalesce', ['get', 'year'], 0], 2008], '#2b83ba', '#d7191c']
+      m.addLayer({ id: 'prodes-fill', type: 'fill', source: 'prodes', paint: { 'fill-color': prodesColor, 'fill-opacity': ['case', ['boolean', ['get', 'selected'], false], 0.65, 0.35] } })
+      m.addLayer({ id: 'prodes-line', type: 'line', source: 'prodes', paint: { 'line-color': prodesColor, 'line-width': ['case', ['boolean', ['get', 'selected'], false], 3, 1.5] } })
       m.addLayer({ id: 'perimeter-halo', type: 'line', source: 'perimeter', paint: { 'line-color': TINTA, 'line-width': 5 } })
       m.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter', paint: { 'line-color': IPE, 'line-width': 2.5 } })
       setReady(true)
@@ -120,10 +127,15 @@ export default function MapView({ properties, selectedId, onSelect, focus, pickM
     ;(m.getSource('perimeter') as maplibregl.GeoJSONSource).setData(
       focus?.perimeter ? { type: 'Feature', geometry: focus.perimeter, properties: {} } : EMPTY)
     ;(m.getSource('car') as maplibregl.GeoJSONSource).setData(focus?.layers ?? EMPTY)
+    ;(m.getSource('prodes') as maplibregl.GeoJSONSource).setData(focus?.prodes ? {
+      ...focus.prodes,
+      features: focus.prodes.features.map(f => ({ ...f, properties: { ...f.properties, selected: focus.prodesSelected?.has(f.properties?.uuid) ?? false } })),
+    } : EMPTY)
+    // com NDVI ou PRODES na tela, as camadas do CAR viram só contorno para não esconder o que importa
+    const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length
     for (const cat of LAYER_ORDER) {
       const vis = focus?.visible.has(cat) ? 'visible' : 'none'
-      // com NDVI ligado, as camadas viram só contorno para o índice aparecer por baixo
-      m.setLayoutProperty(`car-${cat}-fill`, 'visibility', focus?.ndvi ? 'none' : vis)
+      m.setLayoutProperty(`car-${cat}-fill`, 'visibility', outlineOnly ? 'none' : vis)
       m.setLayoutProperty(`car-${cat}-line`, 'visibility', vis)
       m.setPaintProperty(`car-${cat}-line`, 'line-width', focus?.ndvi ? 1.6 : cat === 'agua' ? 2 : 0.8)
     }
