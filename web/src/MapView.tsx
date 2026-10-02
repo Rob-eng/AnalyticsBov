@@ -37,6 +37,7 @@ export type Focus = {
   // piquetes: properties {id, name, area_ha, ndvi?}; id -1 = desenhado e ainda não salvo
   paddocks?: GeoJSON.FeatureCollection | null
   paddockSelected?: number | null
+  paddockExclusions?: GeoJSON.FeatureCollection | null   // áreas suprimidas (mata, água) — fora do pasto
   drawing?: boolean
   onDrawn?: (g: GeoJSON.Polygon) => void
   onPaddockClick?: (id: number) => void
@@ -130,6 +131,9 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
         'line-color': ['case', ['boolean', ['get', 'selected'], false], IPE, '#ffffff'],
         'line-width': ['case', ['boolean', ['get', 'selected'], false], 3.5, 1.6],
         'line-dasharray': ['case', ['==', ['get', 'id'], -1], ['literal', [2, 1.5]], ['literal', [1, 0]]] } })
+      m.addSource('paddock-excl', { type: 'geojson', data: EMPTY })
+      m.addLayer({ id: 'paddock-excl-fill', type: 'fill', source: 'paddock-excl', paint: { 'fill-color': TINTA, 'fill-opacity': 0.55 } })
+      m.addLayer({ id: 'paddock-excl-line', type: 'line', source: 'paddock-excl', paint: { 'line-color': '#ffffff', 'line-width': 1.2, 'line-dasharray': [2, 2] } })
       m.on('click', 'paddock-fill', e => {
         const id = Number(e.features?.[0]?.properties?.id)
         if (id > 0 && !focusRef.current?.drawing && !pickRef.current) focusRef.current?.onPaddockClick?.(id)
@@ -220,6 +224,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       ...focus.paddocks,
       features: focus.paddocks.features.map(f => ({ ...f, properties: { ...f.properties, selected: f.properties?.id === focus.paddockSelected } })),
     } : EMPTY)
+    ;(m.getSource('paddock-excl') as maplibregl.GeoJSONSource).setData(focus?.paddockExclusions ?? EMPTY)
     // nomes dos piquetes (o estilo de satélite não tem fontes para rótulos no próprio mapa)
     paddockMarkers.current.forEach(mk => mk.remove())
     paddockMarkers.current = (focus?.paddocks?.features ?? []).filter(f => f.properties?.id > 0).map(f => {

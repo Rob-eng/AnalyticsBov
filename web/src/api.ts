@@ -38,8 +38,8 @@ export type Property = {
   car_code: string | null; area_ha: number | null; municipio: string | null; uf: string | null
   car_synced_at: string | null; has_perimeter: boolean
 }
-export type PaddockProps = { id: number; name: string; area_ha: number; ndvi?: number | null }
-export type Paddocks = GeoJSON.FeatureCollection<GeoJSON.Polygon, PaddockProps>
+export type PaddockProps = { id: number; name: string; area_ha: number; pasture_ha: number; excluded_ha: number; ndvi?: number | null }
+export type Paddocks = GeoJSON.FeatureCollection<GeoJSON.Polygon, PaddockProps> & { exclusions?: GeoJSON.FeatureCollection }
 export type Paddock = GeoJSON.Feature<GeoJSON.Polygon, PaddockProps> & { id: number }
 export type Alerts = { ndvi: boolean; rain: boolean; prodes: boolean }
 export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null; alerts: Alerts }
@@ -81,6 +81,9 @@ export const api = {
   createPaddock: (id: number, name: string, geometry: GeoJSON.Polygon) => request<Paddock>(`/properties/${id}/paddocks`, { method: 'POST', body: JSON.stringify({ name, geometry }) }),
   editPaddock: (id: number, pid: number, body: { name?: string; geometry?: GeoJSON.Polygon }) => request<Paddock>(`/properties/${id}/paddocks/${pid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePaddock: (id: number, pid: number) => request<void>(`/properties/${id}/paddocks/${pid}`, { method: 'DELETE' }),
+  cutPaddock: (id: number, pid: number, body: { geometry: GeoJSON.Polygon } | { source: 'car' }) => request<Paddock>(`/properties/${id}/paddocks/${pid}/cut`, { method: 'POST', body: JSON.stringify(body) }),
+  clearCuts: (id: number, pid: number) => request<Paddock>(`/properties/${id}/paddocks/${pid}/cut`, { method: 'DELETE' }),
+  paddockSeries: (id: number, pid: number) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/paddocks/${pid}/ndvi/series`),
   paddocksNdvi: (id: number, month: string) => request<Analysis<{ values: Record<string, number | null>; images: number; date?: string | null }>>(`/properties/${id}/paddocks/ndvi?month=${month}`),
   setAlerts: (id: number, a: Partial<Alerts>) => request<Alerts>(`/properties/${id}/alerts`, { method: 'PATCH', body: JSON.stringify(a) }),
   history: (id: number) => request<HistoryItem[]>(`/properties/${id}/history`),

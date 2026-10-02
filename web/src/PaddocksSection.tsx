@@ -23,6 +23,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   const key = ['paddocks', propertyId]
   const list = useQuery({ queryKey: key, queryFn: () => api.paddocks(propertyId), enabled: hasPerimeter })
   const [drawing, setDrawing] = useState(false)
+  const [cutting, setCutting] = useState(false)   // desenho atual é um recorte (mata) do piquete selecionado
   const [pending, setPending] = useState<GeoJSON.Polygon | null>(null)
   const [name, setName] = useState('')
   const [selected, setSelected] = useState<number | null>(null)
@@ -37,13 +38,14 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   useEffect(() => { setDrawing(false); setPending(null); setSelected(null); setColorBy(null); setEditing(null); setEdited(null) }, [propertyId])
   useEffect(() => { if (!active) { setEditing(null); setEdited(null); setDrawing(false) } }, [active])
 
-  const ndvi = useQuery({ queryKey: ['paddocks-ndvi', propertyId, colorBy, feats.map(f => f.id).join(',')],
+  const ndvi = useQuery({ queryKey: ['paddocks-ndvi', propertyId, colorBy, feats.map(f => `${f.id}:${f.properties.pasture_ha}`).join(',')],
     queryFn: () => api.paddocksNdvi(propertyId, colorBy!), enabled: !!colorBy && feats.length > 0, retry: false })
   const values = useMemo(() => ndvi.data?.result.values ?? {}, [ndvi.data])
   const farm = useQuery({ queryKey: ['ndvi-series', propertyId], queryFn: () => api.ndviSeries(propertyId, 24), enabled: selected != null })
   const sel = feats.find(f => f.properties.id === selected) ?? null
-  const zone = useQuery({ queryKey: ['ndvi-zone-paddock', propertyId, selected, JSON.stringify(sel?.geometry.coordinates ?? null)],
-    queryFn: () => api.ndviZone(propertyId, sel!.geometry, 24), enabled: !!sel, retry: false })
+  // série só da área de pasto (contorno − recortes): a chave muda quando o formato ou os recortes mudam
+  const zone = useQuery({ queryKey: ['paddock-series', propertyId, selected, JSON.stringify(sel?.geometry.coordinates ?? null), sel?.properties.pasture_ha],
+    queryFn: () => api.paddockSeries(propertyId, sel!.properties.id), enabled: !!sel, retry: false })
 
   const save = useMutation({
     mutationFn: () => api.createPaddock(propertyId, name.trim(), pending!),
@@ -61,6 +63,15 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
     const f = feats.find(x => x.properties.id === id)
     if (f) { reshape.reset(); setDrawing(false); setEdited(null); setEditing({ id, geometry: f.geometry }) }
   }
+  const cut = useMutation({
+    mutationFn: (body: { geometry: GeoJSON.Polygon } | { source: 'car' }) => api.cutPaddock(propertyId, selected!, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+  })
+  const cutMutate = cut.mutate   // estável entre renders (o objeto da mutação não é)
+  const clearCuts = useMutation({
+    mutationFn: (pid: number) => api.clearCuts(propertyId, pid),
+    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+  })
   const remove = useMutation({
     mutationFn: (id: number) => api.deletePaddock(propertyId, id),
     onSuccess: (_d, id) => { if (selected === id) setSelected(null); qc.invalidateQueries({ queryKey: key }) },
@@ -73,20 +84,24 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
       const v = values[String(f.properties.id)]
       return { ...f, properties: { ...f.properties, ...(colorBy && v != null ? { ndvi: v } : {}) } }
     })
-    if (pending) base.push({ type: 'Feature', id: -1, geometry: pending, properties: { id: -1, name: name || 'Novo piquete', area_ha: 0 } })
-    return { type: 'FeatureCollection', features: base }
-  }, [active, hasPerimeter, feats, values, colorBy, pending, name, editing])
+    if (pending) base.push({ type: 'Feature', id: -1, geometry: pending, properties: { id: -1, name: name || 'Novo piquete', area_ha: 0, pasture_ha: 0, excluded_ha: 0 } })
+    return { type: 'FeatureCollection', features: base, exclusions: list.data?.exclusions }
+  }, [active, hasPerimeter, feats, values, colorBy, pending, name, editing, list.data])
 
   useEffect(() => {
     onLayer(active ? {
       fc, selected, drawing,
-      onDrawn: g => { setDrawing(false); setPending(g); setName(`Piquete ${feats.length + 1}`) },
+      onDrawn: g => {
+        setDrawing(false)
+        if (cutting) { setCutting(false); cutMutate({ geometry: g }) }
+        else { setPending(g); setName(`Piquete ${feats.length + 1}`) }
+      },
       onClick: id => { if (!editing) setSelected(s => (s === id ? null : id)) },
       editing,
       // selecionar já dispara 'change' no Terra Draw: só conta como edição se o formato mudou
       onEdited: g => setEdited(editing && JSON.stringify(g.coordinates) !== JSON.stringify(editing.geometry.coordinates) ? g : null),
     } : null)
-  }, [active, fc, selected, drawing, feats.length, onLayer, editing])
+  }, [active, fc, selected, drawing, cutting, cutMutate, feats.length, onLayer, editing])
   useEffect(() => () => onLayer(null), [onLayer])
 
   if (!hasPerimeter) return <div className="block"><h3>Piquetes</h3><p className="muted">Vincule o CAR desta propriedade para desenhar os piquetes sobre o perímetro.</p></div>
@@ -117,8 +132,10 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
       {!drawing && !pending && !editing && <button className="btn btn-sm" onClick={() => { setSelected(null); setDrawing(true) }}>Desenhar piquete</button>}
       {drawing && (
         <div className="draw-help">
-          <p className="small">Clique no mapa para marcar os cantos do piquete. Para fechar, clique de novo no primeiro ponto.</p>
-          <button className="link" onClick={() => setDrawing(false)}>Cancelar</button>
+          <p className="small">{cutting
+            ? 'Contorne a mata (ou outra área) a tirar do piquete. Para fechar, clique de novo no primeiro ponto.'
+            : 'Clique no mapa para marcar os cantos do piquete. Para fechar, clique de novo no primeiro ponto.'}</p>
+          <button className="link" onClick={() => { setDrawing(false); setCutting(false) }}>Cancelar</button>
         </div>
       )}
       {pending && (
@@ -169,9 +186,20 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
                   ) : (
                     <button className="paddock-main" onClick={() => setSelected(s => (s === p.id ? null : p.id))}>
                       <strong>{p.name}</strong>
-                      <span className="muted small">{fmtHa(p.area_ha)}{colorBy ? ` · NDVI ${fmtNdvi(v ?? null)}` : ''}</span>
+                      <span className="muted small">{fmtHa(p.area_ha)}{p.excluded_ha > 0 ? ` · pasto ${fmtHa(p.pasture_ha)}` : ''}{colorBy ? ` · NDVI ${fmtNdvi(v ?? null)}` : ''}</span>
                     </button>
                   )}
+                  {p.id === selected && renaming?.id !== p.id && !editing && !drawing && (
+                    <span className="row small paddock-cuts">
+                      <button className="link" disabled={cut.isPending} onClick={() => { cut.reset(); setCutting(true); setDrawing(true) }}>Recortar mata</button>
+                      <button className="link" disabled={cut.isPending} onClick={() => { cut.reset(); cut.mutate({ source: 'car' }) }}>
+                        {cut.isPending ? 'Recortando…' : 'Tirar mata do CAR'}
+                      </button>
+                      {p.excluded_ha > 0 && <button className="link" disabled={clearCuts.isPending} onClick={() => clearCuts.mutate(p.id)}>Desfazer recortes</button>}
+                    </span>
+                  )}
+                  {p.id === selected && cut.isError && <p className="notice small">{(cut.error as Error).message}</p>}
+                  {p.id === selected && p.excluded_ha > 0 && <p className="muted small">{fmtHa(p.excluded_ha)} de mata/água fora do cálculo de NDVI.</p>}
                   {p.id === selected && renaming?.id !== p.id && (
                     <span className="row small">
                       <button className="link" onClick={() => setRenaming({ id: p.id, name: p.name })}>Renomear</button>
@@ -187,7 +215,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
 
           {sel && (
             <div className="paddock-detail">
-              <p className="small"><strong>{sel.properties.name}</strong> × média da fazenda, mês a mês</p>
+              <p className="small"><strong>{sel.properties.name}</strong>{sel.properties.excluded_ha > 0 ? ' (só pasto)' : ''} × média da fazenda, mês a mês</p>
               {(zone.isFetching || farm.isFetching) && <p className="muted small">Calculando 24 meses (≈15 s)…</p>}
               {zone.isError && <p className="notice">{(zone.error as Error).message}</p>}
               {farm.data && zone.data && (

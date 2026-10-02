@@ -197,6 +197,9 @@ class PropertyPaddock(Base):
     name = Column(String, nullable=False)
     geom = Column(Geometry('POLYGON', srid=4326, spatial_index=True), nullable=False)
     area_ha = Column(Float, nullable=True)
+    # áreas suprimidas (mata, água...): o NDVI e a área de pasto usam geom − exclusions
+    exclusions = Column(Geometry('MULTIPOLYGON', srid=4326), nullable=True)
+    pasture_ha = Column(Float, nullable=True)
     created_by = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -449,6 +452,8 @@ def init_db():
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS rain_alerts_enabled BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS prodes_alerts_enabled BOOLEAN DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS alert_state JSONB"))
+            conn.execute(text("ALTER TABLE property_paddocks ADD COLUMN IF NOT EXISTS exclusions geometry(MULTIPOLYGON, 4326)"))
+            conn.execute(text("ALTER TABLE property_paddocks ADD COLUMN IF NOT EXISTS pasture_ha DOUBLE PRECISION"))
             if hasattr(conn, 'commit'):
                 conn.commit()
     except Exception as e:

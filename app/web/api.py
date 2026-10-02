@@ -373,3 +373,24 @@ async def paddocks_ndvi(property_id: int, month: str, user=Depends(current_user)
     _own(property_id, user)
     _rate_limit(f"ndvi:{user.chat_id}", limit=30)
     return await _call(P.paddocks_ndvi_for, user.chat_id, property_id, month)
+
+
+@router.post("/properties/{property_id}/paddocks/{paddock_id}/cut")
+async def paddock_cut(property_id: int, paddock_id: int, body: dict, user=Depends(current_user)):
+    """Recorte manual ({geometry}) ou automático pelo CAR ({source: "car"})."""
+    _own(property_id, user)
+    if body.get("source") == "car":
+        return await _call(P.cut_paddock_car, property_id, paddock_id)
+    return await _call(P.cut_paddock, property_id, paddock_id, body.get("geometry"))
+
+
+@router.delete("/properties/{property_id}/paddocks/{paddock_id}/cut")
+async def paddock_cut_clear(property_id: int, paddock_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.clear_paddock_cuts, property_id, paddock_id)
+
+
+@router.get("/properties/{property_id}/paddocks/{paddock_id}/ndvi/series")
+async def paddock_series(property_id: int, paddock_id: int, months: int = 24, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.paddock_series_for, user.chat_id, property_id, paddock_id, max(6, min(months, 60)))

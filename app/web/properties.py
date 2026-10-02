@@ -767,20 +767,135 @@ def prodes_job_file(property_id: int, job_id: int, which: str) -> tuple:
 
 MAX_PADDOCKS = 200
 MIN_PADDOCK_HA = 0.05
+# camadas do CAR que "Remover mata do CAR" tira do piquete
+CAR_EXCLUDE_CATEGORIES = ("vegetacao", "reserva", "app", "agua")
+# área de pasto = contorno do piquete (cerca) − áreas suprimidas (mata, água...)
+PASTURE_SQL = ("CASE WHEN exclusions IS NULL THEN geom "
+               "ELSE ST_CollectionExtract(ST_MakeValid(ST_Difference(geom, exclusions)), 3) END")
 
 
 def list_paddocks(property_id: int) -> dict:
+    """Contornos dos piquetes (features) + áreas suprimidas (exclusions), com área total e de pasto."""
     db = SessionLocal()
     try:
         rows = db.execute(text("""
-            SELECT id, name, area_ha, ST_AsGeoJSON(geom, 7) AS g FROM property_paddocks
-            WHERE property_id = :pid ORDER BY name, id
+            SELECT id, name, area_ha, pasture_ha, ST_AsGeoJSON(geom, 7) AS g,
+                   CASE WHEN exclusions IS NOT NULL THEN ST_AsGeoJSON(exclusions, 7) END AS ex
+            FROM property_paddocks WHERE property_id = :pid ORDER BY name, id
         """), {"pid": property_id}).fetchall()
     finally:
         db.close()
-    return {"type": "FeatureCollection", "features": [
-        {"type": "Feature", "id": r.id, "geometry": json.loads(r.g),
-         "properties": {"id": r.id, "name": r.name, "area_ha": round(r.area_ha or 0, 2)}} for r in rows]}
+    feats, excl = [], []
+    for r in rows:
+        area = round(r.area_ha or 0, 2)
+        pasture = round(r.pasture_ha if r.pasture_ha is not None else (r.area_ha or 0), 2)
+        feats.append({"type": "Feature", "id": r.id, "geometry": json.loads(r.g),
+                      "properties": {"id": r.id, "name": r.name, "area_ha": area, "pasture_ha": pasture,
+                                     "excluded_ha": round(max(area - pasture, 0), 2)}})
+        if r.ex:
+            excl.append({"type": "Feature", "geometry": json.loads(r.ex), "properties": {"paddock_id": r.id}})
+    return {"type": "FeatureCollection", "features": feats,
+            "exclusions": {"type": "FeatureCollection", "features": excl}}
+
+
+def _recompute_paddock(db, paddock_id: int):
+    """Depois de mudar contorno ou recortes: recortes ficam só dentro do contorno; recalcula a área de pasto."""
+    db.execute(text("""
+        UPDATE property_paddocks SET exclusions = CASE
+            WHEN exclusions IS NULL THEN NULL
+            ELSE NULLIF(ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Intersection(exclusions, geom)), 3)),
+                        ST_GeomFromText('MULTIPOLYGON EMPTY', 4326)) END
+        WHERE id = :id
+    """), {"id": paddock_id})
+    db.execute(text(f"""
+        UPDATE property_paddocks SET
+            exclusions = CASE WHEN exclusions IS NOT NULL AND ST_IsEmpty(exclusions) THEN NULL ELSE exclusions END,
+            pasture_ha = ST_Area(({PASTURE_SQL})::geography) / 10000,
+            updated_at = now() at time zone 'utc'
+        WHERE id = :id
+    """), {"id": paddock_id})
+
+
+def _own_paddock(db, property_id: int, paddock_id: int):
+    if not db.execute(text("SELECT 1 FROM property_paddocks WHERE id = :id AND property_id = :pid"),
+                      {"id": paddock_id, "pid": property_id}).fetchone():
+        raise PropertyError("Piquete não encontrado.")
+
+
+def _add_exclusion(db, paddock_id: int, cut_sql: str, params: dict) -> float:
+    """Soma ao recorte do piquete a parte de `cut_sql` que cai dentro dele; devolve os ha suprimidos agora."""
+    before = db.execute(text(f"SELECT ST_Area(({PASTURE_SQL})::geography) / 10000 FROM property_paddocks WHERE id = :id"),
+                        {"id": paddock_id}).scalar() or 0
+    db.execute(text(f"""
+        UPDATE property_paddocks SET exclusions = ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Union(
+            COALESCE(exclusions, ST_GeomFromText('MULTIPOLYGON EMPTY', 4326)),
+            ST_CollectionExtract(ST_MakeValid(ST_Intersection(({cut_sql}), geom)), 3))), 3))
+        WHERE id = :id
+    """), {**params, "id": paddock_id})
+    _recompute_paddock(db, paddock_id)
+    after = db.execute(text("SELECT pasture_ha FROM property_paddocks WHERE id = :id"), {"id": paddock_id}).scalar() or 0
+    return before - after
+
+
+def cut_paddock(property_id: int, paddock_id: int, geometry: dict) -> dict:
+    """Recorte manual: o polígono desenhado (ex.: uma mata) sai da área de pasto do piquete."""
+    if (geometry or {}).get("type") != "Polygon":
+        raise PropertyError("Desenhe a área a recortar como um polígono.")
+    db = SessionLocal()
+    try:
+        _own_paddock(db, property_id, paddock_id)
+        removed = _add_exclusion(db, paddock_id, "ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(:g), 4326))",
+                                 {"g": json.dumps(geometry)})
+        if removed < 0.01:
+            db.rollback()
+            raise PropertyError("O recorte precisa cobrir uma parte do piquete.")
+        db.commit()
+    finally:
+        db.close()
+    return next(f for f in list_paddocks(property_id)["features"] if f["id"] == paddock_id)
+
+
+def cut_paddock_car(property_id: int, paddock_id: int) -> dict:
+    """Tira do piquete o que o CAR declara como vegetação nativa, reserva legal, APP ou corpo d'água."""
+    db = SessionLocal()
+    try:
+        _own_paddock(db, property_id, paddock_id)
+        removed = _add_exclusion(db, paddock_id, """
+            SELECT ST_Union(ST_CollectionExtract(ST_MakeValid(c.geom), 3)) FROM property_car_features c
+            WHERE c.property_id = :pid AND c.category = ANY(:cats)
+        """, {"pid": property_id, "cats": list(CAR_EXCLUDE_CATEGORIES)})
+        if removed < 0.01:
+            db.rollback()
+            raise PropertyError("O CAR não declara mata, reserva, APP nem água dentro deste piquete.")
+        db.commit()
+    finally:
+        db.close()
+    return next(f for f in list_paddocks(property_id)["features"] if f["id"] == paddock_id)
+
+
+def clear_paddock_cuts(property_id: int, paddock_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        _own_paddock(db, property_id, paddock_id)
+        db.execute(text("UPDATE property_paddocks SET exclusions = NULL WHERE id = :id"), {"id": paddock_id})
+        _recompute_paddock(db, paddock_id)
+        db.commit()
+    finally:
+        db.close()
+    return next(f for f in list_paddocks(property_id)["features"] if f["id"] == paddock_id)
+
+
+def paddock_series_for(chat_id: str, property_id: int, paddock_id: int, months: int = 24) -> dict:
+    """Série mensal de NDVI só da área de pasto do piquete."""
+    db = SessionLocal()
+    try:
+        g = db.execute(text(f"SELECT ST_AsGeoJSON(({PASTURE_SQL}), 7) FROM property_paddocks WHERE id = :id AND property_id = :pid"),
+                       {"id": paddock_id, "pid": property_id}).scalar()
+    finally:
+        db.close()
+    if not g:
+        raise PropertyError("Piquete não encontrado.")
+    return ndvi_zone_for(chat_id, property_id, json.loads(g), months)
 
 
 def _clip_to_perimeter(db, property_id: int, geometry: dict):
@@ -813,8 +928,8 @@ def create_paddock(chat_id: str, property_id: int, name: str, geometry: dict) ->
             raise PropertyError(f"Limite de {MAX_PADDOCKS} piquetes por propriedade.")
         wkt, ha = _clip_to_perimeter(db, property_id, geometry)
         new_id = db.execute(text("""
-            INSERT INTO property_paddocks (property_id, name, geom, area_ha, created_by, created_at, updated_at)
-            VALUES (:pid, :name, ST_GeomFromText(:wkt, 4326), :ha, :cid, now() at time zone 'utc', now() at time zone 'utc')
+            INSERT INTO property_paddocks (property_id, name, geom, area_ha, pasture_ha, created_by, created_at, updated_at)
+            VALUES (:pid, :name, ST_GeomFromText(:wkt, 4326), :ha, :ha, :cid, now() at time zone 'utc', now() at time zone 'utc')
             RETURNING id
         """), {"pid": property_id, "name": name.strip()[:60], "wkt": wkt, "ha": ha, "cid": str(chat_id)}).scalar()
         db.commit()
@@ -836,6 +951,7 @@ def update_paddock(property_id: int, paddock_id: int, name: str = None, geometry
             wkt, ha = _clip_to_perimeter(db, property_id, geometry)
             db.execute(text("""UPDATE property_paddocks SET geom = ST_GeomFromText(:wkt, 4326), area_ha = :ha,
                                updated_at = now() at time zone 'utc' WHERE id = :id"""), {"wkt": wkt, "ha": ha, "id": paddock_id})
+            _recompute_paddock(db, paddock_id)
         db.commit()
     finally:
         db.close()
@@ -866,8 +982,8 @@ def paddocks_ndvi_for(chat_id: str, property_id: int, month: str) -> dict:
         raise PropertyError("Mês inválido (use AAAA-MM ou latest).")
     db = SessionLocal()
     try:
-        rows = db.execute(text("""SELECT id, ST_AsGeoJSON(geom, 7) AS g, updated_at FROM property_paddocks
-                                  WHERE property_id = :pid ORDER BY id"""), {"pid": property_id}).fetchall()
+        rows = db.execute(text(f"""SELECT id, ST_AsGeoJSON(({PASTURE_SQL}), 7) AS g, updated_at FROM property_paddocks
+                                   WHERE property_id = :pid ORDER BY id"""), {"pid": property_id}).fetchall()
     finally:
         db.close()
     if not rows:
