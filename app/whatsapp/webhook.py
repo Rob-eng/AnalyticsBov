@@ -85,6 +85,17 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                         
                         print(f"[Webhook] {sender_phone} ({user_name}) disse: {texto if texto else msg_type}")
                         
+                        # Login da plataforma web: "ENTRAR <código>" (enviado pelo botão do site)
+                        from app.web.auth import CODE_RE as _WEB_CODE_RE
+                        _login = _WEB_CODE_RE.match(texto or "")
+                        if _login:
+                            from app.web.auth import confirm_login_code, login_reply_text
+                            from app.whatsapp.sender import send_whatsapp_text
+                            ok = confirm_login_code(_login.group(1), sender_phone, "whatsapp", user_name)
+                            send_whatsapp_text(sender_phone, login_reply_text() if ok else
+                                               "⚠️ Código de acesso inválido ou expirado. Gere um novo no site.")
+                            continue
+
                         # Detecção de Código CAR
                         import re
                         car_pattern = r"^[A-Z]{2}-\d{7}-[A-F0-9]{32}$"

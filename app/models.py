@@ -145,6 +145,43 @@ class FuturesSettlement(Base):
     trades = Column(Integer, nullable=True)
     collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+# ── Plataforma web ────────────────────────────────────────────────────────────
+
+class Organization(Base):
+    """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
+    __tablename__ = 'organizations'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    kind = Column(String, nullable=False, default='produtor')   # 'produtor' | 'consultoria'
+    owner_chat_id = Column(String, ForeignKey('users.chat_id'), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OrganizationMember(Base):
+    __tablename__ = 'organization_members'
+    __table_args__ = (UniqueConstraint('organization_id', 'chat_id', name='uq_org_member'),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    chat_id = Column(String, ForeignKey('users.chat_id'), nullable=False, index=True)
+    role = Column(String, nullable=False, default='owner')       # owner | consultor | tecnico | leitura
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class WebLoginCode(Base):
+    """Código de uso único: o site gera, o usuário envia ao bot (WhatsApp/Telegram) e o navegador entra."""
+    __tablename__ = 'web_login_codes'
+
+    code = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    confirmed_chat_id = Column(String, nullable=True)
+    confirmed_platform = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    consumed_at = Column(DateTime, nullable=True)
+
+
 class CARCaptchaSession(Base):
     """
     Armazena o estado de uma tentativa de download do SICAR que 

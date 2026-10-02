@@ -1,3 +1,12 @@
+# ── Estágio 1: compila a plataforma web (React + Vite) ───────────────────────
+FROM node:22-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund --omit=optional || npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+# ── Estágio 2: API + bots (Python) ────────────────────────────────────────────
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -16,6 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+# Site compilado (servido pelo FastAPI em /app)
+COPY --from=web /web/dist /app/web/dist
 
 # Set environment variables
 ENV PYTHONPATH=/app

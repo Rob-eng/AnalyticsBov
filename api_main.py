@@ -18,6 +18,25 @@ app.include_router(telegram_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 
+from app.web.api import router as web_api_router
+app.include_router(web_api_router)
+
+# Plataforma web (SPA React em web/dist): /app e qualquer rota /app/* → index.html
+_WEB_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "dist")
+if os.path.isdir(_WEB_DIST):
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    app.mount("/app/assets", StaticFiles(directory=os.path.join(_WEB_DIST, "assets")), name="web-assets")
+
+    @app.get("/app", include_in_schema=False)
+    @app.get("/app/{path:path}", include_in_schema=False)
+    def web_app(path: str = ""):
+        file_path = os.path.join(_WEB_DIST, path)
+        if path and os.path.isfile(file_path) and os.path.realpath(file_path).startswith(os.path.realpath(_WEB_DIST)):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_WEB_DIST, "index.html"))
+
 @app.on_event("startup")
 async def on_startup():
     """Configura o sistema ao iniciar a API."""

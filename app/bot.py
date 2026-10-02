@@ -71,6 +71,16 @@ def get_keyboard(chat_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
+
+    # Login da plataforma web: t.me/<bot>?start=login_<código>
+    if context.args and context.args[0].lower().startswith("login_"):
+        from app.web.auth import confirm_login_code, login_reply_text
+        name = update.effective_chat.first_name or update.effective_chat.username
+        ok = confirm_login_code(context.args[0][6:], chat_id, "telegram", name)
+        await update.message.reply_text(
+            login_reply_text() if ok else "⚠️ Código de acesso inválido ou expirado. Gere um novo no site.",
+            parse_mode='Markdown')
+        return
     raw_username = update.effective_chat.username
     first_name = update.effective_chat.first_name or "Usuario"
     username = f"{first_name} (@{raw_username})" if raw_username else first_name
