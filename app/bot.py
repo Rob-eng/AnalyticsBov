@@ -1508,7 +1508,7 @@ async def receive_prodes_location(update: Update, context: ContextTypes.DEFAULT_
         apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
     except RuntimeError as e:
         await status_msg.edit_text(
-            f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente novamente em instantes.",
+            "⚠️ O servidor do INPE (TerraBrasilis) não está respondendo agora, então não consegui consultar o PRODES. Tente novamente mais tarde.",
         )
         return ConversationHandler.END
 

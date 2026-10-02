@@ -516,7 +516,8 @@ def prodes_list_for(chat_id: str, property_id: int, refresh: bool = False) -> di
     try:
         aps = find_intersecting_apontamentos(prop["perimeter"])
     except RuntimeError as e:
-        raise PropertyError(f"Não consegui consultar a base PRODES/INPE agora ({e}).")
+        print(f"[WEB PRODES] Falha na consulta: {e}", flush=True)
+        raise PropertyError("O servidor do INPE (TerraBrasilis) não está respondendo agora. Tente novamente mais tarde.")
     features = [{"type": "Feature", "geometry": a["geometry"], "properties": {
         "uuid": a["uuid"], "class_name": a["class_name"], "year": a["year"],
         "image_date": a["image_date"].isoformat() if a.get("image_date") else None,

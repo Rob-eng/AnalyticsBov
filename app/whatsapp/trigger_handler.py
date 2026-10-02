@@ -404,7 +404,7 @@ async def _handle_prodes_list(phone, lat, lon, nome, loop):
     try:
         apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
     except RuntimeError as e:
-        send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
+        send_whatsapp_text(phone, "⚠️ O servidor do INPE (TerraBrasilis) não está respondendo agora, então não consegui consultar o PRODES. Tente de novo mais tarde.")
         return
 
     if not apontamentos:
@@ -498,7 +498,7 @@ async def _handle_prodes_escolha(phone, lat, lon, nome, escolha, loop):
         try:
             apontamentos = await loop.run_in_executor(None, find_intersecting_apontamentos, car['geometry'])
         except RuntimeError as e:
-            send_whatsapp_text(phone, f"⚠️ Não consegui consultar a base PRODES/INPE agora ({e}). Tente de novo em instantes.")
+            send_whatsapp_text(phone, "⚠️ O servidor do INPE (TerraBrasilis) não está respondendo agora, então não consegui consultar o PRODES. Tente de novo mais tarde.")
             return
         if not apontamentos:
             send_whatsapp_text(phone, "⚠️ Não encontrei mais apontamentos pra essa coordenada — pode ter mudado algo, peça a análise de novo.")
