@@ -169,6 +169,21 @@ class PropertyCarFeature(Base):
     attrs = Column(JSONB, nullable=True)
 
 
+class PropertyAnalysis(Base):
+    """Histórico de análises da propriedade (NDVI, chuva, MDT, PRODES...): resultado + arquivo no GCS."""
+    __tablename__ = 'property_analyses'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    kind = Column(String, nullable=False, index=True)        # ndvi_series | ndvi_month | rain | mdt | prodes
+    params = Column(JSONB, nullable=True)                    # ex.: {"month": "2025-09"}
+    result = Column(JSONB, nullable=True)                    # dados pequenos (série, estatísticas, moldura)
+    file_path = Column(String, nullable=True)                # objeto no GCS (imagem, vídeo, PDF)
+    file_type = Column(String, nullable=True)                # mime type
+    created_by = Column(String, nullable=True)               # chat_id de quem gerou
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class Organization(Base):
     """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
     __tablename__ = 'organizations'

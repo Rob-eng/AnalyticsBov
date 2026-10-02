@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, fmtHa, LAYER_ORDER, LAYER_STYLE, type Ndvi } from './api'
 import type { Focus } from './MapView'
+import NdviSection from './NdviSection'
 
 export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) => void }) {
   const id = Number(useParams().id)
@@ -30,7 +31,6 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
     qc.invalidateQueries({ queryKey: ['properties'] })
   }
   const sync = useMutation({ mutationFn: () => api.syncCar(id, code.trim().toUpperCase() || undefined), onSuccess: refresh })
-  const loadNdvi = useMutation({ mutationFn: () => api.ndvi(id), onSuccess: setNdvi })
   const remove = useMutation({
     mutationFn: () => api.deleteProperty(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['properties'] }); navigate('/') },
@@ -98,26 +98,7 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
             </ul>
           </div>
 
-          <div className="block">
-            <h3>Vigor da pastagem (NDVI)</h3>
-            {!ndvi && <p className="muted">Imagem Sentinel-2 mais recente sem nuvens sobre o perímetro.</p>}
-            {ndvi && <p className="muted small">Com o NDVI ligado, as camadas do CAR aparecem só como contorno.</p>}
-            {ndvi && (
-              <div className="ndvi">
-                <span className="ndvi-value">{ndvi.mean?.toFixed(2).replace('.', ',') ?? '—'}</span>
-                <span className="muted">NDVI médio · imagem de {ndvi.date.split('-').reverse().join('/')}</span>
-                <span className="ndvi-scale" aria-hidden="true" />
-                <span className="ndvi-labels"><span>solo exposto</span><span>vegetação densa</span></span>
-              </div>
-            )}
-            {loadNdvi.isError && <p className="notice">{(loadNdvi.error as Error).message}</p>}
-            <div className="row">
-              <button className="btn btn-sm" disabled={loadNdvi.isPending} onClick={() => loadNdvi.mutate()}>
-                {loadNdvi.isPending ? 'Processando satélite…' : ndvi ? 'Atualizar NDVI' : 'Mostrar NDVI'}
-              </button>
-              {ndvi && <button className="link" onClick={() => setNdvi(null)}>Ocultar</button>}
-            </div>
-          </div>
+          <NdviSection propertyId={id} shown={ndvi} onShow={setNdvi} />
 
           <div className="block">
             <h3>Arquivos</h3>

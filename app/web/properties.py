@@ -277,3 +277,143 @@ def latest_ndvi(chat_id: str, property_id: int) -> dict:
         "coordinates": [[bb["min_lon"], bb["max_lat"]], [bb["max_lon"], bb["max_lat"]],
                         [bb["max_lon"], bb["min_lat"]], [bb["min_lon"], bb["min_lat"]]],
     }
+
+
+# ── Histórico de análises (property_analyses + arquivos no GCS) ──────────────
+
+def _save_analysis(property_id: int, chat_id: str, kind: str, params: dict, result: dict,
+                   file_bytes: bytes = None, file_type: str = None, ext: str = "bin") -> int:
+    from app.models import PropertyAnalysis
+    file_path = None
+    if file_bytes:
+        try:
+            from app import prodes_storage
+            file_path = f"web/analyses/{property_id}/{kind}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.{ext}"
+            prodes_storage.upload_bytes(file_path, file_bytes, file_type)
+        except Exception as e:   # sem GCS: guarda a imagem no próprio registro (base64)
+            import base64
+            print(f"[WEB] GCS indisponível ({e}); arquivo guardado no banco", flush=True)
+            file_path = None
+            result = {**result, "file_b64": base64.b64encode(file_bytes).decode()}
+    db = SessionLocal()
+    try:
+        row = PropertyAnalysis(property_id=property_id, kind=kind, params=params, result=result,
+                               file_path=file_path, file_type=file_type, created_by=str(chat_id))
+        db.add(row)
+        db.commit()
+        return row.id
+    finally:
+        db.close()
+
+
+def _cached_analysis(property_id: int, kind: str, params: dict, max_age_hours: float):
+    from datetime import timedelta
+    from app.models import PropertyAnalysis
+    db = SessionLocal()
+    try:
+        q = (db.query(PropertyAnalysis)
+             .filter(PropertyAnalysis.property_id == property_id, PropertyAnalysis.kind == kind,
+                     PropertyAnalysis.created_at >= datetime.utcnow() - timedelta(hours=max_age_hours))
+             .order_by(PropertyAnalysis.created_at.desc()))
+        for row in q.limit(20):
+            if (row.params or {}) == params:
+                return row
+        return None
+    finally:
+        db.close()
+
+
+def _analysis_dict(row) -> dict:
+    result = dict(row.result or {})
+    has_file = bool(row.file_path or result.pop("file_b64", None))
+    return {"id": row.id, "kind": row.kind, "params": row.params, "result": result,
+            "file_url": f"/api/v1/properties/{row.property_id}/analyses/{row.id}/file" if has_file else None,
+            "created_at": row.created_at.isoformat()}
+
+
+def ndvi_series_for(chat_id: str, property_id: int, months: int = 24) -> dict:
+    from app.web.analytics import ndvi_series
+    from app.saas.limit_engine import can_perform_action
+    from app.models import log_activity
+    params = {"months": months}
+    cached = _cached_analysis(property_id, "ndvi_series", params, max_age_hours=24 * 7)
+    prop = get_property(property_id)
+    if cached and (not prop["car_synced_at"] or cached.created_at.isoformat() > prop["car_synced_at"]):
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para calcular o NDVI sobre o perímetro.")
+    series = ndvi_series(prop["perimeter"], months)
+    log_activity(chat_id, "NDVI", platform="web", details=f"{prop['name']} (série {months} meses)")
+    aid = _save_analysis(property_id, chat_id, "ndvi_series", params, {"series": series})
+    return _analysis_dict(_get_analysis_row(aid))
+
+
+def ndvi_month_for(chat_id: str, property_id: int, month: str) -> dict:
+    import re as _re
+    from app.web.analytics import ndvi_month_image
+    from app.saas.limit_engine import can_perform_action
+    if not _re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise PropertyError("Mês inválido (use AAAA-MM).")
+    current = datetime.utcnow().strftime("%Y-%m")
+    if month > current:
+        raise PropertyError("Escolha um mês que já passou ou o mês atual.")
+    params = {"month": month}
+    # mês fechado não muda: cache longo; mês corrente: 1 dia
+    cached = _cached_analysis(property_id, "ndvi_month", params, max_age_hours=24 if month == current else 24 * 365)
+    if cached:
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    prop = get_property(property_id)
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para ver o NDVI sobre o perímetro.")
+    out = ndvi_month_image(prop["perimeter"], month)
+    if not out.get("png"):
+        raise PropertyError("Nenhuma imagem de satélite sem nuvens nesse mês.")
+    from app.models import log_activity
+    log_activity(chat_id, "NDVI", platform="web", details=f"{prop['name']} ({month})")
+    aid = _save_analysis(property_id, chat_id, "ndvi_month", params,
+                         {"mean": out["mean"], "images": out["images"], "coordinates": out["coordinates"]},
+                         out["png"], "image/png", "png")
+    return _analysis_dict(_get_analysis_row(aid))
+
+
+def _get_analysis_row(analysis_id: int):
+    from app.models import PropertyAnalysis
+    db = SessionLocal()
+    try:
+        return db.query(PropertyAnalysis).filter_by(id=analysis_id).first()
+    finally:
+        db.close()
+
+
+def list_analyses(property_id: int, limit: int = 50) -> list:
+    from app.models import PropertyAnalysis
+    db = SessionLocal()
+    try:
+        rows = (db.query(PropertyAnalysis).filter_by(property_id=property_id)
+                .order_by(PropertyAnalysis.created_at.desc()).limit(limit).all())
+        return [_analysis_dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def analysis_file(property_id: int, analysis_id: int) -> tuple:
+    """(bytes, mime) do arquivo da análise (GCS ou base64 no registro)."""
+    import base64
+    row = _get_analysis_row(analysis_id)
+    if not row or row.property_id != property_id:
+        raise PropertyError("Análise não encontrada.")
+    if row.file_path:
+        from app import prodes_storage
+        data = prodes_storage.download_bytes(row.file_path)
+        if data:
+            return data, row.file_type
+    b64 = (row.result or {}).get("file_b64")
+    if b64:
+        return base64.b64decode(b64), row.file_type
+    raise PropertyError("Arquivo da análise indisponível.")

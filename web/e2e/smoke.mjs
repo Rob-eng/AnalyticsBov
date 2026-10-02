@@ -45,10 +45,17 @@ await step('desliga e liga uma camada', async () => {
   const cb = page.getByRole('checkbox', { name: /Área antropizada/ })
   await cb.uncheck(); await cb.check()
 })
-await step('mostra o NDVI', async () => {
-  await page.getByRole('button', { name: 'Mostrar NDVI' }).click()
-  await page.getByText('NDVI médio').waitFor({ timeout: 90000 })
-  await page.waitForTimeout(1500)
+await step('mostra o histórico de NDVI', async () => {
+  await page.getByRole('button', { name: 'Ver histórico' }).click()
+  await page.getByRole('img', { name: 'NDVI médio mensal sobre o perímetro' }).waitFor({ timeout: 120000 })
+})
+await step('compara dois meses e mostra no mapa', async () => {
+  await page.getByRole('button', { name: 'Comparar' }).click()
+  await page.locator('.thumb').nth(1).waitFor({ timeout: 180000 })
+  await page.waitForFunction(() => [...document.querySelectorAll('.thumb img')].every(i => i.complete && i.naturalWidth > 0), null, { timeout: 30000 })
+  await page.locator('.thumb').nth(1).click()
+  await page.getByText(/No mapa: NDVI/).waitFor()
+  await page.waitForTimeout(2000)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/e2e_ndvi.png` })
 })
 await step('exclui a propriedade', async () => {

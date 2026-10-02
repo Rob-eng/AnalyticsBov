@@ -121,3 +121,24 @@ p { margin: 0; }
   .stage { order: 1; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ── gráficos e comparação ── */
+.chart { position: relative; background: #fff; border: 1px solid var(--linha); border-radius: 10px; padding: 6px 4px 2px; }
+.chart svg { display: block; }
+.chart-grid { stroke: #e3e8e1; stroke-width: 1; }
+.chart-cross { stroke: var(--apoio); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart-tick { font: 500 9.5px var(--mono); fill: var(--apoio); }
+.chart-tip { position: absolute; top: 6px; width: 140px; display: grid; gap: 1px; padding: 6px 8px; background: #fff; border: 1px solid var(--linha);
+  border-radius: 8px; box-shadow: 0 4px 12px rgba(23,37,28,.15); font-size: .78rem; pointer-events: none; }
+.table-toggle summary { cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--apoio); }
+.mini-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: .8rem; }
+.mini-table th, .mini-table td { text-align: left; padding: 3px 4px; border-bottom: 1px solid #e3e8e1; }
+.mini-table td:nth-child(2) { font-family: var(--mono); }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.thumb { display: grid; gap: 4px; padding: 4px; border: 1.5px solid var(--linha); border-radius: 9px; background: #fff; cursor: pointer; font-size: .8rem; text-align: left; }
+.thumb img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #f4f6f3; border-radius: 6px; }
+.thumb-on { border-color: var(--tinta); box-shadow: inset 0 -4px 0 var(--ipe); }
+.delta { font-weight: 600; font-size: .9rem; }
+.delta-up { color: #1f6b35; }
+.delta-down { color: #9b2c2c; }

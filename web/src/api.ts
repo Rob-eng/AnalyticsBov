@@ -43,6 +43,9 @@ export type AreaRow = { category: string; label: string; area_ha: number }
 export type Layers = GeoJSON.FeatureCollection & { areas: AreaRow[] }
 export type CarCandidate = { car_code: string; municipio: string | null; uf: string | null; area_ha: number | null; modulos_rurais: number | null; tipo: string }
 export type Ndvi = { date: string; mean: number | null; cloud_pct: number | null; image: string; coordinates: [number, number][] }
+export type Analysis<R = Record<string, unknown>> = { id: number; kind: string; params: Record<string, unknown>; result: R; file_url: string | null; created_at: string }
+export type NdviPoint = { month: string; images: number; mean: number | null; p25: number | null; p75: number | null }
+export type NdviMonth = { mean: number | null; images: number; coordinates: [number, number][] }
 export type LoginStart = { code: string; expires_in: number; whatsapp_url: string | null; telegram_url: string }
 
 export const api = {
@@ -61,6 +64,9 @@ export const api = {
   layers: (id: number) => request<Layers>(`/properties/${id}/layers`),
   ndvi: (id: number) => request<Ndvi>(`/properties/${id}/ndvi`),
   carLookup: (lat: number, lon: number) => request<{ candidates: CarCandidate[] }>(`/car/lookup?lat=${lat}&lon=${lon}`),
+  ndviSeries: (id: number, months = 24) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/ndvi/series?months=${months}`),
+  ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
+  analyses: (id: number) => request<Analysis[]>(`/properties/${id}/analyses`),
   zipUrl: (id: number) => `/api/v1/properties/${id}/car.zip`,
   mapUrl: (id: number) => `/api/v1/properties/${id}/map.png`,
 }
@@ -83,3 +89,7 @@ export const LAYER_STYLE: Record<string, { color: string; opacity: number; label
   extra_pousio: { color: '#c5a880', opacity: 0.5, label: 'Área de pousio' },
 }
 export const LAYER_ORDER = Object.keys(LAYER_STYLE)
+
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+export const fmtMonth = (ym: string) => { const [y, m] = ym.split('-'); return `${MESES[Number(m) - 1]}/${y.slice(2)}` }
+export const fmtNdvi = (v: number | null | undefined) => v == null ? '—' : v.toFixed(2).replace('.', ',')

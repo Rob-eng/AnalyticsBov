@@ -216,3 +216,33 @@ async def property_map(property_id: int, user=Depends(current_user)):
     _rate_limit(f"map:{user.chat_id}", limit=20)
     data, name = await _call(P.build_map_png, property_id)
     return _download(data, name, "image/png")
+
+
+# ── Análises e histórico ─────────────────────────────────────────────────────
+
+@router.get("/properties/{property_id}/ndvi/series")
+async def ndvi_series(property_id: int, months: int = 24, user=Depends(current_user)):
+    _own(property_id, user)
+    months = max(6, min(months, 60))
+    return await _call(P.ndvi_series_for, user.chat_id, property_id, months)
+
+
+@router.get("/properties/{property_id}/ndvi/month")
+async def ndvi_month(property_id: int, month: str, user=Depends(current_user)):
+    _own(property_id, user)
+    _rate_limit(f"ndvi:{user.chat_id}", limit=30)
+    return await _call(P.ndvi_month_for, user.chat_id, property_id, month)
+
+
+@router.get("/properties/{property_id}/analyses")
+def analyses(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return P.list_analyses(property_id)
+
+
+@router.get("/properties/{property_id}/analyses/{analysis_id}/file")
+async def analysis_file(property_id: int, analysis_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    data, mime = await _call(P.analysis_file, property_id, analysis_id)
+    return RawResponse(data, media_type=mime or "application/octet-stream",
+                       headers={"Cache-Control": "private, max-age=86400"})
