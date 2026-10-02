@@ -152,6 +152,21 @@ def list_properties(chat_id: str) -> list:
         db.close()
 
 
+def list_perimeters(chat_id: str) -> dict:
+    """Perímetros (simplificados, ~10 m) de todas as propriedades com CAR — para o mapa geral."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id, name, ST_AsGeoJSON(ST_SimplifyPreserveTopology(perimeter, 0.0001), 6) AS g
+            FROM favorite_locations WHERE user_id = :cid AND perimeter IS NOT NULL
+        """), {"cid": str(chat_id)}).fetchall()
+        return {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "id": r.id, "geometry": json.loads(r.g), "properties": {"id": r.id, "name": r.name}}
+            for r in rows]}
+    finally:
+        db.close()
+
+
 def get_property(property_id: int) -> dict:
     db = SessionLocal()
     try:

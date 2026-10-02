@@ -133,6 +133,11 @@ def list_properties(user=Depends(current_user)):
     return P.list_properties(user.chat_id)
 
 
+@router.get("/properties/perimeters")   # antes de /properties/{property_id}
+def list_perimeters(user=Depends(current_user)):
+    return P.list_perimeters(user.chat_id)
+
+
 @router.post("/properties", status_code=201)
 async def create_property(body: NewProperty, user=Depends(current_user)):
     return await _call(P.create_property, user.chat_id, body.name, body.car_code, body.lat, body.lon)

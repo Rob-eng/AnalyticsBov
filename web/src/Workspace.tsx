@@ -10,6 +10,8 @@ export default function Workspace({ me }: { me: Me }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const props = useQuery({ queryKey: ['properties'], queryFn: api.properties })
+  // chave sob 'properties': criar/excluir/vincular CAR já invalida os perímetros junto
+  const perimeters = useQuery({ queryKey: ['properties', 'perimeters'], queryFn: api.perimeters })
   const [mode, setMode] = useState<Me['mode']>(me.mode)
   const [focus, setFocus] = useState<Focus | null>(null)
   const [pick, setPick] = useState<{ active: boolean; point: { lat: number; lon: number } | null }>({ active: false, point: null })
@@ -91,6 +93,7 @@ export default function Workspace({ me }: { me: Me }) {
       <main className="stage">
         <MapView
           properties={list}
+          perimeters={perimeters.data ?? null}
           selectedId={selectedId}
           onSelect={onSelect}
           focus={selectedId ? focus : null}

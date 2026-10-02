@@ -61,6 +61,7 @@ export const api = {
   logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
 
   properties: () => request<Property[]>('/properties'),
+  perimeters: () => request<GeoJSON.FeatureCollection<GeoJSON.Geometry, { id: number; name: string }>>('/properties/perimeters'),
   property: (id: number) => request<PropertyDetail>(`/properties/${id}`),
   createProperty: (body: { name: string; car_code?: string; lat?: number; lon?: number }) =>
     request<PropertyDetail>('/properties', { method: 'POST', body: JSON.stringify(body) }),

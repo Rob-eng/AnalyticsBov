@@ -36,6 +36,7 @@ export type Focus = {
 
 type Props = {
   properties: Property[]
+  perimeters?: GeoJSON.FeatureCollection | null
   selectedId?: number | null
   onSelect?: (id: number) => void
   focus?: Focus | null
@@ -45,7 +46,7 @@ type Props = {
   interactive?: boolean
 }
 
-export default function MapView({ properties, selectedId, onSelect, focus, pickMode, picked, onPick, interactive = true }: Props) {
+export default function MapView({ properties, perimeters, selectedId, onSelect, focus, pickMode, picked, onPick, interactive = true }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
@@ -53,6 +54,10 @@ export default function MapView({ properties, selectedId, onSelect, focus, pickM
   const [ready, setReady] = useState(false)
   const onPickRef = useRef(onPick)
   onPickRef.current = onPick
+  const onSelectRef = useRef(onSelect)
+  onSelectRef.current = onSelect
+  const pickRef = useRef(pickMode)
+  pickRef.current = pickMode
 
   // criação do mapa + fontes/camadas vazias (preenchidas depois com setData)
   useEffect(() => {
@@ -81,6 +86,17 @@ export default function MapView({ properties, selectedId, onSelect, focus, pickM
       const prodesColor: maplibregl.ExpressionSpecification = ['case', ['<=', ['coalesce', ['get', 'year'], 0], 2008], '#2b83ba', '#d7191c']
       m.addLayer({ id: 'prodes-fill', type: 'fill', source: 'prodes', paint: { 'fill-color': prodesColor, 'fill-opacity': ['case', ['boolean', ['get', 'selected'], false], 0.65, 0.35] } })
       m.addLayer({ id: 'prodes-line', type: 'line', source: 'prodes', paint: { 'line-color': prodesColor, 'line-width': ['case', ['boolean', ['get', 'selected'], false], 3, 1.5] } })
+      // mapa geral: perímetro de cada propriedade com CAR (clique abre a propriedade)
+      m.addSource('overview', { type: 'geojson', data: EMPTY })
+      m.addLayer({ id: 'overview-fill', type: 'fill', source: 'overview', paint: { 'fill-color': IPE, 'fill-opacity': 0.12 } })
+      m.addLayer({ id: 'overview-halo', type: 'line', source: 'overview', paint: { 'line-color': TINTA, 'line-width': 4, 'line-opacity': 0.6 } })
+      m.addLayer({ id: 'overview-line', type: 'line', source: 'overview', paint: { 'line-color': IPE, 'line-width': 2 } })
+      m.on('click', 'overview-fill', e => {
+        const id = e.features?.[0]?.properties?.id
+        if (id != null && !pickRef.current) onSelectRef.current?.(Number(id))
+      })
+      m.on('mouseenter', 'overview-fill', () => { if (!pickRef.current) m.getCanvas().style.cursor = 'pointer' })
+      m.on('mouseleave', 'overview-fill', () => { if (!pickRef.current) m.getCanvas().style.cursor = '' })
       m.addLayer({ id: 'perimeter-halo', type: 'line', source: 'perimeter', paint: { 'line-color': TINTA, 'line-width': 5 } })
       m.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter', paint: { 'line-color': IPE, 'line-width': 2.5 } })
       setReady(true)
@@ -112,13 +128,19 @@ export default function MapView({ properties, selectedId, onSelect, focus, pickM
       el.addEventListener('click', ev => { ev.stopPropagation(); onSelect?.(p.id) })
       return new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat([p.lon!, p.lat!]).addTo(m)
     })
+    const overview = m.getSource('overview') as maplibregl.GeoJSONSource | undefined
+    overview?.setData(!focus && perimeters ? perimeters : EMPTY)
     const pts = properties.filter(p => p.lat != null)
     if (!focus && pts.length && interactive && !pickMode) {
       const b = new maplibregl.LngLatBounds()
       pts.forEach(p => b.extend([p.lon!, p.lat!]))
+      const walk = (c: unknown): void => {
+        if (Array.isArray(c) && typeof c[0] === 'number') b.extend(c as [number, number]); else if (Array.isArray(c)) c.forEach(walk)
+      }
+      perimeters?.features.forEach(f => walk((f.geometry as GeoJSON.Polygon).coordinates))
       m.fitBounds(b, { padding: 90, maxZoom: 12, duration: 600 })
     }
-  }, [properties, selectedId, onSelect, interactive, focus, pickMode])
+  }, [properties, perimeters, selectedId, onSelect, interactive, focus, pickMode, ready])
 
   // propriedade aberta: perímetro + camadas do CAR + NDVI
   useEffect(() => {
