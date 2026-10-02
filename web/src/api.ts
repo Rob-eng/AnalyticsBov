@@ -38,7 +38,7 @@ export type Property = {
   car_code: string | null; area_ha: number | null; municipio: string | null; uf: string | null
   car_synced_at: string | null; has_perimeter: boolean
 }
-export type PaddockProps = { id: number; name: string; area_ha: number; pasture_ha: number; excluded_ha: number; ndvi?: number | null }
+export type PaddockProps = { id: number; name: string; area_ha: number; pasture_ha: number; excluded_ha: number; water_m?: number | null; ndvi?: number | null }
 export type Paddocks = GeoJSON.FeatureCollection<GeoJSON.Polygon, PaddockProps> & { exclusions?: GeoJSON.FeatureCollection }
 export type Paddock = GeoJSON.Feature<GeoJSON.Polygon, PaddockProps> & { id: number }
 export type Lot = { id: number; name: string; category: string; category_label: string; head_count: number; avg_weight_kg: number | null; default_weight_kg: number; ua: number; notes: string | null; paddock_id: number | null; paddock_name: string | null; since: string | null }
@@ -51,6 +51,9 @@ export type GrazingPaddock = {
   history: { lot: string; entered_on: string; left_on: string | null; days: number; heads: number; ua: number; source: string }[]
 }
 export type Grazing = { paddocks: GrazingPaddock[]; rest_window: [number, number]; ndvi_date: string | null }
+export type ImprovementKind = { key: string; label: string; geometry: 'Point' | 'LineString'; water: boolean }
+export type ImprovementProps = { id: number; kind: string; kind_label: string; name: string | null; notes: string | null; length_m: number | null }
+export type Improvements = GeoJSON.FeatureCollection<GeoJSON.Point | GeoJSON.LineString, ImprovementProps> & { kinds: ImprovementKind[] }
 export type Alerts = { ndvi: boolean; rain: boolean; prodes: boolean }
 export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null; alerts: Alerts }
 export type HistoryItem = { id: number; kind: string; title: string; detail: string | null; created_at: string; file_type: string | null; file_url: string | null }
@@ -91,6 +94,10 @@ export const api = {
   createPaddock: (id: number, name: string, geometry: GeoJSON.Polygon) => request<Paddock>(`/properties/${id}/paddocks`, { method: 'POST', body: JSON.stringify({ name, geometry }) }),
   editPaddock: (id: number, pid: number, body: { name?: string; geometry?: GeoJSON.Polygon }) => request<Paddock>(`/properties/${id}/paddocks/${pid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePaddock: (id: number, pid: number) => request<void>(`/properties/${id}/paddocks/${pid}`, { method: 'DELETE' }),
+  improvements: (id: number) => request<Improvements>(`/properties/${id}/improvements`),
+  createImprovement: (id: number, body: { kind: string; geometry: GeoJSON.Geometry; name?: string; notes?: string }) => request<unknown>(`/properties/${id}/improvements`, { method: 'POST', body: JSON.stringify(body) }),
+  editImprovement: (id: number, item: number, body: { name?: string; notes?: string }) => request<unknown>(`/properties/${id}/improvements/${item}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteImprovement: (id: number, item: number) => request<void>(`/properties/${id}/improvements/${item}`, { method: 'DELETE' }),
   herd: (id: number) => request<Herd>(`/properties/${id}/herd`),
   createLot: (id: number, body: { name: string; category: string; head_count: number; avg_weight_kg?: number | null; notes?: string }) => request<Herd>(`/properties/${id}/lots`, { method: 'POST', body: JSON.stringify(body) }),
   editLot: (id: number, lot: number, body: Partial<{ name: string; category: string; head_count: number; avg_weight_kg: number | null; notes: string }>) => request<Herd>(`/properties/${id}/lots/${lot}`, { method: 'PATCH', body: JSON.stringify(body) }),

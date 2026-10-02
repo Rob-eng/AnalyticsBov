@@ -239,6 +239,22 @@ class PaddockOccupation(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PropertyImprovement(Base):
+    """Benfeitoria, ponto de água ou anotação no mapa da fazenda (ponto ou linha)."""
+    __tablename__ = 'property_improvements'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    kind = Column(String, nullable=False)                   # sede | curral | aguada | bebedouro | cocho | cerca | estrada ...
+    name = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
+    geom = Column(Geometry('GEOMETRY', srid=4326, spatial_index=True), nullable=False)   # Point ou LineString
+    length_m = Column(Float, nullable=True)                 # linhas (cerca, estrada, rede de água)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Organization(Base):
     """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
     __tablename__ = 'organizations'

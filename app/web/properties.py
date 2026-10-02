@@ -783,6 +783,8 @@ def list_paddocks(property_id: int) -> dict:
                    CASE WHEN exclusions IS NOT NULL THEN ST_AsGeoJSON(exclusions, 7) END AS ex
             FROM property_paddocks WHERE property_id = :pid ORDER BY name, id
         """), {"pid": property_id}).fetchall()
+        from app.web.improvements import water_distance_by_paddock
+        water = water_distance_by_paddock(db, property_id)
     finally:
         db.close()
     feats, excl = [], []
@@ -791,7 +793,7 @@ def list_paddocks(property_id: int) -> dict:
         pasture = round(r.pasture_ha if r.pasture_ha is not None else (r.area_ha or 0), 2)
         feats.append({"type": "Feature", "id": r.id, "geometry": json.loads(r.g),
                       "properties": {"id": r.id, "name": r.name, "area_ha": area, "pasture_ha": pasture,
-                                     "excluded_ha": round(max(area - pasture, 0), 2)}})
+                                     "excluded_ha": round(max(area - pasture, 0), 2), "water_m": water.get(r.id)}})
         if r.ex:
             excl.append({"type": "Feature", "geometry": json.loads(r.ex), "properties": {"paddock_id": r.id}})
     return {"type": "FeatureCollection", "features": feats,

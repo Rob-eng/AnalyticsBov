@@ -2,7 +2,8 @@ import type * as GeoJSON from 'geojson'
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 // MapLibre 6: o worker é um módulo à parte; o Vite empacota com as dependências (?worker&url)
-import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw'
+import { TerraDraw, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw'
+import { iconSvg, LINE_COLORS, WATER_KINDS } from './icons'
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { LAYER_ORDER, LAYER_STYLE, type Ndvi, type Property } from './api'
@@ -39,7 +40,12 @@ export type Focus = {
   paddockSelected?: number | null
   paddockExclusions?: GeoJSON.FeatureCollection | null   // áreas suprimidas (mata, água) — fora do pasto
   drawing?: boolean
-  onDrawn?: (g: GeoJSON.Polygon) => void
+  drawMode?: 'polygon' | 'point' | 'linestring'   // padrão: polígono (piquete)
+  onDrawn?: (g: GeoJSON.Geometry) => void
+  // benfeitorias, pontos de água e anotações (pontos viram ícones; linhas, traços por tipo)
+  improvements?: GeoJSON.FeatureCollection | null
+  improvementSelected?: number | null
+  onImprovementClick?: (id: number) => void
   onPaddockClick?: (id: number) => void
   // edição do formato de um piquete (vértices arrastáveis); onEdited recebe a geometria a cada mudança
   editing?: { id: number; geometry: GeoJSON.Polygon } | null
@@ -91,6 +97,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
   const draw = useRef<TerraDraw | null>(null)
   const editId = useRef<string | number | null>(null)
   const paddockMarkers = useRef<maplibregl.Marker[]>([])
+  const impMarkers = useRef<maplibregl.Marker[]>([])
 
   // criação do mapa + fontes/camadas vazias (preenchidas depois com setData)
   useEffect(() => {
@@ -148,6 +155,18 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
         const id = Number(e.features?.[0]?.properties?.id)
         if (id > 0 && !focusRef.current?.drawing && !pickRef.current) focusRef.current?.onPaddockClick?.(id)
       })
+      m.addSource('imp', { type: 'geojson', data: EMPTY })
+      const impColor: maplibregl.ExpressionSpecification = ['match', ['get', 'kind'],
+        'cerca', LINE_COLORS.cerca, 'estrada', LINE_COLORS.estrada, 'rede_agua', LINE_COLORS.rede_agua, '#ffffff']
+      m.addLayer({ id: 'imp-line-halo', type: 'line', source: 'imp', filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': TINTA, 'line-opacity': 0.5, 'line-width': ['case', ['boolean', ['get', 'selected'], false], 7, 4.5] } })
+      m.addLayer({ id: 'imp-line', type: 'line', source: 'imp', filter: ['==', ['geometry-type'], 'LineString'],
+        paint: { 'line-color': impColor, 'line-width': ['case', ['boolean', ['get', 'selected'], false], 4, 2.2],
+                 'line-dasharray': ['case', ['==', ['get', 'kind'], 'rede_agua'], ['literal', [2, 1.5]], ['literal', [1, 0]]] } })
+      m.on('click', 'imp-line-halo', e => {
+        const id = Number(e.features?.[0]?.properties?.id)
+        if (id && !focusRef.current?.drawing && !pickRef.current) focusRef.current?.onImprovementClick?.(id)
+      })
       m.addLayer({ id: 'perimeter-halo', type: 'line', source: 'perimeter', paint: { 'line-color': TINTA, 'line-width': 5 } })
       m.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter', paint: { 'line-color': IPE, 'line-width': 2.5 } })
       // desenho de piquetes (Terra Draw): só fica ativo enquanto focus.drawing
@@ -156,7 +175,10 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
         modes: [new TerraDrawPolygonMode({ styles: {
           fillColor: '#E8B730', fillOpacity: 0.25, outlineColor: '#E8B730', outlineWidth: 2.5,
           closingPointColor: '#17251C', closingPointWidth: 6, closingPointOutlineColor: '#ffffff', closingPointOutlineWidth: 2,
-        } }), new TerraDrawSelectMode({
+        } }), new TerraDrawPointMode({ styles: { pointColor: '#E8B730', pointWidth: 7, pointOutlineColor: '#17251C', pointOutlineWidth: 2 } }),
+        new TerraDrawLineStringMode({ styles: { lineStringColor: '#E8B730', lineStringWidth: 3, closingPointColor: '#17251C', closingPointWidth: 6,
+          closingPointOutlineColor: '#ffffff', closingPointOutlineWidth: 2 } }),
+        new TerraDrawSelectMode({
           flags: { polygon: { feature: { draggable: true, coordinates: { midpoints: true, draggable: true, deletable: true } } } },
           styles: { selectedPolygonColor: '#E8B730', selectedPolygonFillOpacity: 0.25, selectedPolygonOutlineColor: '#E8B730',
                     selectedPolygonOutlineWidth: 2.5, selectionPointColor: '#17251C', selectionPointWidth: 6,
@@ -173,7 +195,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
         if (editId.current != null) return   // 'finish' do arraste na edição não é piquete novo
         const f = td.getSnapshotFeature(id)
         td.clear()
-        if (f?.geometry.type === 'Polygon') focusRef.current?.onDrawn?.(f.geometry as GeoJSON.Polygon)
+        if (f) focusRef.current?.onDrawn?.(f.geometry as GeoJSON.Geometry)
       })
       draw.current = td
       setReady(true)
@@ -255,6 +277,23 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       }
       return new maplibregl.Marker({ element: el }).setLngLat(ringCenter(f.geometry as GeoJSON.Polygon)).addTo(m)
     })
+    // benfeitorias: linhas no mapa, pontos como ícones clicáveis
+    const imps = focus?.improvements?.features ?? []
+    ;(m.getSource('imp') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection',
+      features: imps.filter(f => f.geometry.type === 'LineString').map(f => ({ ...f, properties: { ...f.properties, selected: f.properties?.id === focus?.improvementSelected } })) })
+    impMarkers.current.forEach(mk => mk.remove())
+    impMarkers.current = imps.filter(f => f.geometry.type === 'Point').map(f => {
+      const pr = f.properties!
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'imp-marker ' + (WATER_KINDS.includes(pr.kind) ? 'imp-water' : pr.kind === 'nota' ? 'imp-note' : 'imp-struct')
+        + (pr.id === focus?.improvementSelected ? ' imp-on' : '')
+      el.innerHTML = iconSvg(pr.kind, 15)
+      el.title = pr.name ? `${pr.kind_label}: ${pr.name}` : pr.kind_label
+      el.setAttribute('aria-label', el.title)
+      el.addEventListener('click', ev => { ev.stopPropagation(); if (!focusRef.current?.drawing) focusRef.current?.onImprovementClick?.(pr.id) })
+      return new maplibregl.Marker({ element: el }).setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).addTo(m)
+    })
     // com NDVI, PRODES ou piquetes na tela, as camadas do CAR viram só contorno para não esconder o que importa
     const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length || !!focus?.paddocks?.features.length || !!focus?.editing
     for (const cat of LAYER_ORDER) {
@@ -281,7 +320,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
     editId.current = null
     if (focus?.drawing) {
       if (!td.enabled) td.start()
-      td.setMode('polygon')
+      td.setMode(focus.drawMode ?? 'polygon')
     } else if (ed) {
       if (!td.enabled) td.start()
       const fid = td.getFeatureId()
@@ -292,7 +331,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
     } else if (td.enabled) {
       td.stop()
     }
-  }, [focus?.drawing, editingId, ready])
+  }, [focus?.drawing, focus?.drawMode, editingId, ready])
 
   // enquadra a propriedade aberta
   useEffect(() => {

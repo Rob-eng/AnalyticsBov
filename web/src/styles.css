@@ -217,3 +217,19 @@ p { margin: 0; }
 .paddock-use { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px 0 4px; font-size: .7rem; border-radius: 5px; background: var(--ipe, #E8B730); color: #17251C; font-variant-numeric: tabular-nums; }
 .paddock-label-on .paddock-use { background: #17251C; color: #E8B730; }
 .steer { flex: none; }
+.imp-marker { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; padding: 0; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.imp-struct { background: #17251C; color: #fff; }
+.imp-water { background: #2A6FB0; color: #fff; }
+.imp-note { background: #E8B730; color: #17251C; }
+.imp-on { outline: 3px solid #E8B730; outline-offset: 1px; }
+.imp-marker:focus-visible { outline: 3px solid #E8B730; }
+.ico-wrap { display: inline-flex; vertical-align: -3px; }
+.kind-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.kind-btn { display: grid; justify-items: center; gap: 3px; padding: 8px 4px; border: 1px solid var(--linha); border-radius: 8px; background: #fff; color: var(--tinta); font: 600 .7rem var(--body); cursor: pointer; text-align: center; }
+.kind-btn:hover, .kind-btn:focus-visible { border-color: var(--tinta); }
+.kind-water { color: #2A6FB0; }
+.imp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 280px; overflow-y: auto; }
+.imp-row { display: grid; gap: 4px; padding: 6px 8px; background: #fff; border: 1px solid var(--linha); border-radius: 8px; }
+.imp-row-on { border-color: var(--ipe, #E8B730); }
+.imp-main { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: .86rem; }
+.imp-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; flex: none; }

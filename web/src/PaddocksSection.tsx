@@ -5,7 +5,7 @@ import NdviChart from './NdviChart'
 
 export type PaddockLayer = {
   fc: Paddocks | null; selected: number | null; drawing: boolean
-  onDrawn: (g: GeoJSON.Polygon) => void; onClick: (id: number) => void
+  onDrawn: (g: GeoJSON.Geometry) => void; onClick: (id: number) => void
   editing: { id: number; geometry: GeoJSON.Polygon } | null; onEdited: (g: GeoJSON.Polygon) => void
 }
 const LATEST = 'latest'
@@ -110,6 +110,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
       fc, selected, drawing,
       onDrawn: g => {
         setDrawing(false)
+        if (g.type !== 'Polygon') return
         if (cutting) { setCutting(false); cutMutate({ geometry: g }) }
         else { setPending(g); setName(`Piquete ${feats.length + 1}`) }
       },
@@ -203,7 +204,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
                   ) : (
                     <button className="paddock-main" onClick={() => setSelected(s => (s === p.id ? null : p.id))}>
                       <span className="row"><strong>{p.name}</strong>{gmap.get(p.id) && <span className={`status-chip st-${gmap.get(p.id)!.status}`}>{statusText(gmap.get(p.id))}</span>}</span>
-                      <span className="muted small">{fmtHa(p.area_ha)}{p.excluded_ha > 0 ? ` · pasto ${fmtHa(p.pasture_ha)}` : ''}{colorBy ? ` · NDVI ${fmtNdvi(v ?? null)}` : ''}</span>
+                      <span className="muted small">{fmtHa(p.area_ha)}{p.excluded_ha > 0 ? ` · pasto ${fmtHa(p.pasture_ha)}` : ''}{p.water_m != null ? (p.water_m === 0 ? ' · água no piquete' : ` · água a ${p.water_m.toLocaleString('pt-BR')} m`) : ''}{colorBy ? ` · NDVI ${fmtNdvi(v ?? null)}` : ''}</span>
                     </button>
                   )}
                   {p.id === selected && renaming?.id !== p.id && !editing && !drawing && (

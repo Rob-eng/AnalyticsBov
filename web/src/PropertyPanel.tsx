@@ -11,6 +11,7 @@ import AlertsSection from './AlertsSection'
 import HistorySection from './HistorySection'
 import PaddocksSection, { type PaddockLayer } from './PaddocksSection'
 import HerdSection from './HerdSection'
+import ImprovementsSection, { type ImprovementLayer } from './ImprovementsSection'
 import type { ProdesList } from './api'
 
 export type Pick = { active: boolean; point: { lat: number; lon: number } | null }
@@ -27,6 +28,7 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
   const onProdes = useCallback((fc: ProdesList | null, selected: Set<string>) => setProdes({ fc, selected }), [])
   const [tab, setTab] = useState<'analises' | 'piquetes' | 'rebanho' | 'alertas' | 'historico'>('analises')
   const [paddockLayer, setPaddockLayer] = useState<PaddockLayer | null>(null)
+  const [impLayer, setImpLayer] = useState<ImprovementLayer | null>(null)
   const [code, setCode] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -36,10 +38,15 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
   const focus = useMemo<Focus | null>(() => prop.data ? {
     perimeter: prop.data.perimeter, bbox: prop.data.bbox, layers: layers.data ?? null, visible, ndvi,
     prodes: tab === 'analises' ? prodes.fc : null, prodesSelected: prodes.selected,
-    paddocks: paddockLayer?.fc ?? null, paddockExclusions: paddockLayer?.fc?.exclusions ?? null, paddockSelected: paddockLayer?.selected ?? null, drawing: paddockLayer?.drawing ?? false,
-    onDrawn: paddockLayer?.onDrawn, onPaddockClick: paddockLayer?.onClick,
+    paddocks: paddockLayer?.fc ?? null, paddockExclusions: paddockLayer?.fc?.exclusions ?? null, paddockSelected: paddockLayer?.selected ?? null,
+    // um desenho por vez: benfeitoria (ponto/linha) ou piquete (polígono)
+    drawing: !!(impLayer?.drawing || paddockLayer?.drawing),
+    drawMode: impLayer?.drawing ? impLayer.mode : 'polygon',
+    onDrawn: impLayer?.drawing ? impLayer.onDrawn : paddockLayer?.onDrawn,
+    onPaddockClick: paddockLayer?.onClick,
+    improvements: impLayer?.fc ?? null, improvementSelected: impLayer?.selected ?? null, onImprovementClick: impLayer?.onClick,
     editing: paddockLayer?.editing ?? null, onEdited: paddockLayer?.onEdited,
-  } : null, [prop.data, layers.data, visible, ndvi, prodes, paddockLayer, tab])
+  } : null, [prop.data, layers.data, visible, ndvi, prodes, paddockLayer, impLayer, tab])
   useEffect(() => { onFocus(focus); }, [focus, onFocus])
   useEffect(() => () => onFocus(null), [onFocus])
 
@@ -92,8 +99,9 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
         <button role="tab" aria-selected={tab === 'historico'} onClick={() => setTab('historico')}>Histórico</button>
       </div>
 
-      <div hidden={tab !== 'piquetes'}>
+      <div className="tab-body" hidden={tab !== 'piquetes'}>
         <PaddocksSection propertyId={id} hasPerimeter={p.has_perimeter} active={tab === 'piquetes'} onLayer={setPaddockLayer} />
+        {p.has_perimeter && <ImprovementsSection propertyId={id} active={tab === 'piquetes'} busy={!!(paddockLayer?.drawing || paddockLayer?.editing)} onLayer={setImpLayer} />}
       </div>
       <div hidden={tab !== 'rebanho'}><HerdSection propertyId={id} active={tab === 'rebanho'} /></div>
       <div hidden={tab !== 'alertas'}><AlertsSection property={p} /></div>

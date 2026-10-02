@@ -460,3 +460,46 @@ async def move_lot(property_id: int, lot_id: int, body: LotMove, user=Depends(cu
 def grazing(property_id: int, user=Depends(current_user)):
     _own(property_id, user)
     return H.grazing_for(property_id)
+
+
+# ── Benfeitorias, pontos de água e anotações ─────────────────────────────────
+
+from app.web import improvements as IMP
+
+
+class ImprovementIn(BaseModel):
+    kind: str
+    geometry: dict
+    name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ImprovementEdit(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
+    geometry: Optional[dict] = None
+
+
+@router.get("/properties/{property_id}/improvements")
+def improvements(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return IMP.list_improvements(property_id)
+
+
+@router.post("/properties/{property_id}/improvements", status_code=201)
+async def create_improvement(property_id: int, body: ImprovementIn, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(IMP.create_improvement, user.chat_id, property_id, body.kind, body.geometry, body.name, body.notes)
+
+
+@router.patch("/properties/{property_id}/improvements/{item_id}")
+async def edit_improvement(property_id: int, item_id: int, body: ImprovementEdit, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(IMP.update_improvement, property_id, item_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/properties/{property_id}/improvements/{item_id}", status_code=204)
+def remove_improvement(property_id: int, item_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    IMP.delete_improvement(property_id, item_id)
+    return RawResponse(status_code=204)
