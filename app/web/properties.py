@@ -596,4 +596,6 @@ def prodes_job_file(property_id: int, job_id: int, which: str) -> tuple:
         data = prodes_storage.download_bytes(path) if path else None
     if not data:
         raise PropertyError("Arquivo do laudo indisponível.")
-    return data, mime, f"PRODES_{j.apontamento_class_name}_{which}.{ext}"
+    name = (f"Laudo_PRODES_{j.apontamento_class_name}.pdf" if which == "pdf"
+            else f"PRODES_{j.apontamento_class_name}_{which}.{ext}")
+    return data, mime, name

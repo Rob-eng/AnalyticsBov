@@ -284,7 +284,7 @@ class ProdesJob(Base):
     id                          = Column(Integer, primary_key=True)
     user_id                     = Column(String, ForeignKey('users.chat_id'), nullable=False, index=True)
     chat_id                     = Column(String, nullable=False)
-    location_id                 = Column(Integer, ForeignKey('favorite_locations.id'), nullable=True)
+    location_id                 = Column(Integer, ForeignKey('favorite_locations.id', ondelete='SET NULL'), nullable=True)
     location_lat                = Column(Float, nullable=True)
     location_lon                = Column(Float, nullable=True)
     location_name               = Column(String, nullable=True)
@@ -375,6 +375,9 @@ def init_db():
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS uf VARCHAR;"))
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS car_synced_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE prodes_jobs ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT 'bot';"))
+            # excluir a propriedade não pode travar por causa de laudos antigos: o job fica, sem vínculo
+            conn.execute(text("ALTER TABLE prodes_jobs DROP CONSTRAINT IF EXISTS prodes_jobs_location_id_fkey;"))
+            conn.execute(text("ALTER TABLE prodes_jobs ADD CONSTRAINT prodes_jobs_location_id_fkey FOREIGN KEY (location_id) REFERENCES favorite_locations(id) ON DELETE SET NULL;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_favorite_locations_perimeter ON favorite_locations USING GIST (perimeter);"))
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
