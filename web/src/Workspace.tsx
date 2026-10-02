@@ -1,29 +1,39 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, PLAN_LABEL, type Me } from './api'
-import MapView from './MapView'
+import { Link, Route, Routes, useMatch, useNavigate } from 'react-router'
+import { api, fmtHa, PLAN_LABEL, type Me } from './api'
+import MapView, { type Focus } from './MapView'
+import PropertyPanel from './PropertyPanel'
+import AddProperty from './AddProperty'
 
 export default function Workspace({ me }: { me: Me }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const props = useQuery({ queryKey: ['properties'], queryFn: api.properties })
-  const [selected, setSelected] = useState<number | null>(null)
   const [mode, setMode] = useState<Me['mode']>(me.mode)
+  const [focus, setFocus] = useState<Focus | null>(null)
+  const [pick, setPick] = useState<{ active: boolean; point: { lat: number; lon: number } | null }>({ active: false, point: null })
+  const openMatch = useMatch('/p/:id')
+  const selectedId = openMatch ? Number(openMatch.params.id) : null
   const hasConsultancy = me.organizations.some(o => o.kind === 'consultoria')
+  const list = props.data ?? []
+
+  const onPick = useCallback((lat: number, lon: number) => {
+    setPick(p => (p.active ? { ...p, point: { lat, lon } } : p))
+  }, [])
+  const onSelect = useCallback((id: number) => navigate(`/p/${id}`), [navigate])
 
   async function logout() {
     await api.logout()
     qc.clear()
-    window.location.reload()
+    window.location.href = '/app/'
   }
-
-  const list = props.data ?? []
-  const current = list.find(p => p.id === selected)
 
   return (
     <div className="workspace">
       <aside className="rail">
         <header className="rail-head">
-          <p className="brand">Agro Analytics</p>
+          <Link to="/" className="brand">Agro Analytics</Link>
           <div className="mode" role="tablist" aria-label="Modo de uso">
             <button role="tab" aria-selected={mode === 'produtor'} onClick={() => setMode('produtor')}>Minhas fazendas</button>
             <button role="tab" aria-selected={mode === 'consultor'} onClick={() => setMode('consultor')}>Carteira de clientes</button>
@@ -31,33 +41,42 @@ export default function Workspace({ me }: { me: Me }) {
         </header>
 
         {mode === 'consultor' && !hasConsultancy ? (
-          <section className="empty">
+          <section className="panel">
             <h2>Carteira de clientes</h2>
             <p>Atenda várias fazendas de clientes em um só lugar: indicadores lado a lado, alertas e documentos vencendo.</p>
             <p className="muted">Disponível no plano Ouro. Em breve nesta tela.</p>
           </section>
         ) : (
-          <section className="props">
-            <h2>{list.length ? `${list.length} propriedade${list.length > 1 ? 's' : ''}` : 'Propriedades'}</h2>
-            {props.isPending && <p className="muted">Carregando propriedades…</p>}
-            {props.isError && <p className="notice">Não foi possível carregar as propriedades. <button className="link" onClick={() => props.refetch()}>Tentar de novo</button></p>}
-            {props.isSuccess && !list.length && (
-              <div className="empty">
-                <p>Você ainda não tem propriedades cadastradas.</p>
-                <p className="muted">Cadastre pelo bot com "cadastrar propriedade" — elas aparecem aqui na hora. O cadastro pela web chega na próxima etapa.</p>
-              </div>
-            )}
-            <ul>
-              {list.map(p => (
-                <li key={p.id}>
-                  <button className={'prop' + (p.id === selected ? ' prop-active' : '')} onClick={() => setSelected(p.id)}>
-                    <span className="prop-name">{p.name}</span>
-                    <span className="prop-coord">{p.lat.toFixed(4)}, {p.lon.toFixed(4)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <Routes>
+            <Route path="/p/:id" element={<PropertyPanel onFocus={setFocus} />} />
+            <Route path="/nova" element={<AddProperty pick={pick} setPick={setPick} />} />
+            <Route path="*" element={
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>{list.length ? `${list.length} propriedade${list.length > 1 ? 's' : ''}` : 'Propriedades'}</h2>
+                  <Link className="btn btn-sm" to="/nova">Adicionar</Link>
+                </div>
+                {props.isPending && <p className="muted">Carregando propriedades…</p>}
+                {props.isError && <p className="notice">Não foi possível carregar as propriedades. <button className="link" onClick={() => props.refetch()}>Tentar de novo</button></p>}
+                {props.isSuccess && !list.length && (
+                  <div className="empty-box">
+                    <p>Você ainda não tem propriedades.</p>
+                    <p className="muted">Adicione pelo código do CAR ou clicando na fazenda no mapa. As cadastradas no bot aparecem aqui também.</p>
+                  </div>
+                )}
+                <ul className="prop-list">
+                  {list.map(p => (
+                    <li key={p.id}>
+                      <Link className="prop" to={`/p/${p.id}`}>
+                        <span className="prop-name">{p.name}</span>
+                        <span className="prop-meta">{p.has_perimeter ? `${fmtHa(p.area_ha)} · ${p.municipio ?? ''}${p.uf ? '/' + p.uf : ''}` : 'Sem CAR vinculado'}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            } />
+          </Routes>
         )}
 
         <footer className="rail-foot">
@@ -70,15 +89,16 @@ export default function Workspace({ me }: { me: Me }) {
       </aside>
 
       <main className="stage">
-        <MapView properties={list} selectedId={selected} onSelect={setSelected} />
-        {current && (
-          <div className="sheet" role="dialog" aria-label={current.name}>
-            <h3>{current.name}</h3>
-            <p className="prop-coord">{current.lat.toFixed(5)}, {current.lon.toFixed(5)}</p>
-            <p className="muted">Mapa CAR, NDVI e histórico desta fazenda chegam na próxima etapa.</p>
-            <button className="link" onClick={() => setSelected(null)}>Fechar</button>
-          </div>
-        )}
+        <MapView
+          properties={list}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          focus={selectedId ? focus : null}
+          pickMode={pick.active}
+          picked={pick.point}
+          onPick={onPick}
+        />
+        {pick.active && <div className="map-hint" role="status">Clique dentro da fazenda no mapa</div>}
       </main>
     </div>
   )

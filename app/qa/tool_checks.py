@@ -156,6 +156,38 @@ def check_car_map_layout():
     return _ok(f"layout OK em {len(LAYOUT_REF_CARS)} formatos de imóvel")
 
 
+def check_web_api():
+    """API da plataforma web (só leitura): /me, propriedades e camadas de uma fazenda com CAR vinculado."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.config import Config
+    from app.web.api import router
+    from app.web.auth import make_session_token
+    from sqlalchemy import text
+    from app.models import SessionLocal
+    db = SessionLocal()
+    try:   # dono de uma propriedade com CAR vinculado (testa também as camadas); senão o admin
+        row = db.execute(text("SELECT f.user_id FROM favorite_locations f JOIN users u ON u.chat_id = f.user_id "
+                              "WHERE f.perimeter IS NOT NULL ORDER BY f.id LIMIT 1")).fetchone()
+    finally:
+        db.close()
+    chat_id = row[0] if row else str(Config.ADMIN_CHAT_ID)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app, cookies={"ab_session": make_session_token(chat_id)})
+    me = client.get("/api/v1/me")
+    if me.status_code != 200:
+        return _fail(f"/me respondeu {me.status_code}")
+    props = client.get("/api/v1/properties").json()
+    with_car = [p for p in props if p.get("has_perimeter")]
+    if not with_car:
+        return _ok(f"/me OK, {len(props)} propriedades (nenhuma com CAR para testar camadas)")
+    layers = client.get(f"/api/v1/properties/{with_car[0]['id']}/layers")
+    if layers.status_code != 200 or not layers.json().get("areas"):
+        return _fail(f"camadas da propriedade {with_car[0]['id']}: HTTP {layers.status_code}")
+    return _ok(f"/me, {len(props)} propriedades, camadas OK ({len(layers.json()['features'])} feições)")
+
+
 CHECKS = {
     "Cotação (Scot)": check_cotacao,
     "Mercado Futuro": check_mercado_futuro,
@@ -166,6 +198,7 @@ CHECKS = {
     "PRODES": check_prodes,
     "CAR (WFS oficial)": check_car_wfs,
     "Mapa CAR (layout)": check_car_map_layout,
+    "Plataforma web (API)": check_web_api,
 }
 
 

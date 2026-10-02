@@ -1,80 +1,158 @@
-import { useEffect, useRef } from 'react'
+import type * as GeoJSON from 'geojson'
+import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 // MapLibre 6: o worker é um módulo à parte; o Vite empacota com as dependências (?worker&url)
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
-type MLMap = maplibregl.Map
+import { LAYER_ORDER, LAYER_STYLE, type Ndvi, type Property } from './api'
 
 maplibregl.setWorkerUrl(workerUrl)
-import type { Property } from './api'
 
-// Base de satélite: Esri World Imagery (conferir licença comercial antes do lançamento — ver plano).
+// Base de satélite: Esri World Imagery (conferir licença comercial antes do lançamento)
 const SATELLITE_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
     sat: {
       type: 'raster',
       tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-      tileSize: 256,
-      maxzoom: 18,
+      tileSize: 256, maxzoom: 18,
       attribution: 'Imagens © Esri, Maxar, Earthstar Geographics',
     },
   },
   layers: [{ id: 'sat', type: 'raster', source: 'sat' }],
+}
+const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
+const IPE = '#E8B730'
+const TINTA = '#17251C'
+
+export type Focus = {
+  perimeter: GeoJSON.MultiPolygon | null
+  bbox: [number, number, number, number] | null
+  layers: GeoJSON.FeatureCollection | null
+  visible: Set<string>
+  ndvi: Ndvi | null
 }
 
 type Props = {
   properties: Property[]
   selectedId?: number | null
   onSelect?: (id: number) => void
+  focus?: Focus | null
+  pickMode?: boolean
+  picked?: { lat: number; lon: number } | null
+  onPick?: (lat: number, lon: number) => void
   interactive?: boolean
 }
 
-export default function MapView({ properties, selectedId, onSelect, interactive = true }: Props) {
+export default function MapView({ properties, selectedId, onSelect, focus, pickMode, picked, onPick, interactive = true }: Props) {
   const container = useRef<HTMLDivElement>(null)
-  const map = useRef<MLMap | null>(null)
+  const map = useRef<maplibregl.Map | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
+  const pickMarker = useRef<maplibregl.Marker | null>(null)
+  const [ready, setReady] = useState(false)
+  const onPickRef = useRef(onPick)
+  onPickRef.current = onPick
 
+  // criação do mapa + fontes/camadas vazias (preenchidas depois com setData)
   useEffect(() => {
     if (!container.current) return
     const m = new maplibregl.Map({
-      container: container.current,
-      style: SATELLITE_STYLE,
-      center: [-54.6, -20.4],   // MS
-      zoom: interactive ? 5.5 : 6.2,
-      interactive,
+      container: container.current, style: SATELLITE_STYLE,
+      center: [-54.6, -20.4], zoom: interactive ? 5.5 : 6.2, interactive,
       attributionControl: { compact: true },
     })
-    if (interactive) m.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
+    if (interactive) {
+      m.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
+      m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right')
+    }
+    m.on('load', () => {
+      m.addSource('car', { type: 'geojson', data: EMPTY })
+      m.addSource('perimeter', { type: 'geojson', data: EMPTY })
+      for (const cat of LAYER_ORDER) {
+        const st = LAYER_STYLE[cat]
+        m.addLayer({ id: `car-${cat}-fill`, type: 'fill', source: 'car', filter: ['==', ['get', 'category'], cat],
+          paint: { 'fill-color': st.color, 'fill-opacity': st.opacity } })
+        m.addLayer({ id: `car-${cat}-line`, type: 'line', source: 'car', filter: ['==', ['get', 'category'], cat],
+          paint: { 'line-color': st.color, 'line-width': cat === 'agua' ? 2 : 0.8 } })
+      }
+      m.addLayer({ id: 'perimeter-halo', type: 'line', source: 'perimeter', paint: { 'line-color': TINTA, 'line-width': 5 } })
+      m.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter', paint: { 'line-color': IPE, 'line-width': 2.5 } })
+      setReady(true)
+    })
+    m.on('click', e => onPickRef.current?.(e.lngLat.lat, e.lngLat.lng))
+    // gancho do teste de ponta a ponta (e2e/smoke.mjs): centraliza o mapa num ponto
+    const qaFly = (ev: Event) => { const { lat, lon } = (ev as CustomEvent).detail; m.jumpTo({ center: [lon, lat], zoom: 14 }) }
+    window.addEventListener('qa-fly', qaFly)
+    m.once('remove', () => window.removeEventListener('qa-fly', qaFly))
     map.current = m
-    return () => { m.remove(); map.current = null }
+    return () => { m.remove(); map.current = null; setReady(false) }
   }, [interactive])
 
-  // marcadores das propriedades
+  useEffect(() => {
+    if (map.current) map.current.getCanvas().style.cursor = pickMode ? 'crosshair' : ''
+  }, [pickMode])
+
+  // pinos das propriedades (escondidos quando uma propriedade está aberta)
   useEffect(() => {
     const m = map.current
     if (!m) return
     markers.current.forEach(mk => mk.remove())
-    markers.current = properties.map(p => {
+    markers.current = focus ? [] : properties.filter(p => p.lat != null && p.lon != null).map(p => {
       const el = document.createElement('button')
       el.className = 'pin' + (p.id === selectedId ? ' pin-active' : '')
       el.type = 'button'
       el.setAttribute('aria-label', p.name)
       el.innerHTML = `<span class="pin-dot"></span><span class="pin-label">${p.name.replace(/</g, '&lt;')}</span>`
-      el.addEventListener('click', () => onSelect?.(p.id))
-      return new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat([p.lon, p.lat]).addTo(m)
+      el.addEventListener('click', ev => { ev.stopPropagation(); onSelect?.(p.id) })
+      return new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat([p.lon!, p.lat!]).addTo(m)
     })
-    if (properties.length && interactive && !selectedId) {
+    const pts = properties.filter(p => p.lat != null)
+    if (!focus && pts.length && interactive && !pickMode) {
       const b = new maplibregl.LngLatBounds()
-      properties.forEach(p => b.extend([p.lon, p.lat]))
-      m.fitBounds(b, { padding: 90, maxZoom: 12, duration: 0 })
+      pts.forEach(p => b.extend([p.lon!, p.lat!]))
+      m.fitBounds(b, { padding: 90, maxZoom: 12, duration: 600 })
     }
-  }, [properties, selectedId, onSelect, interactive])
+  }, [properties, selectedId, onSelect, interactive, focus, pickMode])
 
-  // voar até a propriedade selecionada
+  // propriedade aberta: perímetro + camadas do CAR + NDVI
   useEffect(() => {
-    const p = properties.find(x => x.id === selectedId)
-    if (p && map.current) map.current.flyTo({ center: [p.lon, p.lat], zoom: 13.5, speed: 1.4 })
-  }, [selectedId, properties])
+    const m = map.current
+    if (!m || !ready) return
+    ;(m.getSource('perimeter') as maplibregl.GeoJSONSource).setData(
+      focus?.perimeter ? { type: 'Feature', geometry: focus.perimeter, properties: {} } : EMPTY)
+    ;(m.getSource('car') as maplibregl.GeoJSONSource).setData(focus?.layers ?? EMPTY)
+    for (const cat of LAYER_ORDER) {
+      const vis = focus?.visible.has(cat) ? 'visible' : 'none'
+      // com NDVI ligado, as camadas viram só contorno para o índice aparecer por baixo
+      m.setLayoutProperty(`car-${cat}-fill`, 'visibility', focus?.ndvi ? 'none' : vis)
+      m.setLayoutProperty(`car-${cat}-line`, 'visibility', vis)
+      m.setPaintProperty(`car-${cat}-line`, 'line-width', focus?.ndvi ? 1.6 : cat === 'agua' ? 2 : 0.8)
+    }
+    if (m.getLayer('ndvi')) m.removeLayer('ndvi')
+    if (m.getSource('ndvi')) m.removeSource('ndvi')
+    if (focus?.ndvi) {
+      m.addSource('ndvi', { type: 'image', url: focus.ndvi.image, coordinates: focus.ndvi.coordinates as [[number, number], [number, number], [number, number], [number, number]] })
+      m.addLayer({ id: 'ndvi', type: 'raster', source: 'ndvi', paint: { 'raster-opacity': 0.85 } }, 'car-sem_classificacao-fill')
+    }
+  }, [focus, ready])
+
+  // enquadra a propriedade aberta
+  useEffect(() => {
+    if (map.current && focus?.bbox) {
+      const [x0, y0, x1, y1] = focus.bbox
+      map.current.fitBounds([[x0, y0], [x1, y1]], { padding: { top: 60, bottom: 60, left: 60, right: 60 }, duration: 800 })
+    }
+  }, [focus?.bbox])
+
+  // ponto escolhido no modo cadastro
+  useEffect(() => {
+    pickMarker.current?.remove()
+    pickMarker.current = null
+    if (picked && map.current) {
+      const el = document.createElement('div')
+      el.className = 'pick-marker'
+      pickMarker.current = new maplibregl.Marker({ element: el }).setLngLat([picked.lon, picked.lat]).addTo(map.current)
+    }
+  }, [picked])
 
   return <div ref={container} className="map" />
 }

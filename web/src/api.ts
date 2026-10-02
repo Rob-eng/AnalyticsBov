@@ -1,3 +1,4 @@
+import type * as GeoJSON from 'geojson'
 // Cliente da API /api/v1 (mesma origem; sessão por cookie HttpOnly)
 
 export class ApiError extends Error {
@@ -9,13 +10,17 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, { credentials: 'same-origin', ...init })
+  const res = await fetch(`/api/v1${path}`, {
+    credentials: 'same-origin',
+    ...init,
+    headers: init?.body ? { 'Content-Type': 'application/json', ...init?.headers } : init?.headers,
+  })
   if (!res.ok) {
     let detail = res.statusText
     try { detail = (await res.json()).detail ?? detail } catch { /* corpo sem JSON */ }
-    throw new ApiError(res.status, detail)
+    throw new ApiError(res.status, typeof detail === 'string' ? detail : 'Dados inválidos')
   }
-  return res.json() as Promise<T>
+  return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>)
 }
 
 export type Organization = { id: number; name: string; kind: 'produtor' | 'consultoria'; role: string }
@@ -28,15 +33,53 @@ export type Me = {
   organizations: Organization[]
   mode: 'produtor' | 'consultor'
 }
-export type Property = { id: number; name: string; lat: number; lon: number }
+export type Property = {
+  id: number; name: string; lat: number | null; lon: number | null
+  car_code: string | null; area_ha: number | null; municipio: string | null; uf: string | null
+  car_synced_at: string | null; has_perimeter: boolean
+}
+export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null }
+export type AreaRow = { category: string; label: string; area_ha: number }
+export type Layers = GeoJSON.FeatureCollection & { areas: AreaRow[] }
+export type CarCandidate = { car_code: string; municipio: string | null; uf: string | null; area_ha: number | null; modulos_rurais: number | null; tipo: string }
+export type Ndvi = { date: string; mean: number | null; cloud_pct: number | null; image: string; coordinates: [number, number][] }
 export type LoginStart = { code: string; expires_in: number; whatsapp_url: string | null; telegram_url: string }
 
 export const api = {
   me: () => request<Me>('/me'),
-  properties: () => request<Property[]>('/properties'),
   loginStart: () => request<LoginStart>('/auth/start', { method: 'POST' }),
   loginPoll: (code: string) => request<{ status: 'pending' | 'expired' | 'ok' }>(`/auth/poll?code=${encodeURIComponent(code)}`),
   logout: () => request<{ status: string }>('/auth/logout', { method: 'POST' }),
+
+  properties: () => request<Property[]>('/properties'),
+  property: (id: number) => request<PropertyDetail>(`/properties/${id}`),
+  createProperty: (body: { name: string; car_code?: string; lat?: number; lon?: number }) =>
+    request<PropertyDetail>('/properties', { method: 'POST', body: JSON.stringify(body) }),
+  renameProperty: (id: number, name: string) => request<PropertyDetail>(`/properties/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteProperty: (id: number) => request<void>(`/properties/${id}`, { method: 'DELETE' }),
+  syncCar: (id: number, car_code?: string) => request<PropertyDetail>(`/properties/${id}/sync-car`, { method: 'POST', body: JSON.stringify(car_code ? { car_code } : {}) }),
+  layers: (id: number) => request<Layers>(`/properties/${id}/layers`),
+  ndvi: (id: number) => request<Ndvi>(`/properties/${id}/ndvi`),
+  carLookup: (lat: number, lon: number) => request<{ candidates: CarCandidate[] }>(`/car/lookup?lat=${lat}&lon=${lon}`),
+  zipUrl: (id: number) => `/api/v1/properties/${id}/car.zip`,
+  mapUrl: (id: number) => `/api/v1/properties/${id}/map.png`,
 }
 
 export const PLAN_LABEL: Record<Me['plan'], string> = { FREE: 'Bronze', STARTER: 'Starter', PRO: 'Ouro' }
+
+export const fmtHa = (v: number | null | undefined) =>
+  v == null ? '—' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha`
+
+// Cores das camadas = as mesmas do mapa ambiental do bot (app/charts.py)
+export const LAYER_STYLE: Record<string, { color: string; opacity: number; label: string }> = {
+  sem_classificacao: { color: '#bdbdbd', opacity: 0.55, label: 'Sem classificação no CAR' },
+  consolidada: { color: '#ff3d00', opacity: 0.6, label: 'Área antropizada (consolidada)' },
+  uso_restrito: { color: '#fff59d', opacity: 0.75, label: 'Uso restrito' },
+  vegetacao: { color: '#4caf50', opacity: 0.55, label: 'Remanescente nativo' },
+  app: { color: '#03a9f4', opacity: 0.6, label: 'A.P.P.' },
+  reserva: { color: '#1b5e20', opacity: 0.7, label: 'Reserva Legal' },
+  agua: { color: '#4fc3f7', opacity: 0.9, label: "Corpo d'água" },
+  extra_servidao: { color: '#9e9e9e', opacity: 0.5, label: 'Servidão administrativa' },
+  extra_pousio: { color: '#c5a880', opacity: 0.5, label: 'Área de pousio' },
+}
+export const LAYER_ORDER = Object.keys(LAYER_STYLE)

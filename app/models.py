@@ -4,6 +4,8 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import pandas as pd
 from app.config import Config
+from geoalchemy2 import Geometry
+from sqlalchemy.dialects.postgresql import JSONB
 
 Base = declarative_base()
 
@@ -37,6 +39,14 @@ class FavoriteLocation(Base):
     # NDVI alert tracking
     last_ndvi_date = Column(String, nullable=True)        # 'YYYY-MM-DD' of last image sent
     ndvi_alerts_enabled = Column(Boolean, default=True)  # user opt-in/out per property
+    # Plataforma web (mesma lista do bot): imóvel do CAR vinculado e seu perímetro oficial
+    organization_id = Column(Integer, ForeignKey('organizations.id', ondelete='SET NULL'), nullable=True, index=True)
+    car_code = Column(String, nullable=True, index=True)
+    perimeter = Column(Geometry('MULTIPOLYGON', srid=4326, spatial_index=True), nullable=True)
+    area_ha = Column(Float, nullable=True)
+    municipio = Column(String, nullable=True)
+    uf = Column(String, nullable=True)
+    car_synced_at = Column(DateTime, nullable=True)
 
 class PriceHistory(Base):
     __tablename__ = 'price_history'
@@ -146,6 +156,18 @@ class FuturesSettlement(Base):
     collected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 # ── Plataforma web ────────────────────────────────────────────────────────────
+
+class PropertyCarFeature(Base):
+    """Camadas oficiais do CAR de uma propriedade (cache do WFS da Consulta Pública)."""
+    __tablename__ = 'property_car_features'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    category = Column(String, nullable=False, index=True)   # imovel, reserva, app, vegetacao, consolidada, uso_restrito, agua, extra_*
+    layer = Column(String, nullable=False)                  # nome da camada no WFS (ex.: app_rio_ate_10)
+    geom = Column(Geometry('GEOMETRY', srid=4326, spatial_index=True), nullable=False)
+    attrs = Column(JSONB, nullable=True)
+
 
 class Organization(Base):
     """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
@@ -328,6 +350,15 @@ def init_db():
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_expires_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_notice_stage INTEGER DEFAULT 0;"))
+            # Plataforma web: propriedades com CAR e perímetro (PostGIS)
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS car_code VARCHAR;"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS perimeter geometry(MULTIPOLYGON,4326);"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS area_ha FLOAT;"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS municipio VARCHAR;"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS uf VARCHAR;"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS car_synced_at TIMESTAMP;"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_favorite_locations_perimeter ON favorite_locations USING GIST (perimeter);"))
             conn.execute(text("ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR DEFAULT 'USER_REQUEST';"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS qtde_animals INTEGER;"))
             conn.execute(text("ALTER TABLE cda_lot_results ADD COLUMN IF NOT EXISTS scrape_mode VARCHAR DEFAULT 'individual';"))

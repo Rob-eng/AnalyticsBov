@@ -91,6 +91,37 @@ def get_theme_layers() -> dict:
     return _FALLBACK_LAYERS
 
 
+def find_cars_at_point(lat: float, lon: float) -> list:
+    """
+    Todos os imóveis do CAR cujo polígono contém o ponto (WFS, teste exato de
+    interseção — com sobreposição real voltam vários). Ordena do menor para o
+    maior (o menor costuma ser o imóvel específico). Cada item: car_code,
+    municipio, uf, area_ha, modulos_rurais, tipo.
+    """
+    from pyproj import Geod
+    from shapely.geometry import shape
+    geod = Geod(ellps="GRS80")
+    found = []
+    for layer in get_theme_layers().get("imovel_rural", ["iru", "ast", "pct"]):
+        try:
+            resp = requests.get(WFS_URL, headers=HEADERS, timeout=TIMEOUT, params={
+                "service": "WFS", "version": "2.0.0", "request": "GetFeature",
+                "typeNames": f"consulta_publica:{layer}", "outputFormat": "application/json",
+                # SRID=4326 explícito: com EPSG:4674 o WFS 2.0 espera lat/lon (ordem invertida)
+                "cql_filter": f"INTERSECTS(geom,SRID=4326;POINT({lon} {lat}))", "count": "20",
+            })
+            resp.raise_for_status()
+            for f in resp.json().get("features", []):
+                props = f.get("properties") or {}
+                area = abs(geod.geometry_area_perimeter(shape(f["geometry"]))[0]) / 10000 if f.get("geometry") else None
+                found.append({"car_code": props.get("cod_imovel"), "municipio": props.get("municipio"),
+                              "uf": props.get("uf"), "area_ha": round(area, 2) if area else None,
+                              "modulos_rurais": props.get("modulos_rurais"), "tipo": props.get("tipo_imovel") or layer.upper()})
+        except Exception as e:
+            print(f"[CAR-WFS] Busca por ponto em {layer} falhou: {e}", flush=True)
+    return sorted({c["car_code"]: c for c in found if c["car_code"]}.values(), key=lambda c: c["area_ha"] or 0)
+
+
 def find_car_by_coordinate(lat: float, lon: float):
     """Detalhes do imóvel no ponto: {codeProperty, nameCity, idState, haRegisteredArea, ...} ou None."""
     try:
@@ -213,8 +244,9 @@ def resolve_car_code(lat: float, lon: float):
             return prop["cod_imovel"]
     except Exception as e:
         print(f"[CAR-WFS] GEE indisponível para achar o CAR: {e}", flush=True)
-    found = find_car_by_coordinate(lat, lon)
-    return found["codeProperty"] if found else None
+    # fallback exato (polígono contém o ponto); a API "totalizer" usa o retângulo envolvente
+    found = find_cars_at_point(lat, lon)
+    return found[0]["car_code"] if found else None
 
 
 def build_car_map(car_code: str, property_name: str = None):

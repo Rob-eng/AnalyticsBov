@@ -105,3 +105,4 @@ httpx==0.28.1
 ijson==3.3.0
 openai>=1.14.0
 stripe
+geoalchemy2==0.17.1

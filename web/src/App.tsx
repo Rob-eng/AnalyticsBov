@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { BrowserRouter } from 'react-router'
 import { api, ApiError } from './api'
 import Login from './Login'
 import Workspace from './Workspace'
@@ -14,5 +15,9 @@ export default function App() {
       <button className="btn" onClick={() => me.refetch()}>Tentar de novo</button>
     </div>
   )
-  return <Workspace me={me.data} />
+  return (
+    <BrowserRouter basename="/app">
+      <Workspace me={me.data} />
+    </BrowserRouter>
+  )
 }
