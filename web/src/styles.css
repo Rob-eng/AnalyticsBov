@@ -213,3 +213,7 @@ p { margin: 0; }
 .flag-info { background: #e3eef8; color: #234a73; }
 .occ-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: .78rem; color: var(--apoio); }
 .status-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.paddock-label { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; padding: 3px 7px 4px; }
+.paddock-use { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px 0 4px; font-size: .7rem; border-radius: 5px; background: var(--ipe, #E8B730); color: #17251C; font-variant-numeric: tabular-nums; }
+.paddock-label-on .paddock-use { background: #17251C; color: #E8B730; }
+.steer { flex: none; }

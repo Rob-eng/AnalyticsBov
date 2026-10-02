@@ -50,6 +50,13 @@ export type Focus = {
 const NDVI_FILL: maplibregl.ExpressionSpecification = ['interpolate', ['linear'], ['get', 'ndvi'],
   0, '#d7191c', 0.2, '#fdae61', 0.4, '#ffffbf', 0.6, '#a6d96a', 0.8, '#1a9641']
 
+// boizinho minimalista (cabeça de frente com chifres), no traço da interface
+const STEER_SVG = '<svg class="steer" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+  + '<path d="M3.5 5.5c.8 2.3 2.8 3.3 5 3.2"/><path d="M20.5 5.5c-.8 2.3-2.8 3.3-5 3.2"/>'
+  + '<path d="M5.2 10.4 8 9.6M18.8 10.4 16 9.6"/>'
+  + '<path d="M8 8.7h8l-1 6.6c-.3 2.1-1.6 3.6-3 3.6s-2.7-1.5-3-3.6z"/>'
+  + '<path d="M10.6 16.6h.01M13.4 16.6h.01" stroke-width="2.4"/></svg>'
+
 const ringCenter = (g: GeoJSON.Polygon): [number, number] => {
   const ring = g.coordinates[0].slice(0, -1)
   return [ring.reduce((s, c) => s + c[0], 0) / ring.length, ring.reduce((s, c) => s + c[1], 0) / ring.length]
@@ -233,8 +240,19 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
     paddockMarkers.current = (focus?.paddocks?.features ?? []).filter(f => f.properties?.id > 0).map(f => {
       const el = document.createElement('div')
       el.className = 'paddock-label' + (f.properties!.id === focus?.paddockSelected ? ' paddock-label-on' : '')
-      const nd = f.properties!.ndvi
-      el.textContent = f.properties!.name + (typeof nd === 'number' ? ` · ${nd.toFixed(2).replace('.', ',')}` : '')
+      const pr = f.properties!
+      const nd = pr.ndvi
+      const name = document.createElement('span')
+      name.textContent = pr.name + (typeof nd === 'number' ? ` · ${nd.toFixed(2).replace('.', ',')}` : '')
+      el.append(name)
+      if (pr.in_use) {
+        const use = document.createElement('span')
+        use.className = 'paddock-use'
+        use.innerHTML = STEER_SVG
+        use.append(typeof pr.ua_ha === 'number' ? `${pr.ua_ha.toFixed(2).replace('.', ',')} UA/ha` : 'em uso')
+        el.append(use)
+        el.title = `Em uso · ${use.textContent}`
+      }
       return new maplibregl.Marker({ element: el }).setLngLat(ringCenter(f.geometry as GeoJSON.Polygon)).addTo(m)
     })
     // com NDVI, PRODES ou piquetes na tela, as camadas do CAR viram só contorno para não esconder o que importa

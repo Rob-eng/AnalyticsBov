@@ -95,8 +95,11 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
     if (!active || !hasPerimeter) return null
     const base = feats.filter(f => f.properties.id !== editing?.id).map(f => {
       const v = values[String(f.properties.id)]
-      const st = gmap.get(f.properties.id)?.status
-      return { ...f, properties: { ...f.properties, ...(colorBy && v != null ? { ndvi: v } : st ? { status: st } : {}) } }
+      const g = gmap.get(f.properties.id)
+      const st = g?.status
+      // em uso: o rótulo do mapa ganha o boizinho e a lotação, com ou sem a cor de NDVI
+      const use = st === 'em_uso' ? { in_use: true, ua_ha: g?.ua_ha ?? null } : {}
+      return { ...f, properties: { ...f.properties, ...use, ...(colorBy && v != null ? { ndvi: v } : st ? { status: st } : {}) } }
     })
     if (pending) base.push({ type: 'Feature', id: -1, geometry: pending, properties: { id: -1, name: name || 'Novo piquete', area_ha: 0, pasture_ha: 0, excluded_ha: 0 } })
     return { type: 'FeatureCollection', features: base, exclusions: list.data?.exclusions }
