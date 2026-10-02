@@ -73,7 +73,7 @@ export const api = {
   ndviSeries: (id: number, months = 24) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/ndvi/series?months=${months}`),
   ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
   rain: (id: number) => request<Analysis<Rain>>(`/properties/${id}/rain`),
-  mdt: (id: number, kind: '2d' | '3d') => request<Analysis<{ elev_min: number; elev_max: number; source: string }>>(`/properties/${id}/mdt?kind=${kind}`),
+  mdt: (id: number, kind: '2d' | '3d') => request<Analysis<{ elev_min: number; elev_max: number; source: string }> | { status: 'processing' }>(`/properties/${id}/mdt?kind=${kind}`),
   prodes: (id: number, refresh = false) => request<Analysis<ProdesList>>(`/properties/${id}/prodes${refresh ? '?refresh=true' : ''}`),
   prodesReport: (id: number, uuids: string[]) => request<{ job_id: number; class_name: string }[]>(`/properties/${id}/prodes/report`, { method: 'POST', body: JSON.stringify({ uuids }) }),
   prodesJobs: (id: number) => request<ProdesJob[]>(`/properties/${id}/prodes/jobs`),

@@ -437,22 +437,56 @@ def rain_for(chat_id: str, property_id: int) -> dict:
     return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, "rain", {}, result)))
 
 
+_mdt_jobs = {}   # (property_id, kind) -> {"error": str|None} enquanto o vídeo 3D renderiza
+
+
 def mdt_for(chat_id: str, property_id: int, kind: str = "2d") -> dict:
-    """Relevo da propriedade: '2d' = curvas de nível (PNG); '3d' = vídeo 3D com textura Sentinel-2 (MP4)."""
-    from app.gee_connector import get_terrain_data
-    from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
+    """
+    Relevo da propriedade: '2d' = curvas de nível (PNG); '3d' = vídeo 3D com textura Sentinel-2 (MP4).
+    O vídeo leva mais que o timeout do proxy do Railway, então o 3D roda numa thread e a
+    resposta é {"status": "processing"} até o vídeo aparecer no histórico (o site consulta de novo).
+    """
     from app.saas.limit_engine import can_perform_action
-    from app.models import log_activity
     analysis_kind = f"mdt_{kind}"
     cached = _cached_analysis(property_id, analysis_kind, {}, max_age_hours=24 * 30)
     if cached:
+        _mdt_jobs.pop((property_id, kind), None)
         return _analysis_dict(cached)
+    job = _mdt_jobs.get((property_id, kind))
+    if job is not None:
+        if job["error"]:
+            _mdt_jobs.pop((property_id, kind), None)
+            raise PropertyError(job["error"])
+        return {"status": "processing"}
     ok, msg = can_perform_action(chat_id, "LOOKUP")
     if not ok:
         raise PropertyError(msg.replace("Patrão, ", ""))
     prop = get_property(property_id)
     if not prop["perimeter"]:
         raise PropertyError("Vincule o CAR desta propriedade para gerar o relevo sobre o perímetro.")
+    if kind == "2d":
+        return _analysis_dict(_get_analysis_row(_generate_mdt(chat_id, property_id, prop, kind)))
+
+    import threading
+    _mdt_jobs[(property_id, kind)] = {"error": None}
+
+    def run():
+        try:
+            _generate_mdt(chat_id, property_id, prop, kind)
+        except PropertyError as e:
+            _mdt_jobs[(property_id, kind)] = {"error": str(e)}
+        except Exception as e:
+            print(f"[WEB MDT] Falha no 3D da propriedade {property_id}: {e}", flush=True)
+            _mdt_jobs[(property_id, kind)] = {"error": "Não foi possível gerar o modelo 3D agora."}
+    threading.Thread(target=run, daemon=True).start()
+    return {"status": "processing"}
+
+
+def _generate_mdt(chat_id: str, property_id: int, prop: dict, kind: str) -> int:
+    from app.gee_connector import get_terrain_data
+    from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
+    from app.models import log_activity
+    analysis_kind = f"mdt_{kind}"
     terrain = get_terrain_data(prop["perimeter"])
     if not terrain:
         raise PropertyError("Não foi possível obter os dados de elevação agora.")
@@ -465,7 +499,7 @@ def mdt_for(chat_id: str, property_id: int, kind: str = "2d") -> dict:
     log_activity(chat_id, "MDT", platform="web", details=f"{prop['name']} ({kind})")
     result = {"elev_min": terrain.get("elev_min"), "elev_max": terrain.get("elev_max"), "source": terrain.get("source")}
     mime, ext = ("image/png", "png") if kind == "2d" else ("video/mp4", "mp4")
-    return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, analysis_kind, {}, result, data, mime, ext)))
+    return _save_analysis(property_id, chat_id, analysis_kind, {}, result, data, mime, ext)
 
 
 # ── PRODES na web (mesma fila e laudo do bot; origin='web') ──────────────────
@@ -556,7 +590,10 @@ def prodes_job_file(property_id: int, job_id: int, which: str) -> tuple:
     path, mime, ext = {"pdf": (j.result_pdf_path, "application/pdf", "pdf"),
                        "antes": (j.result_png_before_path, "image/png", "png"),
                        "depois": (j.result_png_after_path, "image/png", "png")}.get(which, (None, None, None))
-    data = prodes_storage.download_bytes(path) if path else None
+    if path and path.startswith("analysis:"):   # sem GCS: arquivo guardado no histórico da propriedade
+        data = analysis_file(property_id, int(path.split(":", 1)[1]))[0]
+    else:
+        data = prodes_storage.download_bytes(path) if path else None
     if not data:
         raise PropertyError("Arquivo do laudo indisponível.")
     return data, mime, f"PRODES_{j.apontamento_class_name}_{which}.{ext}"

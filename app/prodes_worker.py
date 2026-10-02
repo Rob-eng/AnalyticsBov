@@ -200,6 +200,8 @@ async def _process_single_job(job, application):
 
     # Pedido feito pela plataforma web: o resultado fica na página da propriedade
     if (getattr(job, 'origin', None) or 'bot') == 'web':
+        if not result.get('pdf_path') and job.location_id:
+            result = {**result, **_store_web_files(job, result)}
         _mark_job_done(job.id, result)
         print(f"[PRODES WORKER] Job #{job.id} (web) concluído — disponível na plataforma.", flush=True)
         return
@@ -370,6 +372,22 @@ def _run_job_pipeline(job) -> dict:
 
 
 # ── Atualização de estado do job ────────────────────────────────────────────
+
+def _store_web_files(job, result: dict) -> dict:
+    """Sem GCS, os arquivos do laudo web ficam no histórico da propriedade (property_analyses)."""
+    from app.web.properties import _save_analysis
+    paths = {}
+    params = {'job_id': job.id, 'uuid': job.apontamento_uuid, 'class_name': job.apontamento_class_name}
+    for key, data_key, kind, mime, ext in (
+            ('pdf_path', 'pdf_bytes', 'prodes_laudo', 'application/pdf', 'pdf'),
+            ('png_before_path', 'map_before_png', 'prodes_antes', 'image/png', 'png'),
+            ('png_after_path', 'map_after_png', 'prodes_depois', 'image/png', 'png')):
+        if result.get(data_key):
+            aid = _save_analysis(job.location_id, job.chat_id, kind, params, {},
+                                 file_bytes=result[data_key], file_type=mime, ext=ext)
+            paths[key] = f"analysis:{aid}"
+    return paths
+
 
 def _mark_job_done(job_id: int, result: dict):
     from app.models import SessionLocal, ProdesJob

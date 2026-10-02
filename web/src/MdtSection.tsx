@@ -1,12 +1,23 @@
-import { useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { api } from './api'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { api, type Analysis } from './api'
+
+type Relief = Analysis<{ elev_min: number; elev_max: number; source: string }>
+const ready = (d: unknown): d is Relief => !!d && !('status' in (d as object))
 
 export default function MdtSection({ propertyId }: { propertyId: number }) {
   const map2d = useMutation({ mutationFn: () => api.mdt(propertyId, '2d') })
-  const video3d = useMutation({ mutationFn: () => api.mdt(propertyId, '3d') })
-  useEffect(() => { map2d.reset(); video3d.reset() }, [propertyId])   // eslint-disable-line
-  const info = map2d.data?.result ?? video3d.data?.result
+  // o vídeo 3D renderiza no servidor por alguns minutos: a consulta se repete até ele ficar pronto
+  const [want3d, setWant3d] = useState(false)
+  const video3d = useQuery({
+    queryKey: ['mdt3d', propertyId], queryFn: () => api.mdt(propertyId, '3d'), enabled: want3d, retry: false,
+    refetchInterval: q => (q.state.data && !ready(q.state.data) ? 10000 : false),
+  })
+  useEffect(() => { map2d.reset(); setWant3d(false) }, [propertyId])   // eslint-disable-line
+  const map = ready(map2d.data) ? map2d.data : null
+  const video = ready(video3d.data) ? video3d.data : null
+  const rendering = want3d && !video && !video3d.isError
+  const info = map?.result ?? video?.result
 
   return (
     <div className="block">
@@ -17,19 +28,19 @@ export default function MdtSection({ propertyId }: { propertyId: number }) {
         <button className="btn btn-sm" disabled={map2d.isPending} onClick={() => map2d.mutate()}>
           {map2d.isPending ? 'Gerando curvas…' : 'Curvas de nível'}
         </button>
-        <button className="btn btn-sm btn-ghost" disabled={video3d.isPending} onClick={() => video3d.mutate()}>
-          {video3d.isPending ? 'Renderizando 3D (≈1 min)…' : 'Modelo 3D (vídeo)'}
+        <button className="btn btn-sm btn-ghost" disabled={rendering} onClick={() => { if (video3d.isError) video3d.refetch(); setWant3d(true) }}>
+          {rendering ? 'Renderizando 3D (até 5 min)…' : 'Modelo 3D (vídeo)'}
         </button>
       </div>
       {map2d.isError && <p className="notice">{(map2d.error as Error).message}</p>}
       {video3d.isError && <p className="notice">{(video3d.error as Error).message}</p>}
-      {map2d.data?.file_url && (
-        <a className="media" href={map2d.data.file_url} target="_blank" rel="noreferrer" title="Abrir em tamanho cheio">
-          <img src={map2d.data.file_url} alt="Mapa de curvas de nível da propriedade" />
+      {map?.file_url && (
+        <a className="media" href={map.file_url} target="_blank" rel="noreferrer" title="Abrir em tamanho cheio">
+          <img src={map.file_url} alt="Mapa de curvas de nível da propriedade" />
         </a>
       )}
-      {video3d.data?.file_url && (
-        <video className="media" src={video3d.data.file_url} controls autoPlay muted loop playsInline aria-label="Modelo 3D do terreno" />
+      {video?.file_url && (
+        <video className="media" src={video.file_url} controls autoPlay muted loop playsInline aria-label="Modelo 3D do terreno" />
       )}
     </div>
   )
