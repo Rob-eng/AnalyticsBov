@@ -251,6 +251,27 @@ async def ndvi_month(property_id: int, month: str, user=Depends(current_user)):
     return await _call(P.ndvi_month_for, user.chat_id, property_id, month)
 
 
+class AlertSettings(BaseModel):
+    ndvi: Optional[bool] = None
+    rain: Optional[bool] = None
+    prodes: Optional[bool] = None
+
+
+@router.patch("/properties/{property_id}/alerts")
+def property_alerts(property_id: int, body: AlertSettings, user=Depends(current_user)):
+    _own(property_id, user)
+    try:
+        return P.set_alerts(property_id, body.ndvi, body.rain, body.prodes)
+    except P.PropertyError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.get("/properties/{property_id}/history")
+def property_history(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return P.history_for(property_id)
+
+
 @router.get("/properties/{property_id}/analyses")
 def analyses(property_id: int, user=Depends(current_user)):
     _own(property_id, user)

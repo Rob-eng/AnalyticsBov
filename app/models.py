@@ -39,6 +39,10 @@ class FavoriteLocation(Base):
     # NDVI alert tracking
     last_ndvi_date = Column(String, nullable=True)        # 'YYYY-MM-DD' of last image sent
     ndvi_alerts_enabled = Column(Boolean, default=True)  # user opt-in/out per property
+    # Alertas da plataforma web (opt-in): chuva abaixo da média e novo apontamento PRODES
+    rain_alerts_enabled = Column(Boolean, default=False)
+    prodes_alerts_enabled = Column(Boolean, default=False)
+    alert_state = Column(JSONB, nullable=True)   # {"rain_sent_at": iso, "prodes_uuids": [...]}
     # Plataforma web (mesma lista do bot): imóvel do CAR vinculado e seu perímetro oficial
     organization_id = Column(Integer, ForeignKey('organizations.id', ondelete='SET NULL'), nullable=True, index=True)
     car_code = Column(String, nullable=True, index=True)
@@ -428,6 +432,9 @@ def init_db():
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS last_ndvi_date TEXT"))
             conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS ndvi_alerts_enabled BOOLEAN DEFAULT TRUE"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS rain_alerts_enabled BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS prodes_alerts_enabled BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE favorite_locations ADD COLUMN IF NOT EXISTS alert_state JSONB"))
             if hasattr(conn, 'commit'):
                 conn.commit()
     except Exception as e:

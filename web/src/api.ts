@@ -38,7 +38,9 @@ export type Property = {
   car_code: string | null; area_ha: number | null; municipio: string | null; uf: string | null
   car_synced_at: string | null; has_perimeter: boolean
 }
-export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null }
+export type Alerts = { ndvi: boolean; rain: boolean; prodes: boolean }
+export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null; alerts: Alerts }
+export type HistoryItem = { id: number; kind: string; title: string; detail: string | null; created_at: string; file_type: string | null; file_url: string | null }
 export type AreaRow = { category: string; label: string; area_ha: number }
 export type Layers = GeoJSON.FeatureCollection & { areas: AreaRow[] }
 export type CarCandidate = { car_code: string; municipio: string | null; uf: string | null; area_ha: number | null; modulos_rurais: number | null; tipo: string }
@@ -72,6 +74,8 @@ export const api = {
   ndvi: (id: number) => request<Ndvi>(`/properties/${id}/ndvi`),
   carLookup: (lat: number, lon: number) => request<{ candidates: CarCandidate[] }>(`/car/lookup?lat=${lat}&lon=${lon}`),
   ndviSeries: (id: number, months = 24) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/ndvi/series?months=${months}`),
+  setAlerts: (id: number, a: Partial<Alerts>) => request<Alerts>(`/properties/${id}/alerts`, { method: 'PATCH', body: JSON.stringify(a) }),
+  history: (id: number) => request<HistoryItem[]>(`/properties/${id}/history`),
   ndviZone: (id: number, geometry: GeoJSON.Geometry, months = 24) => request<Analysis<{ series: NdviPoint[]; buffer_m: number }>>(`/properties/${id}/ndvi/zone`, { method: 'POST', body: JSON.stringify({ geometry, months }) }),
   ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
   rain: (id: number) => request<Analysis<Rain>>(`/properties/${id}/rain`),

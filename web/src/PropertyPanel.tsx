@@ -7,6 +7,8 @@ import NdviSection from './NdviSection'
 import RainSection from './RainSection'
 import MdtSection from './MdtSection'
 import ProdesSection from './ProdesSection'
+import AlertsSection from './AlertsSection'
+import HistorySection from './HistorySection'
 import type { ProdesList } from './api'
 
 export type Pick = { active: boolean; point: { lat: number; lon: number } | null }
@@ -21,11 +23,12 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
   const [ndvi, setNdvi] = useState<Ndvi | null>(null)
   const [prodes, setProdes] = useState<{ fc: ProdesList | null; selected: Set<string> }>({ fc: null, selected: new Set() })
   const onProdes = useCallback((fc: ProdesList | null, selected: Set<string>) => setProdes({ fc, selected }), [])
+  const [tab, setTab] = useState<'analises' | 'alertas' | 'historico'>('analises')
   const [code, setCode] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  useEffect(() => { setNdvi(null) }, [id])
+  useEffect(() => { setNdvi(null); setTab('analises') }, [id])
 
   const focus = useMemo<Focus | null>(() => prop.data ? {
     perimeter: prop.data.perimeter, bbox: prop.data.bbox, layers: layers.data ?? null, visible, ndvi,
@@ -74,6 +77,17 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
           : <p className="muted">Cadastrada pelo bot, ainda sem o CAR vinculado.</p>}
         {p.car_code && <p className="mono small">{p.car_code}</p>}
       </div>
+
+      <div className="mode mode-3" role="tablist" aria-label="Seções da propriedade">
+        <button role="tab" aria-selected={tab === 'analises'} onClick={() => setTab('analises')}>Análises</button>
+        <button role="tab" aria-selected={tab === 'alertas'} onClick={() => setTab('alertas')}>Alertas</button>
+        <button role="tab" aria-selected={tab === 'historico'} onClick={() => setTab('historico')}>Histórico</button>
+      </div>
+
+      <div hidden={tab !== 'alertas'}><AlertsSection property={p} /></div>
+      <div hidden={tab !== 'historico'}><HistorySection propertyId={id} active={tab === 'historico'} /></div>
+
+      <div className="tab-body" hidden={tab !== 'analises'}>
 
       {!p.has_perimeter && (
         <div className="field-group">
@@ -135,9 +149,11 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
         </>
       )}
 
-      <button className="link danger" onClick={() => { if (confirm(`Excluir "${p.name}"? Ela também some do bot.`)) remove.mutate() }}>
-        Excluir propriedade
-      </button>
+
+        <button className="link danger" onClick={() => { if (confirm(`Excluir "${p.name}"? Ela também some do bot.`)) remove.mutate() }}>
+          Excluir propriedade
+        </button>
+      </div>
     </section>
   )
 }

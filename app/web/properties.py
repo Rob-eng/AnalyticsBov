@@ -174,7 +174,8 @@ def get_property(property_id: int) -> dict:
             SELECT id, name, latitude, longitude, car_code, area_ha, municipio, uf, car_synced_at,
                    perimeter IS NOT NULL AS has_perimeter,
                    ST_AsGeoJSON(perimeter, 7) AS perimeter_geojson,
-                   ST_XMin(perimeter) AS xmin, ST_YMin(perimeter) AS ymin, ST_XMax(perimeter) AS xmax, ST_YMax(perimeter) AS ymax
+                   ST_XMin(perimeter) AS xmin, ST_YMin(perimeter) AS ymin, ST_XMax(perimeter) AS xmax, ST_YMax(perimeter) AS ymax,
+                   ndvi_alerts_enabled, rain_alerts_enabled, prodes_alerts_enabled
             FROM favorite_locations WHERE id = :pid
         """), {"pid": property_id}).fetchone()
         if not r:
@@ -182,9 +183,45 @@ def get_property(property_id: int) -> dict:
         out = _row_to_dict(r)
         out["perimeter"] = json.loads(r.perimeter_geojson) if r.perimeter_geojson else None
         out["bbox"] = [r.xmin, r.ymin, r.xmax, r.ymax] if r.perimeter_geojson else None
+        out["alerts"] = {"ndvi": r.ndvi_alerts_enabled is not False, "rain": bool(r.rain_alerts_enabled),
+                         "prodes": bool(r.prodes_alerts_enabled)}
         return out
     finally:
         db.close()
+
+
+def set_alerts(property_id: int, ndvi=None, rain=None, prodes=None) -> dict:
+    """Liga/desliga os alertas da propriedade (None = não mexe)."""
+    from sqlalchemy.orm.attributes import flag_modified
+    db = SessionLocal()
+    try:
+        loc = db.query(FavoriteLocation).filter_by(id=property_id).first()
+        if not loc:
+            raise PropertyError("Propriedade não encontrada.")
+        if ndvi is not None:
+            loc.ndvi_alerts_enabled = ndvi
+        if rain is not None:
+            loc.rain_alerts_enabled = rain
+        if prodes is not None:
+            if prodes and loc.perimeter is None:
+                raise PropertyError("Vincule o CAR para receber alertas do PRODES.")
+            loc.prodes_alerts_enabled = prodes
+            state = dict(loc.alert_state or {})
+            if prodes and state.get("prodes_uuids") is None:
+                # base inicial = última consulta feita na página, se houver (só o que surgir depois vira alerta)
+                last = db.execute(text("""
+                    SELECT ARRAY(SELECT f->'properties'->>'uuid' FROM jsonb_array_elements(result->'features') f) AS uuids
+                    FROM property_analyses WHERE property_id = :pid AND kind = 'prodes_list'
+                    ORDER BY created_at DESC LIMIT 1
+                """), {"pid": property_id}).fetchone()
+                if last:
+                    state["prodes_uuids"] = [u for u in last.uuids if u]
+                    loc.alert_state = state
+                    flag_modified(loc, "alert_state")
+        db.commit()
+    finally:
+        db.close()
+    return get_property(property_id)["alerts"]
 
 
 def owner_of(property_id: int):
@@ -461,6 +498,62 @@ def list_analyses(property_id: int, limit: int = 50) -> list:
         return [_analysis_dict(r) for r in rows]
     finally:
         db.close()
+
+
+_HISTORY_HIDDEN = ("prodes_antes", "prodes_depois")   # já vêm junto do laudo
+
+
+def history_for(property_id: int, limit: int = 100) -> list:
+    """Histórico leve da propriedade: só os campos do resumo (sem séries nem arquivos em base64)."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id, kind, created_at, file_type, params,
+                   (file_path IS NOT NULL OR result ? 'file_b64') AS has_file,
+                   result->>'mean' AS mean, result->>'last30_mm' AS last30, result->>'pct_of_normal' AS pct,
+                   result->>'elev_min' AS elev_min, result->>'elev_max' AS elev_max,
+                   CASE WHEN jsonb_typeof(result->'features') = 'array' THEN jsonb_array_length(result->'features') END AS n_features
+            FROM property_analyses WHERE property_id = :pid AND kind <> ALL(:hidden)
+            ORDER BY created_at DESC LIMIT :lim
+        """), {"pid": property_id, "hidden": list(_HISTORY_HIDDEN), "lim": limit}).fetchall()
+    finally:
+        db.close()
+
+    def num(v, nd=2):
+        return f"{float(v):.{nd}f}".replace(".", ",") if v not in (None, "") else "—"
+
+    def label(r):
+        p = r.params or {}
+        if r.kind == "ndvi_month":
+            y, m = p.get("month", "-").split("-")
+            return f"NDVI de {m}/{y}", f"média {num(r.mean)}"
+        if r.kind == "ndvi_series":
+            return f"Histórico de NDVI ({p.get('months', 24)} meses)", None
+        if r.kind == "ndvi_zone":
+            g = p.get("geometry") or {}
+            if g.get("type") == "Point":
+                lon, lat = g["coordinates"]
+                return "NDVI de um ponto", f"{lat:.5f}, {lon:.5f}"
+            return "NDVI de uma área", None
+        if r.kind == "rain":
+            return "Chuva", f"{num(r.last30, 0)} mm em 30 dias" + (f" · {r.pct}% da média" if r.pct else "")
+        if r.kind == "mdt_2d":
+            return "Curvas de nível", f"{num(r.elev_min, 0)}–{num(r.elev_max, 0)} m"
+        if r.kind == "mdt_3d":
+            return "Modelo 3D do terreno", f"{num(r.elev_min, 0)}–{num(r.elev_max, 0)} m"
+        if r.kind == "prodes_list":
+            return "Consulta PRODES", f"{r.n_features or 0} apontamento(s)"
+        if r.kind == "prodes_laudo":
+            return f"Laudo PRODES {p.get('class_name', '')}".strip(), None
+        return r.kind, None
+
+    out = []
+    for r in rows:
+        title, detail = label(r)
+        out.append({"id": r.id, "kind": r.kind, "title": title, "detail": detail,
+                    "created_at": r.created_at.isoformat(), "file_type": r.file_type,
+                    "file_url": f"/api/v1/properties/{property_id}/analyses/{r.id}/file" if r.has_file else None})
+    return out
 
 
 def analysis_file(property_id: int, analysis_id: int) -> tuple:

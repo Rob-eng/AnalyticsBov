@@ -187,6 +187,25 @@ def setup_scheduler(application):
     scheduler.add_job(qa_agent_job, CronTrigger(day_of_week='mon', hour=7, minute=30, timezone=USER_TZ),
                       id='qa_agent', replace_existing=True)
 
+    # ── Alertas por propriedade (opt-in na web): chuva seg 06:30; PRODES dia 5 06:45 ─
+    def _property_alert_job(fn_name, label):
+        async def job():
+            from app import property_alerts
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(None, getattr(property_alerts, fn_name))
+            except Exception:
+                import traceback
+                print(f"[Scheduler] ❌ {label} FAILED: {traceback.format_exc()}", flush=True)
+        return job
+
+    scheduler.add_job(_property_alert_job('run_rain_alert_scan', 'Alerta de chuva'),
+                      CronTrigger(day_of_week='mon', hour=6, minute=30, timezone=USER_TZ),
+                      id='rain_alert_scan', replace_existing=True, max_instances=1)
+    scheduler.add_job(_property_alert_job('run_prodes_alert_scan', 'Alerta PRODES'),
+                      CronTrigger(day=5, hour=6, minute=45, timezone=USER_TZ),
+                      id='prodes_alert_scan', replace_existing=True, max_instances=1)
+
     # ── Health probes a cada 30 minutos ──────────────────────────────────
     async def health_probe_job():
         try:
@@ -231,6 +250,7 @@ def setup_scheduler(application):
         "+ cda_daily_ingest (daily 05:30) + datagro_daily_ingest (08:00/20:00) "
         "+ b3_futures_ingest (Mon-Fri 21:00) + trial_notices (daily 09:00) "
         "+ qa_tools (daily 07:00) + qa_agent (Mon 07:30) "
+        "+ rain_alert_scan (Mon 06:30) + prodes_alert_scan (day 5 06:45) "
         "+ health_probes (every 30min) "
         f"+ prodes_job_poll (every {Config.PRODES_POLL_INTERVAL_SECONDS}s)",
         flush=True
