@@ -754,3 +754,126 @@ def prodes_job_file(property_id: int, job_id: int, which: str) -> tuple:
     name = (f"Laudo_PRODES_{j.apontamento_class_name}.pdf" if which == "pdf"
             else f"PRODES_{j.apontamento_class_name}_{which}.{ext}")
     return data, mime, name
+
+
+# ── Piquetes (desenhados na web; NDVI por piquete) ───────────────────────────
+
+MAX_PADDOCKS = 200
+MIN_PADDOCK_HA = 0.05
+
+
+def list_paddocks(property_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id, name, area_ha, ST_AsGeoJSON(geom, 7) AS g FROM property_paddocks
+            WHERE property_id = :pid ORDER BY name, id
+        """), {"pid": property_id}).fetchall()
+    finally:
+        db.close()
+    return {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "id": r.id, "geometry": json.loads(r.g),
+         "properties": {"id": r.id, "name": r.name, "area_ha": round(r.area_ha or 0, 2)}} for r in rows]}
+
+
+def _clip_to_perimeter(db, property_id: int, geometry: dict):
+    """Polígono recortado no perímetro (maior parte, se o recorte dividir) → (WKT, área ha)."""
+    if (geometry or {}).get("type") != "Polygon":
+        raise PropertyError("Desenhe o piquete como um polígono.")
+    r = db.execute(text("""
+        WITH d AS (SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(:g), 4326)) AS g),
+             c AS (SELECT ST_CollectionExtract(ST_MakeValid(ST_Intersection(d.g, f.perimeter)), 3) AS g
+                   FROM d, favorite_locations f WHERE f.id = :pid),
+             parts AS (SELECT (ST_Dump(c.g)).geom AS g FROM c)
+        SELECT ST_AsText(g) AS wkt, ST_Area(g::geography) / 10000 AS ha FROM parts
+        ORDER BY ST_Area(g::geography) DESC LIMIT 1
+    """), {"g": json.dumps(geometry), "pid": property_id}).fetchone()
+    if not r or not r.wkt:
+        raise PropertyError("O piquete precisa ficar dentro do perímetro da propriedade.")
+    if r.ha < MIN_PADDOCK_HA:
+        raise PropertyError("Piquete muito pequeno (mínimo 0,05 ha).")
+    return r.wkt, r.ha
+
+
+def create_paddock(chat_id: str, property_id: int, name: str, geometry: dict) -> dict:
+    prop = get_property(property_id)
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para desenhar piquetes.")
+    db = SessionLocal()
+    try:
+        n = db.execute(text("SELECT count(*) FROM property_paddocks WHERE property_id = :pid"), {"pid": property_id}).scalar()
+        if n >= MAX_PADDOCKS:
+            raise PropertyError(f"Limite de {MAX_PADDOCKS} piquetes por propriedade.")
+        wkt, ha = _clip_to_perimeter(db, property_id, geometry)
+        new_id = db.execute(text("""
+            INSERT INTO property_paddocks (property_id, name, geom, area_ha, created_by, created_at, updated_at)
+            VALUES (:pid, :name, ST_GeomFromText(:wkt, 4326), :ha, :cid, now() at time zone 'utc', now() at time zone 'utc')
+            RETURNING id
+        """), {"pid": property_id, "name": name.strip()[:60], "wkt": wkt, "ha": ha, "cid": str(chat_id)}).scalar()
+        db.commit()
+    finally:
+        db.close()
+    return next(f for f in list_paddocks(property_id)["features"] if f["id"] == new_id)
+
+
+def update_paddock(property_id: int, paddock_id: int, name: str = None, geometry: dict = None) -> dict:
+    db = SessionLocal()
+    try:
+        if not db.execute(text("SELECT 1 FROM property_paddocks WHERE id = :id AND property_id = :pid"),
+                          {"id": paddock_id, "pid": property_id}).fetchone():
+            raise PropertyError("Piquete não encontrado.")
+        if name is not None:
+            db.execute(text("UPDATE property_paddocks SET name = :n, updated_at = now() at time zone 'utc' WHERE id = :id"),
+                       {"n": name.strip()[:60], "id": paddock_id})
+        if geometry is not None:
+            wkt, ha = _clip_to_perimeter(db, property_id, geometry)
+            db.execute(text("""UPDATE property_paddocks SET geom = ST_GeomFromText(:wkt, 4326), area_ha = :ha,
+                               updated_at = now() at time zone 'utc' WHERE id = :id"""), {"wkt": wkt, "ha": ha, "id": paddock_id})
+        db.commit()
+    finally:
+        db.close()
+    return next(f for f in list_paddocks(property_id)["features"] if f["id"] == paddock_id)
+
+
+def delete_paddock(property_id: int, paddock_id: int):
+    db = SessionLocal()
+    try:
+        db.execute(text("DELETE FROM property_paddocks WHERE id = :id AND property_id = :pid"), {"id": paddock_id, "pid": property_id})
+        db.commit()
+    finally:
+        db.close()
+
+
+def paddocks_ndvi_for(chat_id: str, property_id: int, month: str) -> dict:
+    """NDVI médio de cada piquete no mês (um único reduceRegions no Earth Engine)."""
+    import hashlib
+    import re as _re
+    from app.web.analytics import ndvi_month_zones
+    from app.saas.limit_engine import can_perform_action
+    from app.models import log_activity
+    if not _re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise PropertyError("Mês inválido (use AAAA-MM).")
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""SELECT id, ST_AsGeoJSON(geom, 7) AS g, updated_at FROM property_paddocks
+                                  WHERE property_id = :pid ORDER BY id"""), {"pid": property_id}).fetchall()
+    finally:
+        db.close()
+    if not rows:
+        raise PropertyError("Desenhe ao menos um piquete.")
+    # a assinatura muda quando um piquete é criado, editado ou excluído → cache invalida sozinho
+    sig = hashlib.md5("|".join(f"{r.id}:{r.updated_at}" for r in rows).encode()).hexdigest()[:12]
+    current = datetime.utcnow().strftime("%Y-%m")
+    params = {"month": month, "sig": sig}
+    cached = _cached_analysis(property_id, "paddock_ndvi", params, max_age_hours=24 if month == current else 24 * 365)
+    if cached:
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    out = ndvi_month_zones([(r.id, json.loads(r.g)) for r in rows], month)
+    if out["images"] == 0:
+        raise PropertyError("Nenhuma imagem de satélite sem nuvens nesse mês.")
+    log_activity(chat_id, "NDVI", platform="web", details=f"piquetes ({len(rows)}) {month}")
+    aid = _save_analysis(property_id, chat_id, "paddock_ndvi", params, out)
+    return _analysis_dict(_get_analysis_row(aid))

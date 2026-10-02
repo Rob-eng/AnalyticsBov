@@ -188,6 +188,20 @@ class PropertyAnalysis(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class PropertyPaddock(Base):
+    """Piquete desenhado na plataforma web: subdivisão da propriedade (base do NDVI por piquete e, depois, do pastejo)."""
+    __tablename__ = 'property_paddocks'
+
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey('favorite_locations.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    geom = Column(Geometry('POLYGON', srid=4326, spatial_index=True), nullable=False)
+    area_ha = Column(Float, nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Organization(Base):
     """Conta de trabalho na web: produtor (fazendas próprias) ou consultoria (carteira de clientes)."""
     __tablename__ = 'organizations'

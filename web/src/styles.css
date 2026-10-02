@@ -162,6 +162,8 @@ p { margin: 0; }
 .zone-table th { font-weight: 600; color: var(--apoio); font-size: .75rem; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .mode-3 { grid-template-columns: repeat(3, 1fr); }
+.mode-4 { grid-template-columns: repeat(4, 1fr); }
+.mode-4 button { padding: 8px 2px; font-size: .76rem; }
 .tab-body { display: grid; gap: 14px; }
 [hidden] { display: none !important; }
 .alert-list, .history { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -179,3 +181,15 @@ p { margin: 0; }
 .history a { white-space: nowrap; }
 .tab-body > .danger { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+.paddock-label { padding: 2px 7px; border-radius: 6px; background: rgba(23, 37, 28, .78); color: #fff; font: 600 .72rem var(--body); white-space: nowrap; pointer-events: none; }
+.paddock-label-on { background: var(--ipe, #E8B730); color: #17251C; }
+.draw-help { display: grid; gap: 8px; padding: 10px 12px; border: 1.5px dashed var(--ipe, #E8B730); border-radius: 9px; background: #fff; }
+.paddock-ndvi-bar { flex-wrap: wrap; }
+.input-sm { padding: 6px 8px; font-size: .85rem; width: auto; }
+.ndvi-legend { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--apoio); }
+.ndvi-legend i { flex: 1; max-width: 140px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #d7191c, #fdae61, #ffffbf, #a6d96a, #1a9641); }
+.paddock-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.paddock { display: grid; gap: 4px; padding: 8px 10px; background: #fff; border: 1px solid var(--linha); border-radius: 9px; }
+.paddock-on { border-color: var(--ipe, #E8B730); box-shadow: inset 3px 0 0 var(--ipe, #E8B730); }
+.paddock-main { display: grid; gap: 1px; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; }
+.paddock-detail { display: grid; gap: 6px; }

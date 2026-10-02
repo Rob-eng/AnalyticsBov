@@ -2,6 +2,8 @@ import type * as GeoJSON from 'geojson'
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 // MapLibre 6: o worker é um módulo à parte; o Vite empacota com as dependências (?worker&url)
+import { TerraDraw, TerraDrawPolygonMode } from 'terra-draw'
+import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { LAYER_ORDER, LAYER_STYLE, type Ndvi, type Property } from './api'
 
@@ -32,6 +34,21 @@ export type Focus = {
   ndvi: Ndvi | null
   prodes?: GeoJSON.FeatureCollection | null
   prodesSelected?: Set<string>
+  // piquetes: properties {id, name, area_ha, ndvi?}; id -1 = desenhado e ainda não salvo
+  paddocks?: GeoJSON.FeatureCollection | null
+  paddockSelected?: number | null
+  drawing?: boolean
+  onDrawn?: (g: GeoJSON.Polygon) => void
+  onPaddockClick?: (id: number) => void
+}
+
+// mesma escala do NDVI em imagem (0 a 0,8), para as cores dos piquetes significarem o mesmo
+const NDVI_FILL: maplibregl.ExpressionSpecification = ['interpolate', ['linear'], ['get', 'ndvi'],
+  0, '#d7191c', 0.2, '#fdae61', 0.4, '#ffffbf', 0.6, '#a6d96a', 0.8, '#1a9641']
+
+const ringCenter = (g: GeoJSON.Polygon): [number, number] => {
+  const ring = g.coordinates[0].slice(0, -1)
+  return [ring.reduce((s, c) => s + c[0], 0) / ring.length, ring.reduce((s, c) => s + c[1], 0) / ring.length]
 }
 
 type Props = {
@@ -58,6 +75,10 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
   onSelectRef.current = onSelect
   const pickRef = useRef(pickMode)
   pickRef.current = pickMode
+  const focusRef = useRef(focus)
+  focusRef.current = focus
+  const draw = useRef<TerraDraw | null>(null)
+  const paddockMarkers = useRef<maplibregl.Marker[]>([])
 
   // criação do mapa + fontes/camadas vazias (preenchidas depois com setData)
   useEffect(() => {
@@ -97,8 +118,34 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       })
       m.on('mouseenter', 'overview-fill', () => { if (!pickRef.current) m.getCanvas().style.cursor = 'pointer' })
       m.on('mouseleave', 'overview-fill', () => { if (!pickRef.current) m.getCanvas().style.cursor = '' })
+      m.addSource('paddocks', { type: 'geojson', data: EMPTY })
+      m.addLayer({ id: 'paddock-fill', type: 'fill', source: 'paddocks', paint: {
+        'fill-color': ['case', ['has', 'ndvi'], NDVI_FILL, IPE],
+        'fill-opacity': ['case', ['has', 'ndvi'], 0.6, ['==', ['get', 'id'], -1], 0.3, 0.12] } })
+      m.addLayer({ id: 'paddock-line', type: 'line', source: 'paddocks', paint: {
+        'line-color': ['case', ['boolean', ['get', 'selected'], false], IPE, '#ffffff'],
+        'line-width': ['case', ['boolean', ['get', 'selected'], false], 3.5, 1.6],
+        'line-dasharray': ['case', ['==', ['get', 'id'], -1], ['literal', [2, 1.5]], ['literal', [1, 0]]] } })
+      m.on('click', 'paddock-fill', e => {
+        const id = Number(e.features?.[0]?.properties?.id)
+        if (id > 0 && !focusRef.current?.drawing && !pickRef.current) focusRef.current?.onPaddockClick?.(id)
+      })
       m.addLayer({ id: 'perimeter-halo', type: 'line', source: 'perimeter', paint: { 'line-color': TINTA, 'line-width': 5 } })
       m.addLayer({ id: 'perimeter-line', type: 'line', source: 'perimeter', paint: { 'line-color': IPE, 'line-width': 2.5 } })
+      // desenho de piquetes (Terra Draw): só fica ativo enquanto focus.drawing
+      const td = new TerraDraw({
+        adapter: new TerraDrawMapLibreGLAdapter({ map: m }),
+        modes: [new TerraDrawPolygonMode({ styles: {
+          fillColor: '#E8B730', fillOpacity: 0.25, outlineColor: '#E8B730', outlineWidth: 2.5,
+          closingPointColor: '#17251C', closingPointWidth: 6, closingPointOutlineColor: '#ffffff', closingPointOutlineWidth: 2,
+        } })],
+      })
+      td.on('finish', id => {
+        const f = td.getSnapshotFeature(id)
+        td.clear()
+        if (f?.geometry.type === 'Polygon') focusRef.current?.onDrawn?.(f.geometry as GeoJSON.Polygon)
+      })
+      draw.current = td
       setReady(true)
     })
     m.on('click', e => onPickRef.current?.(e.lngLat.lat, e.lngLat.lng))
@@ -107,7 +154,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
     window.addEventListener('qa-fly', qaFly)
     m.once('remove', () => window.removeEventListener('qa-fly', qaFly))
     map.current = m
-    return () => { m.remove(); map.current = null; setReady(false) }
+    return () => { try { draw.current?.stop() } catch { /* mapa já removido */ } draw.current = null; m.remove(); map.current = null; setReady(false) }
   }, [interactive])
 
   useEffect(() => {
@@ -153,8 +200,21 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       ...focus.prodes,
       features: focus.prodes.features.map(f => ({ ...f, properties: { ...f.properties, selected: focus.prodesSelected?.has(f.properties?.uuid) ?? false } })),
     } : EMPTY)
-    // com NDVI ou PRODES na tela, as camadas do CAR viram só contorno para não esconder o que importa
-    const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length
+    ;(m.getSource('paddocks') as maplibregl.GeoJSONSource).setData(focus?.paddocks ? {
+      ...focus.paddocks,
+      features: focus.paddocks.features.map(f => ({ ...f, properties: { ...f.properties, selected: f.properties?.id === focus.paddockSelected } })),
+    } : EMPTY)
+    // nomes dos piquetes (o estilo de satélite não tem fontes para rótulos no próprio mapa)
+    paddockMarkers.current.forEach(mk => mk.remove())
+    paddockMarkers.current = (focus?.paddocks?.features ?? []).filter(f => f.properties?.id > 0).map(f => {
+      const el = document.createElement('div')
+      el.className = 'paddock-label' + (f.properties!.id === focus?.paddockSelected ? ' paddock-label-on' : '')
+      const nd = f.properties!.ndvi
+      el.textContent = f.properties!.name + (typeof nd === 'number' ? ` · ${nd.toFixed(2).replace('.', ',')}` : '')
+      return new maplibregl.Marker({ element: el }).setLngLat(ringCenter(f.geometry as GeoJSON.Polygon)).addTo(m)
+    })
+    // com NDVI, PRODES ou piquetes na tela, as camadas do CAR viram só contorno para não esconder o que importa
+    const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length || !!focus?.paddocks?.features.length
     for (const cat of LAYER_ORDER) {
       const vis = focus?.visible.has(cat) ? 'visible' : 'none'
       m.setLayoutProperty(`car-${cat}-fill`, 'visibility', outlineOnly ? 'none' : vis)
@@ -168,6 +228,19 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       m.addLayer({ id: 'ndvi', type: 'raster', source: 'ndvi', paint: { 'raster-opacity': 0.85 } }, 'car-sem_classificacao-fill')
     }
   }, [focus, ready])
+
+  // liga/desliga o desenho
+  useEffect(() => {
+    const td = draw.current
+    if (!td || !ready) return
+    if (focus?.drawing) {
+      if (!td.enabled) td.start()
+      td.setMode('polygon')
+    } else if (td.enabled) {
+      td.clear()
+      td.stop()
+    }
+  }, [focus?.drawing, ready])
 
   // enquadra a propriedade aberta
   useEffect(() => {

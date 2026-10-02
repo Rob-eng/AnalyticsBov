@@ -107,6 +107,23 @@ def ndvi_month_image(perimeter_geojson: dict, month: str) -> dict:
             "coordinates": [[x0, y1], [x1, y1], [x1, y0], [x0, y0]]}
 
 
+def ndvi_month_zones(zones: list, month: str) -> dict:
+    """NDVI médio do mês em várias zonas de uma vez: zones = [(id, geojson)] → {values: {id: mean}, images}."""
+    if not initialize_gee():
+        raise RuntimeError("Google Earth Engine indisponível")
+    fc = ee.FeatureCollection([ee.Feature(ee.Geometry(g), {"zid": zid}) for zid, g in zones])
+    y, m = (int(x) for x in month.split("-"))
+    d0 = ee.Date(date(y, m, 1).isoformat())
+    monthly = (ee.ImageCollection(S2).filterBounds(fc.geometry()).filterDate(d0, d0.advance(1, "month"))
+               .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 60)))
+    n = monthly.size().getInfo()
+    if n == 0:
+        return {"values": {}, "images": 0}
+    stats = monthly.map(_ndvi).median().reduceRegions(collection=fc, reducer=ee.Reducer.mean(), scale=10).getInfo()
+    values = {str(f["properties"]["zid"]): _r(f["properties"].get("mean")) for f in stats["features"]}
+    return {"values": values, "images": n}
+
+
 # ── Chuva (Open-Meteo: previsão + últimos 90 dias + normal de 10 anos) ───────
 
 def rain_summary(lat: float, lon: float) -> dict:

@@ -101,6 +101,7 @@ export default function Workspace({ me }: { me: Me }) {
           picked={pick.point}
           onPick={onPick}
         />
+        {focus?.drawing && selectedId && <div className="map-hint" role="status">Clique para marcar os cantos · clique no primeiro ponto para fechar</div>}
         {pick.active && <div className="map-hint" role="status">{selectedId ? 'Clique no ponto da fazenda que quer analisar' : 'Clique dentro da fazenda no mapa'}</div>}
       </main>
     </div>

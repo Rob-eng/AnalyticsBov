@@ -331,3 +331,45 @@ async def prodes_job_file(property_id: int, job_id: int, which: str, download: b
     if download:
         return _download(data, name, mime)
     return RawResponse(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+
+
+class NewPaddock(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    geometry: dict
+
+
+class EditPaddock(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    geometry: Optional[dict] = None
+
+
+@router.get("/properties/{property_id}/paddocks")
+def paddocks(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return P.list_paddocks(property_id)
+
+
+@router.post("/properties/{property_id}/paddocks", status_code=201)
+async def create_paddock(property_id: int, body: NewPaddock, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.create_paddock, user.chat_id, property_id, body.name, body.geometry)
+
+
+@router.patch("/properties/{property_id}/paddocks/{paddock_id}")
+async def edit_paddock(property_id: int, paddock_id: int, body: EditPaddock, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.update_paddock, property_id, paddock_id, body.name, body.geometry)
+
+
+@router.delete("/properties/{property_id}/paddocks/{paddock_id}", status_code=204)
+def remove_paddock(property_id: int, paddock_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    P.delete_paddock(property_id, paddock_id)
+    return RawResponse(status_code=204)
+
+
+@router.get("/properties/{property_id}/paddocks/ndvi")
+async def paddocks_ndvi(property_id: int, month: str, user=Depends(current_user)):
+    _own(property_id, user)
+    _rate_limit(f"ndvi:{user.chat_id}", limit=30)
+    return await _call(P.paddocks_ndvi_for, user.chat_id, property_id, month)

@@ -9,6 +9,7 @@ import MdtSection from './MdtSection'
 import ProdesSection from './ProdesSection'
 import AlertsSection from './AlertsSection'
 import HistorySection from './HistorySection'
+import PaddocksSection, { type PaddockLayer } from './PaddocksSection'
 import type { ProdesList } from './api'
 
 export type Pick = { active: boolean; point: { lat: number; lon: number } | null }
@@ -23,7 +24,8 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
   const [ndvi, setNdvi] = useState<Ndvi | null>(null)
   const [prodes, setProdes] = useState<{ fc: ProdesList | null; selected: Set<string> }>({ fc: null, selected: new Set() })
   const onProdes = useCallback((fc: ProdesList | null, selected: Set<string>) => setProdes({ fc, selected }), [])
-  const [tab, setTab] = useState<'analises' | 'alertas' | 'historico'>('analises')
+  const [tab, setTab] = useState<'analises' | 'piquetes' | 'alertas' | 'historico'>('analises')
+  const [paddockLayer, setPaddockLayer] = useState<PaddockLayer | null>(null)
   const [code, setCode] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -32,8 +34,10 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
 
   const focus = useMemo<Focus | null>(() => prop.data ? {
     perimeter: prop.data.perimeter, bbox: prop.data.bbox, layers: layers.data ?? null, visible, ndvi,
-    prodes: prodes.fc, prodesSelected: prodes.selected,
-  } : null, [prop.data, layers.data, visible, ndvi, prodes])
+    prodes: tab === 'analises' ? prodes.fc : null, prodesSelected: prodes.selected,
+    paddocks: paddockLayer?.fc ?? null, paddockSelected: paddockLayer?.selected ?? null, drawing: paddockLayer?.drawing ?? false,
+    onDrawn: paddockLayer?.onDrawn, onPaddockClick: paddockLayer?.onClick,
+  } : null, [prop.data, layers.data, visible, ndvi, prodes, paddockLayer, tab])
   useEffect(() => { onFocus(focus); }, [focus, onFocus])
   useEffect(() => () => onFocus(null), [onFocus])
 
@@ -78,12 +82,16 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
         {p.car_code && <p className="mono small">{p.car_code}</p>}
       </div>
 
-      <div className="mode mode-3" role="tablist" aria-label="Seções da propriedade">
+      <div className="mode mode-4" role="tablist" aria-label="Seções da propriedade">
         <button role="tab" aria-selected={tab === 'analises'} onClick={() => setTab('analises')}>Análises</button>
+        <button role="tab" aria-selected={tab === 'piquetes'} onClick={() => setTab('piquetes')}>Piquetes</button>
         <button role="tab" aria-selected={tab === 'alertas'} onClick={() => setTab('alertas')}>Alertas</button>
         <button role="tab" aria-selected={tab === 'historico'} onClick={() => setTab('historico')}>Histórico</button>
       </div>
 
+      <div hidden={tab !== 'piquetes'}>
+        <PaddocksSection propertyId={id} hasPerimeter={p.has_perimeter} active={tab === 'piquetes'} onLayer={setPaddockLayer} />
+      </div>
       <div hidden={tab !== 'alertas'}><AlertsSection property={p} /></div>
       <div hidden={tab !== 'historico'}><HistorySection propertyId={id} active={tab === 'historico'} /></div>
 

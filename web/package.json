@@ -14,7 +14,9 @@
     "maplibre-gl": "^6.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router": "^7.18.4"
+    "react-router": "^7.18.4",
+    "terra-draw": "^1.35.0",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1"
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
