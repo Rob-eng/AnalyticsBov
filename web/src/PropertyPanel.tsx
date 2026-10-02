@@ -37,6 +37,7 @@ export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f:
     prodes: tab === 'analises' ? prodes.fc : null, prodesSelected: prodes.selected,
     paddocks: paddockLayer?.fc ?? null, paddockSelected: paddockLayer?.selected ?? null, drawing: paddockLayer?.drawing ?? false,
     onDrawn: paddockLayer?.onDrawn, onPaddockClick: paddockLayer?.onClick,
+    editing: paddockLayer?.editing ?? null, onEdited: paddockLayer?.onEdited,
   } : null, [prop.data, layers.data, visible, ndvi, prodes, paddockLayer, tab])
   useEffect(() => { onFocus(focus); }, [focus, onFocus])
   useEffect(() => () => onFocus(null), [onFocus])

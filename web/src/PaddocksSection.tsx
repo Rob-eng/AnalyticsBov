@@ -6,7 +6,10 @@ import NdviChart from './NdviChart'
 export type PaddockLayer = {
   fc: Paddocks | null; selected: number | null; drawing: boolean
   onDrawn: (g: GeoJSON.Polygon) => void; onClick: (id: number) => void
+  editing: { id: number; geometry: GeoJSON.Polygon } | null; onEdited: (g: GeoJSON.Polygon) => void
 }
+const LATEST = 'latest'
+const fmtDay = (d?: string | null) => d ? d.split('-').reverse().join('/') : ''
 type Props = { propertyId: number; hasPerimeter: boolean; active: boolean; onLayer: (l: PaddockLayer | null) => void }
 
 // últimos 12 meses fechados (o mês corrente ainda pode ganhar imagens)
@@ -25,18 +28,21 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   const [selected, setSelected] = useState<number | null>(null)
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null)
   const months = useMemo(lastMonths, [])
-  const [month, setMonth] = useState(months[0])
+  const [month, setMonth] = useState(LATEST)
+  const [editing, setEditing] = useState<{ id: number; geometry: GeoJSON.Polygon } | null>(null)
+  const [edited, setEdited] = useState<GeoJSON.Polygon | null>(null)
   const [colorBy, setColorBy] = useState<string | null>(null)
 
   const feats = useMemo(() => list.data?.features ?? [], [list.data])
-  useEffect(() => { setDrawing(false); setPending(null); setSelected(null); setColorBy(null) }, [propertyId])
+  useEffect(() => { setDrawing(false); setPending(null); setSelected(null); setColorBy(null); setEditing(null); setEdited(null) }, [propertyId])
+  useEffect(() => { if (!active) { setEditing(null); setEdited(null); setDrawing(false) } }, [active])
 
   const ndvi = useQuery({ queryKey: ['paddocks-ndvi', propertyId, colorBy, feats.map(f => f.id).join(',')],
     queryFn: () => api.paddocksNdvi(propertyId, colorBy!), enabled: !!colorBy && feats.length > 0, retry: false })
   const values = useMemo(() => ndvi.data?.result.values ?? {}, [ndvi.data])
   const farm = useQuery({ queryKey: ['ndvi-series', propertyId], queryFn: () => api.ndviSeries(propertyId, 24), enabled: selected != null })
   const sel = feats.find(f => f.properties.id === selected) ?? null
-  const zone = useQuery({ queryKey: ['ndvi-zone-paddock', propertyId, selected, sel?.geometry.coordinates[0].length],
+  const zone = useQuery({ queryKey: ['ndvi-zone-paddock', propertyId, selected, JSON.stringify(sel?.geometry.coordinates ?? null)],
     queryFn: () => api.ndviZone(propertyId, sel!.geometry, 24), enabled: !!sel, retry: false })
 
   const save = useMutation({
@@ -47,6 +53,14 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
     mutationFn: (r: { id: number; name: string }) => api.editPaddock(propertyId, r.id, { name: r.name.trim() }),
     onSuccess: () => { setRenaming(null); qc.invalidateQueries({ queryKey: key }) },
   })
+  const reshape = useMutation({
+    mutationFn: () => api.editPaddock(propertyId, editing!.id, { geometry: edited! }),
+    onSuccess: () => { setEditing(null); setEdited(null); qc.invalidateQueries({ queryKey: key }) },
+  })
+  const startEdit = (id: number) => {
+    const f = feats.find(x => x.properties.id === id)
+    if (f) { reshape.reset(); setDrawing(false); setEdited(null); setEditing({ id, geometry: f.geometry }) }
+  }
   const remove = useMutation({
     mutationFn: (id: number) => api.deletePaddock(propertyId, id),
     onSuccess: (_d, id) => { if (selected === id) setSelected(null); qc.invalidateQueries({ queryKey: key }) },
@@ -55,21 +69,24 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
   // camada do mapa: piquetes salvos (com NDVI do mês, se pedido) + o recém-desenhado
   const fc = useMemo<Paddocks | null>(() => {
     if (!active || !hasPerimeter) return null
-    const base = feats.map(f => {
+    const base = feats.filter(f => f.properties.id !== editing?.id).map(f => {
       const v = values[String(f.properties.id)]
       return { ...f, properties: { ...f.properties, ...(colorBy && v != null ? { ndvi: v } : {}) } }
     })
     if (pending) base.push({ type: 'Feature', id: -1, geometry: pending, properties: { id: -1, name: name || 'Novo piquete', area_ha: 0 } })
     return { type: 'FeatureCollection', features: base }
-  }, [active, hasPerimeter, feats, values, colorBy, pending, name])
+  }, [active, hasPerimeter, feats, values, colorBy, pending, name, editing])
 
   useEffect(() => {
     onLayer(active ? {
       fc, selected, drawing,
       onDrawn: g => { setDrawing(false); setPending(g); setName(`Piquete ${feats.length + 1}`) },
-      onClick: id => setSelected(s => (s === id ? null : id)),
+      onClick: id => { if (!editing) setSelected(s => (s === id ? null : id)) },
+      editing,
+      // selecionar já dispara 'change' no Terra Draw: só conta como edição se o formato mudou
+      onEdited: g => setEdited(editing && JSON.stringify(g.coordinates) !== JSON.stringify(editing.geometry.coordinates) ? g : null),
     } : null)
-  }, [active, fc, selected, drawing, feats.length, onLayer])
+  }, [active, fc, selected, drawing, feats.length, onLayer, editing])
   useEffect(() => () => onLayer(null), [onLayer])
 
   if (!hasPerimeter) return <div className="block"><h3>Piquetes</h3><p className="muted">Vincule o CAR desta propriedade para desenhar os piquetes sobre o perímetro.</p></div>
@@ -84,7 +101,20 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
       )}
       {feats.length > 0 && <p className="muted small">{feats.length} piquete{feats.length > 1 ? 's' : ''} · {fmtHa(total)}</p>}
 
-      {!drawing && !pending && <button className="btn btn-sm" onClick={() => { setSelected(null); setDrawing(true) }}>Desenhar piquete</button>}
+      {editing && (
+        <div className="draw-help">
+          <p className="small"><strong>Editando {feats.find(f => f.properties.id === editing.id)?.properties.name}</strong></p>
+          <p className="small">Arraste os cantos (pontos escuros) para ajustar. Arraste um ponto amarelo, no meio de um lado, para criar um canto novo. Botão direito num canto o remove.</p>
+          {reshape.isError && <p className="notice">{(reshape.error as Error).message}</p>}
+          <div className="row">
+            <button className="btn btn-sm" disabled={!edited || reshape.isPending} onClick={() => reshape.mutate()}>
+              {reshape.isPending ? 'Salvando…' : edited ? 'Salvar formato' : 'Sem alterações'}
+            </button>
+            <button className="link" onClick={() => { setEditing(null); setEdited(null) }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+      {!drawing && !pending && !editing && <button className="btn btn-sm" onClick={() => { setSelected(null); setDrawing(true) }}>Desenhar piquete</button>}
       {drawing && (
         <div className="draw-help">
           <p className="small">Clique no mapa para marcar os cantos do piquete. Para fechar, clique de novo no primeiro ponto.</p>
@@ -109,7 +139,8 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
         <>
           <div className="row paddock-ndvi-bar">
             <select className="input input-sm" value={month} onChange={e => setMonth(e.target.value)} aria-label="Mês do NDVI">
-              {months.map(m => <option key={m} value={m}>{fmtMonth(m)}</option>)}
+              <option value={LATEST}>Última imagem</option>
+              {months.map(m => <option key={m} value={m}>Média de {fmtMonth(m)}</option>)}
             </select>
             <button className="btn btn-sm btn-ghost" disabled={ndvi.isFetching} onClick={() => setColorBy(month)}>
               {ndvi.isFetching ? 'Calculando (≈30 s)…' : 'Colorir por NDVI'}
@@ -119,7 +150,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
           {ndvi.isError && <p className="notice">{(ndvi.error as Error).message}</p>}
           {colorBy && ndvi.isSuccess && (
             <div className="ndvi-legend" aria-label="Escala de NDVI">
-              <span>NDVI {fmtMonth(colorBy)}</span><i /><span className="mono small">0 — 0,8</span>
+              <span>{colorBy === LATEST ? `NDVI da imagem de ${fmtDay(ndvi.data?.result.date)}` : `NDVI médio de ${fmtMonth(colorBy)}`}</span><i /><span className="mono small">0 — 0,8</span>
             </div>
           )}
 
@@ -144,6 +175,7 @@ export default function PaddocksSection({ propertyId, hasPerimeter, active, onLa
                   {p.id === selected && renaming?.id !== p.id && (
                     <span className="row small">
                       <button className="link" onClick={() => setRenaming({ id: p.id, name: p.name })}>Renomear</button>
+                      <button className="link" disabled={!!editing} onClick={() => startEdit(p.id)}>Editar formato</button>
                       <button className="link danger" onClick={() => { if (confirm(`Excluir o piquete "${p.name}"?`)) remove.mutate(p.id) }}>Excluir</button>
                     </span>
                   )}

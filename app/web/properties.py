@@ -511,7 +511,8 @@ def history_for(property_id: int, limit: int = 100) -> list:
             SELECT id, kind, created_at, file_type, params,
                    (file_path IS NOT NULL OR result ? 'file_b64') AS has_file,
                    result->>'mean' AS mean, result->>'last30_mm' AS last30, result->>'pct_of_normal' AS pct,
-                   result->>'elev_min' AS elev_min, result->>'elev_max' AS elev_max,
+                   result->>'elev_min' AS elev_min, result->>'elev_max' AS elev_max, result->>'date' AS img_date,
+                   CASE WHEN jsonb_typeof(result->'values') = 'object' THEN (SELECT count(*) FROM jsonb_object_keys(result->'values')) END AS n_values,
                    CASE WHEN jsonb_typeof(result->'features') = 'array' THEN jsonb_array_length(result->'features') END AS n_features
             FROM property_analyses WHERE property_id = :pid AND kind <> ALL(:hidden)
             ORDER BY created_at DESC LIMIT :lim
@@ -543,6 +544,12 @@ def history_for(property_id: int, limit: int = 100) -> list:
             return "Modelo 3D do terreno", f"{num(r.elev_min, 0)}–{num(r.elev_max, 0)} m"
         if r.kind == "prodes_list":
             return "Consulta PRODES", f"{r.n_features or 0} apontamento(s)"
+        if r.kind == "paddock_ndvi":
+            if p.get("month") == "latest":
+                d = (r.img_date or "").split("-")
+                return "NDVI dos piquetes", f"imagem de {d[2]}/{d[1]}/{d[0]} · {r.n_values or 0} piquetes" if len(d) == 3 else None
+            y, m = p.get("month", "-").split("-")
+            return "NDVI dos piquetes", f"{m}/{y} · {r.n_values or 0} piquetes"
         if r.kind == "prodes_laudo":
             return f"Laudo PRODES {p.get('class_name', '')}".strip(), None
         return r.kind, None
@@ -845,14 +852,18 @@ def delete_paddock(property_id: int, paddock_id: int):
 
 
 def paddocks_ndvi_for(chat_id: str, property_id: int, month: str) -> dict:
-    """NDVI médio de cada piquete no mês (um único reduceRegions no Earth Engine)."""
+    """
+    NDVI médio de cada piquete: no mês (mediana das cenas) ou, com month='latest', na imagem
+    mais recente sem nuvens. Um único reduceRegions no Earth Engine.
+    """
     import hashlib
     import re as _re
-    from app.web.analytics import ndvi_month_zones
+    from app.web.analytics import ndvi_month_zones, ndvi_latest_zones
     from app.saas.limit_engine import can_perform_action
     from app.models import log_activity
-    if not _re.fullmatch(r"\d{4}-\d{2}", month or ""):
-        raise PropertyError("Mês inválido (use AAAA-MM).")
+    latest = month == "latest"
+    if not latest and not _re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise PropertyError("Mês inválido (use AAAA-MM ou latest).")
     db = SessionLocal()
     try:
         rows = db.execute(text("""SELECT id, ST_AsGeoJSON(geom, 7) AS g, updated_at FROM property_paddocks
@@ -865,15 +876,18 @@ def paddocks_ndvi_for(chat_id: str, property_id: int, month: str) -> dict:
     sig = hashlib.md5("|".join(f"{r.id}:{r.updated_at}" for r in rows).encode()).hexdigest()[:12]
     current = datetime.utcnow().strftime("%Y-%m")
     params = {"month": month, "sig": sig}
-    cached = _cached_analysis(property_id, "paddock_ndvi", params, max_age_hours=24 if month == current else 24 * 365)
+    max_age = 12 if latest else 24 if month == current else 24 * 365
+    cached = _cached_analysis(property_id, "paddock_ndvi", params, max_age_hours=max_age)
     if cached:
         return _analysis_dict(cached)
     ok, msg = can_perform_action(chat_id, "LOOKUP")
     if not ok:
         raise PropertyError(msg.replace("Patrão, ", ""))
-    out = ndvi_month_zones([(r.id, json.loads(r.g)) for r in rows], month)
+    zones = [(r.id, json.loads(r.g)) for r in rows]
+    out = ndvi_latest_zones(zones) if latest else ndvi_month_zones(zones, month)
     if out["images"] == 0:
-        raise PropertyError("Nenhuma imagem de satélite sem nuvens nesse mês.")
+        raise PropertyError("Nenhuma imagem sem nuvens sobre os piquetes nos últimos 90 dias." if latest
+                            else "Nenhuma imagem de satélite sem nuvens nesse mês.")
     log_activity(chat_id, "NDVI", platform="web", details=f"piquetes ({len(rows)}) {month}")
     aid = _save_analysis(property_id, chat_id, "paddock_ndvi", params, out)
     return _analysis_dict(_get_analysis_row(aid))

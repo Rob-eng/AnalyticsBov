@@ -124,6 +124,49 @@ def ndvi_month_zones(zones: list, month: str) -> dict:
     return {"values": values, "images": n}
 
 
+def ndvi_latest_zones(zones: list, days: int = 90) -> dict:
+    """
+    NDVI das zonas na imagem mais recente sem nuvens sobre elas (mesma regra do "Última imagem"
+    do bot: < 15% de nuvem sobre a área, relaxando para 35%). Junta todos os tiles do mesmo dia,
+    para zonas na divisa entre dois tiles não ficarem sem valor.
+    → {values: {id: mean}, images: n, date: 'YYYY-MM-DD', cloud_pct}
+    """
+    from datetime import timedelta
+    if not initialize_gee():
+        raise RuntimeError("Google Earth Engine indisponível")
+    fc = ee.FeatureCollection([ee.Feature(ee.Geometry(g), {"zid": zid}) for zid, g in zones])
+    area = fc.geometry()
+    end = date.today() + timedelta(days=1)
+    col = (ee.ImageCollection(S2).filterBounds(area)
+           .filterDate((end - timedelta(days=days)).isoformat(), end.isoformat())
+           .sort("system:time_start", False))
+
+    def cloud_frac(img):
+        scl = img.select("SCL")
+        cloudy = scl.eq(3).Or(scl.eq(8)).Or(scl.eq(9)).Or(scl.eq(10))
+        stat = cloudy.reduceRegion(ee.Reducer.mean(), area, 20, maxPixels=1e8).get("SCL")
+        # sem pixel sobre a área (footprint errado no catálogo) = 100% nuvem
+        return img.set("cf", ee.Algorithms.If(ee.Algorithms.IsEqual(stat, None), 100, ee.Number(stat).multiply(100)))
+
+    checked = col.map(cloud_frac)
+    pick = None
+    for limit in (15, 35):
+        clear = checked.filter(ee.Filter.lt("cf", limit))
+        if clear.size().getInfo():
+            pick = clear.first()
+            break
+    if pick is None:
+        return {"values": {}, "images": 0, "date": None}
+    meta = ee.Dictionary({"t": pick.get("system:time_start"), "cf": pick.get("cf")}).getInfo()
+    day = ee.Date(meta["t"]).update(hour=0, minute=0, second=0)
+    same_day = col.filterDate(day, day.advance(1, "day"))
+    stats = same_day.map(_ndvi).mosaic().reduceRegions(collection=fc, reducer=ee.Reducer.mean(), scale=10).getInfo()
+    from datetime import datetime as _dt
+    return {"values": {str(f["properties"]["zid"]): _r(f["properties"].get("mean")) for f in stats["features"]},
+            "images": 1, "date": _dt.utcfromtimestamp(meta["t"] / 1000).strftime("%Y-%m-%d"),
+            "cloud_pct": round(meta["cf"] or 0, 1)}
+
+
 # ── Chuva (Open-Meteo: previsão + últimos 90 dias + normal de 10 anos) ───────
 
 def rain_summary(lat: float, lon: float) -> dict:

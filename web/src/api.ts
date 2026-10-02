@@ -81,7 +81,7 @@ export const api = {
   createPaddock: (id: number, name: string, geometry: GeoJSON.Polygon) => request<Paddock>(`/properties/${id}/paddocks`, { method: 'POST', body: JSON.stringify({ name, geometry }) }),
   editPaddock: (id: number, pid: number, body: { name?: string; geometry?: GeoJSON.Polygon }) => request<Paddock>(`/properties/${id}/paddocks/${pid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deletePaddock: (id: number, pid: number) => request<void>(`/properties/${id}/paddocks/${pid}`, { method: 'DELETE' }),
-  paddocksNdvi: (id: number, month: string) => request<Analysis<{ values: Record<string, number | null>; images: number }>>(`/properties/${id}/paddocks/ndvi?month=${month}`),
+  paddocksNdvi: (id: number, month: string) => request<Analysis<{ values: Record<string, number | null>; images: number; date?: string | null }>>(`/properties/${id}/paddocks/ndvi?month=${month}`),
   setAlerts: (id: number, a: Partial<Alerts>) => request<Alerts>(`/properties/${id}/alerts`, { method: 'PATCH', body: JSON.stringify(a) }),
   history: (id: number) => request<HistoryItem[]>(`/properties/${id}/history`),
   ndviZone: (id: number, geometry: GeoJSON.Geometry, months = 24) => request<Analysis<{ series: NdviPoint[]; buffer_m: number }>>(`/properties/${id}/ndvi/zone`, { method: 'POST', body: JSON.stringify({ geometry, months }) }),

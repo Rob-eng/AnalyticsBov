@@ -2,7 +2,7 @@ import type * as GeoJSON from 'geojson'
 import { useEffect, useRef, useState } from 'react'
 import * as maplibregl from 'maplibre-gl'
 // MapLibre 6: o worker é um módulo à parte; o Vite empacota com as dependências (?worker&url)
-import { TerraDraw, TerraDrawPolygonMode } from 'terra-draw'
+import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from 'terra-draw'
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { LAYER_ORDER, LAYER_STYLE, type Ndvi, type Property } from './api'
@@ -40,6 +40,9 @@ export type Focus = {
   drawing?: boolean
   onDrawn?: (g: GeoJSON.Polygon) => void
   onPaddockClick?: (id: number) => void
+  // edição do formato de um piquete (vértices arrastáveis); onEdited recebe a geometria a cada mudança
+  editing?: { id: number; geometry: GeoJSON.Polygon } | null
+  onEdited?: (g: GeoJSON.Polygon) => void
 }
 
 // mesma escala do NDVI em imagem (0 a 0,8), para as cores dos piquetes significarem o mesmo
@@ -78,6 +81,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
   const focusRef = useRef(focus)
   focusRef.current = focus
   const draw = useRef<TerraDraw | null>(null)
+  const editId = useRef<string | number | null>(null)
   const paddockMarkers = useRef<maplibregl.Marker[]>([])
 
   // criação do mapa + fontes/camadas vazias (preenchidas depois com setData)
@@ -138,9 +142,21 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
         modes: [new TerraDrawPolygonMode({ styles: {
           fillColor: '#E8B730', fillOpacity: 0.25, outlineColor: '#E8B730', outlineWidth: 2.5,
           closingPointColor: '#17251C', closingPointWidth: 6, closingPointOutlineColor: '#ffffff', closingPointOutlineWidth: 2,
-        } })],
+        } }), new TerraDrawSelectMode({
+          flags: { polygon: { feature: { draggable: true, coordinates: { midpoints: true, draggable: true, deletable: true } } } },
+          styles: { selectedPolygonColor: '#E8B730', selectedPolygonFillOpacity: 0.25, selectedPolygonOutlineColor: '#E8B730',
+                    selectedPolygonOutlineWidth: 2.5, selectionPointColor: '#17251C', selectionPointWidth: 6,
+                    selectionPointOutlineColor: '#ffffff', selectionPointOutlineWidth: 2, midPointColor: '#E8B730', midPointWidth: 4 },
+        })],
+      })
+      td.on('change', ids => {
+        const eid = editId.current
+        if (eid == null || !ids.includes(eid) || !td.hasFeature(eid)) return
+        const f = td.getSnapshotFeature(eid)
+        if (f?.geometry.type === 'Polygon') focusRef.current?.onEdited?.(f.geometry as GeoJSON.Polygon)
       })
       td.on('finish', id => {
+        if (editId.current != null) return   // 'finish' do arraste na edição não é piquete novo
         const f = td.getSnapshotFeature(id)
         td.clear()
         if (f?.geometry.type === 'Polygon') focusRef.current?.onDrawn?.(f.geometry as GeoJSON.Polygon)
@@ -214,7 +230,7 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
       return new maplibregl.Marker({ element: el }).setLngLat(ringCenter(f.geometry as GeoJSON.Polygon)).addTo(m)
     })
     // com NDVI, PRODES ou piquetes na tela, as camadas do CAR viram só contorno para não esconder o que importa
-    const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length || !!focus?.paddocks?.features.length
+    const outlineOnly = !!focus?.ndvi || !!focus?.prodes?.features.length || !!focus?.paddocks?.features.length || !!focus?.editing
     for (const cat of LAYER_ORDER) {
       const vis = focus?.visible.has(cat) ? 'visible' : 'none'
       m.setLayoutProperty(`car-${cat}-fill`, 'visibility', outlineOnly ? 'none' : vis)
@@ -229,18 +245,28 @@ export default function MapView({ properties, perimeters, selectedId, onSelect, 
     }
   }, [focus, ready])
 
-  // liga/desliga o desenho
+  // liga/desliga o desenho (piquete novo) e a edição de formato (piquete existente)
+  const editingId = focus?.editing?.id ?? null
   useEffect(() => {
     const td = draw.current
     if (!td || !ready) return
+    const ed = focusRef.current?.editing
+    if (td.enabled) td.clear()
+    editId.current = null
     if (focus?.drawing) {
       if (!td.enabled) td.start()
       td.setMode('polygon')
+    } else if (ed) {
+      if (!td.enabled) td.start()
+      const fid = td.getFeatureId()
+      td.addFeatures([{ type: 'Feature', id: fid, geometry: ed.geometry, properties: { mode: 'polygon' } }])
+      td.setMode('select')
+      editId.current = fid
+      td.selectFeature(fid)
     } else if (td.enabled) {
-      td.clear()
       td.stop()
     }
-  }, [focus?.drawing, ready])
+  }, [focus?.drawing, editingId, ready])
 
   // enquadra a propriedade aberta
   useEffect(() => {
