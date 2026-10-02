@@ -351,6 +351,52 @@ def ndvi_series_for(chat_id: str, property_id: int, months: int = 24) -> dict:
     return _analysis_dict(_get_analysis_row(aid))
 
 
+POINT_BUFFER_M = 15   # ~7 pixels Sentinel-2 de 10 m: suaviza ruído de um pixel isolado
+
+
+def _round_coords(c):
+    return [_round_coords(x) for x in c] if isinstance(c, list) else round(c, 5)
+
+
+def ndvi_zone_for(chat_id: str, property_id: int, geometry: dict, months: int = 24) -> dict:
+    """
+    NDVI mês a mês de uma zona da propriedade — ponto (com buffer) hoje, piquete desenhado no futuro.
+    A zona precisa estar dentro do perímetro.
+    """
+    from shapely.geometry import shape
+    from app.web.analytics import ndvi_series
+    from app.saas.limit_engine import can_perform_action
+    from app.models import log_activity
+    gtype = (geometry or {}).get("type")
+    if gtype not in ("Point", "Polygon", "MultiPolygon"):
+        raise PropertyError("Envie um ponto ou um polígono.")
+    geometry = {"type": gtype, "coordinates": _round_coords(geometry.get("coordinates"))}
+    prop = get_property(property_id)
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para calcular o NDVI.")
+    try:
+        zone = shape(geometry)
+        perim = shape(prop["perimeter"])
+        if not perim.is_valid:
+            perim = perim.buffer(0)
+    except Exception:
+        raise PropertyError("Geometria inválida.")
+    if not zone.intersects(perim):
+        raise PropertyError("Escolha um ponto dentro do perímetro da propriedade.")
+    buffer_m = POINT_BUFFER_M if gtype == "Point" else 0
+    params = {"geometry": geometry, "months": months}
+    cached = _cached_analysis(property_id, "ndvi_zone", params, max_age_hours=24 * 7)
+    if cached:
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    series = ndvi_series(geometry, months, scale=10, buffer_m=buffer_m)
+    log_activity(chat_id, "NDVI", platform="web", details=f"{prop['name']} (zona {gtype}, {months} meses)")
+    aid = _save_analysis(property_id, chat_id, "ndvi_zone", params, {"series": series, "buffer_m": buffer_m})
+    return _analysis_dict(_get_analysis_row(aid))
+
+
 def ndvi_month_for(chat_id: str, property_id: int, month: str) -> dict:
     import re as _re
     from app.web.analytics import ndvi_month_image

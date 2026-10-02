@@ -40,11 +40,16 @@ def _month_start(months_back: int) -> date:
     return date(y, m, 1)
 
 
-def ndvi_series(perimeter_geojson: dict, months: int = 24) -> list:
-    """[{month: 'YYYY-MM', mean, p25, p75, images}] do mais antigo ao mais recente (None = sem cena limpa)."""
+def ndvi_series(perimeter_geojson: dict, months: int = 24, scale: int = 20, buffer_m: float = 0) -> list:
+    """
+    [{month: 'YYYY-MM', mean, p25, p75, images}] do mais antigo ao mais recente (None = sem cena limpa).
+    Serve para o perímetro inteiro ou uma zona dele (ponto com buffer, piquete): zonas pequenas usam scale=10.
+    """
     if not initialize_gee():
         raise RuntimeError("Google Earth Engine indisponível")
     geom = ee.Geometry(perimeter_geojson)
+    if buffer_m:
+        geom = geom.buffer(buffer_m)
     start = ee.Date(_month_start(months - 1).isoformat())
     col = (ee.ImageCollection(S2).filterBounds(geom)
            .filterDate(start, ee.Date(date.today().isoformat()).advance(1, "day"))
@@ -57,7 +62,7 @@ def ndvi_series(perimeter_geojson: dict, months: int = 24) -> list:
         stats = ee.Dictionary(ee.Algorithms.If(
             monthly.size().gt(0),
             monthly.map(_ndvi).median().reduceRegion(
-                reducer=reducer, geometry=geom, scale=20, maxPixels=1e9, bestEffort=True),
+                reducer=reducer, geometry=geom, scale=scale, maxPixels=1e9, bestEffort=True),
             ee.Dictionary({}),
         ))
         # mês sem cena limpa → dicionário vazio (as chaves NDVI_* simplesmente não aparecem)

@@ -227,6 +227,18 @@ async def ndvi_series(property_id: int, months: int = 24, user=Depends(current_u
     return await _call(P.ndvi_series_for, user.chat_id, property_id, months)
 
 
+class NdviZone(BaseModel):
+    geometry: dict
+    months: int = Field(default=24, ge=6, le=60)
+
+
+@router.post("/properties/{property_id}/ndvi/zone")
+async def ndvi_zone(property_id: int, body: NdviZone, user=Depends(current_user)):
+    _own(property_id, user)
+    _rate_limit(f"ndvi:{user.chat_id}", limit=30)
+    return await _call(P.ndvi_zone_for, user.chat_id, property_id, body.geometry, body.months)
+
+
 @router.get("/properties/{property_id}/ndvi/month")
 async def ndvi_month(property_id: int, month: str, user=Depends(current_user)):
     _own(property_id, user)

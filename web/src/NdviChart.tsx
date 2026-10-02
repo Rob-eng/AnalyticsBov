@@ -7,10 +7,11 @@ const H = 150
 const PAD = { l: 30, r: 8, t: 10, b: 22 }
 const Y_MAX = 0.9
 const LINE = '#2E7D32'
+const ZONE = '#2A6FB0'   // ponto/piquete: segunda série, mesmo eixo
 
-type Props = { series: NdviPoint[]; selected: string[]; onPick: (month: string) => void }
+type Props = { series: NdviPoint[]; selected: string[]; onPick: (month: string) => void; zone?: NdviPoint[] | null; zoneLabel?: string }
 
-export default function NdviChart({ series, selected, onPick }: Props) {
+export default function NdviChart({ series, selected, onPick, zone, zoneLabel = 'Ponto' }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(300)
   const [hover, setHover] = useState<number | null>(null)
@@ -29,13 +30,20 @@ export default function NdviChart({ series, selected, onPick }: Props) {
   const y = (v: number) => PAD.t + ih - (Math.min(Math.max(v, 0), Y_MAX) / Y_MAX) * ih
 
   // segmentos contínuos (quebra onde não há dado)
-  const segments: number[][] = []
-  series.forEach((p, i) => {
-    if (p.mean == null) return
-    const last = segments[segments.length - 1]
-    if (last && last[last.length - 1] === i - 1) last.push(i); else segments.push([i])
-  })
-  const linePath = segments.map(seg => seg.map((i, k) => `${k ? 'L' : 'M'}${x(i)},${y(series[i].mean!)}`).join('')).join('')
+  const segmentsOf = (s: NdviPoint[]) => {
+    const out: number[][] = []
+    s.forEach((p, i) => {
+      if (p.mean == null) return
+      const last = out[out.length - 1]
+      if (last && last[last.length - 1] === i - 1) last.push(i); else out.push([i])
+    })
+    return out
+  }
+  const pathOf = (s: NdviPoint[]) => segmentsOf(s).map(seg => seg.map((i, k) => `${k ? 'L' : 'M'}${x(i)},${y(s[i].mean!)}`).join('')).join('')
+  const segments = segmentsOf(series)
+  const linePath = pathOf(series)
+  const zoneByMonth = new Map((zone ?? []).map(p => [p.month, p]))
+  const zoneAligned = zone ? series.map(p => zoneByMonth.get(p.month) ?? { ...p, mean: null }) : null
   const bandPath = segments.map(seg => {
     const top = seg.map((i, k) => `${k ? 'L' : 'M'}${x(i)},${y(series[i].p75 ?? series[i].mean!)}`).join('')
     const bottom = [...seg].reverse().map(i => `L${x(i)},${y(series[i].p25 ?? series[i].mean!)}`).join('')
@@ -64,6 +72,7 @@ export default function NdviChart({ series, selected, onPick }: Props) {
         ))}
         <path d={bandPath} fill={LINE} opacity={0.14} />
         <path d={linePath} fill="none" stroke={LINE} strokeWidth={2} strokeLinejoin="round" />
+        {zoneAligned && <path d={pathOf(zoneAligned)} fill="none" stroke={ZONE} strokeWidth={2} strokeLinejoin="round" />}
         {series.map((p, i) => p.mean != null && selected.includes(p.month) && (
           <circle key={p.month} cx={x(i)} cy={y(p.mean)} r={5} fill="#E8B730" stroke="#17251C" strokeWidth={2} />
         ))}
@@ -71,6 +80,7 @@ export default function NdviChart({ series, selected, onPick }: Props) {
           <>
             <line x1={x(hover!)} x2={x(hover!)} y1={PAD.t} y2={PAD.t + ih} className="chart-cross" />
             <circle cx={x(hover!)} cy={y(hp.mean)} r={4} fill={LINE} stroke="#fff" strokeWidth={2} />
+            {zoneAligned?.[hover!]?.mean != null && <circle cx={x(hover!)} cy={y(zoneAligned[hover!].mean!)} r={4} fill={ZONE} stroke="#fff" strokeWidth={2} />}
           </>
         )}
         <rect x={PAD.l} y={PAD.t} width={iw} height={ih} fill="transparent" style={{ cursor: 'pointer' }}
@@ -82,7 +92,15 @@ export default function NdviChart({ series, selected, onPick }: Props) {
           <strong>{fmtMonth(hp.month)}</strong>
           {hp.mean == null
             ? <span>sem imagem sem nuvens</span>
-            : <><span>NDVI {fmtNdvi(hp.mean)}</span><span className="muted">faixa {fmtNdvi(hp.p25)}–{fmtNdvi(hp.p75)} · {hp.images} cenas</span></>}
+            : <><span>{zoneAligned ? 'Fazenda ' : 'NDVI '}{fmtNdvi(hp.mean)}</span>
+                {zoneAligned && <span>{zoneLabel} {fmtNdvi(zoneAligned[hover!]?.mean ?? null)}</span>}
+                <span className="muted">faixa {fmtNdvi(hp.p25)}–{fmtNdvi(hp.p75)} · {hp.images} cenas</span></>}
+        </div>
+      )}
+      {zoneAligned && (
+        <div className="chart-legend">
+          <span><i style={{ background: LINE }} />Fazenda (média)</span>
+          <span><i style={{ background: ZONE }} />{zoneLabel}</span>
         </div>
       )}
     </div>

@@ -71,6 +71,7 @@ export const api = {
   ndvi: (id: number) => request<Ndvi>(`/properties/${id}/ndvi`),
   carLookup: (lat: number, lon: number) => request<{ candidates: CarCandidate[] }>(`/car/lookup?lat=${lat}&lon=${lon}`),
   ndviSeries: (id: number, months = 24) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/ndvi/series?months=${months}`),
+  ndviZone: (id: number, geometry: GeoJSON.Geometry, months = 24) => request<Analysis<{ series: NdviPoint[]; buffer_m: number }>>(`/properties/${id}/ndvi/zone`, { method: 'POST', body: JSON.stringify({ geometry, months }) }),
   ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
   rain: (id: number) => request<Analysis<Rain>>(`/properties/${id}/rain`),
   mdt: (id: number, kind: '2d' | '3d') => request<Analysis<{ elev_min: number; elev_max: number; source: string }> | { status: 'processing' }>(`/properties/${id}/mdt?kind=${kind}`),

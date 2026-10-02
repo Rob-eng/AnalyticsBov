@@ -9,7 +9,9 @@ import MdtSection from './MdtSection'
 import ProdesSection from './ProdesSection'
 import type { ProdesList } from './api'
 
-export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) => void }) {
+export type Pick = { active: boolean; point: { lat: number; lon: number } | null }
+
+export default function PropertyPanel({ onFocus, pick, setPick }: { onFocus: (f: Focus | null) => void; pick: Pick; setPick: (p: Pick) => void }) {
   const id = Number(useParams().id)
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -105,7 +107,7 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
             </ul>
           </div>
 
-          <NdviSection propertyId={id} shown={ndvi} onShow={setNdvi} />
+          <NdviSection propertyId={id} shown={ndvi} onShow={setNdvi} pick={pick} setPick={setPick} />
 
           <RainSection propertyId={id} />
 

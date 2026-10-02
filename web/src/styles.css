@@ -154,3 +154,10 @@ p { margin: 0; }
 .ok { color: #1f6b35; font-weight: 600; font-size: .9rem; }
 .jobs { display: grid; gap: 4px; }
 .job { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px; background: #fff; border: 1px solid var(--linha); border-radius: 8px; font-size: .85rem; }
+.chart-legend { display: flex; gap: 14px; font-size: .78rem; color: var(--apoio); margin-top: 2px; }
+.chart-legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; border-radius: 1px; }
+.zone-table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.zone-table th, .zone-table td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--linha); }
+.zone-table th:first-child, .zone-table td:first-child { text-align: left; }
+.zone-table th { font-weight: 600; color: var(--apoio); font-size: .75rem; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
