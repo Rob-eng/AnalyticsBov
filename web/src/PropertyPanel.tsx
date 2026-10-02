@@ -4,6 +4,8 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { api, fmtHa, LAYER_ORDER, LAYER_STYLE, type Ndvi } from './api'
 import type { Focus } from './MapView'
 import NdviSection from './NdviSection'
+import RainSection from './RainSection'
+import MdtSection from './MdtSection'
 
 export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) => void }) {
   const id = Number(useParams().id)
@@ -99,6 +101,10 @@ export default function PropertyPanel({ onFocus }: { onFocus: (f: Focus | null) 
           </div>
 
           <NdviSection propertyId={id} shown={ndvi} onShow={setNdvi} />
+
+          <RainSection propertyId={id} />
+
+          <MdtSection propertyId={id} />
 
           <div className="block">
             <h3>Arquivos</h3>

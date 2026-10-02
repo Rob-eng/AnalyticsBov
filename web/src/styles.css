@@ -142,3 +142,9 @@ p { margin: 0; }
 .delta { font-weight: 600; font-size: .9rem; }
 .delta-up { color: #1f6b35; }
 .delta-down { color: #9b2c2c; }
+.chart-ref { stroke: var(--tinta); stroke-width: 1; stroke-dasharray: 4 3; opacity: .7; }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.kpis > div { display: grid; gap: 2px; padding: 8px; background: #fff; border: 1px solid var(--linha); border-radius: 8px; }
+.kpi { font: 800 1.05rem var(--display); letter-spacing: -.01em; }
+.media { display: block; width: 100%; border: 1px solid var(--linha); border-radius: 10px; background: #fff; overflow: hidden; }
+.media img, video.media { display: block; width: 100%; height: auto; }

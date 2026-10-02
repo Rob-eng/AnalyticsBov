@@ -246,3 +246,18 @@ async def analysis_file(property_id: int, analysis_id: int, user=Depends(current
     data, mime = await _call(P.analysis_file, property_id, analysis_id)
     return RawResponse(data, media_type=mime or "application/octet-stream",
                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/properties/{property_id}/rain")
+async def property_rain(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(P.rain_for, user.chat_id, property_id)
+
+
+@router.get("/properties/{property_id}/mdt")
+async def property_mdt(property_id: int, kind: str = "2d", user=Depends(current_user)):
+    _own(property_id, user)
+    if kind not in ("2d", "3d"):
+        raise HTTPException(422, "Use kind=2d ou kind=3d")
+    _rate_limit(f"mdt:{user.chat_id}", limit=20)
+    return await _call(P.mdt_for, user.chat_id, property_id, kind)

@@ -100,3 +100,57 @@ def ndvi_month_image(perimeter_geojson: dict, month: str) -> dict:
     x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
     return {"png": resp.content, "images": n, "mean": _r(mean),
             "coordinates": [[x0, y1], [x1, y1], [x1, y0], [x0, y0]]}
+
+
+# ── Chuva (Open-Meteo: previsão + últimos 90 dias + normal de 10 anos) ───────
+
+def rain_summary(lat: float, lon: float) -> dict:
+    """
+    Previsão de 7 dias, chuva diária dos últimos 90 dias (agregada por semana)
+    e o acumulado dos últimos 30 dias contra a média do mesmo período nos
+    10 anos anteriores (ERA5, archive-api).
+    """
+    from datetime import timedelta
+    tz = "America/Sao_Paulo"
+    fc = requests.get("https://api.open-meteo.com/v1/forecast", timeout=30, params={
+        "latitude": lat, "longitude": lon, "timezone": tz, "past_days": 90, "forecast_days": 7,
+        "daily": "precipitation_sum,precipitation_probability_max",
+    })
+    fc.raise_for_status()
+    d = fc.json()["daily"]
+    today = date.today().isoformat()
+    days = [{"date": t, "mm": round(mm or 0, 1), "prob": p} for t, mm, p in
+            zip(d["time"], d["precipitation_sum"], d["precipitation_probability_max"])]
+    past = [x for x in days if x["date"] < today]
+    forecast = [x for x in days if x["date"] >= today][:7]
+
+    weeks = []   # semanas fechadas, da mais antiga à mais recente
+    for i in range(len(past) % 7, len(past), 7):
+        chunk = past[i:i + 7]
+        weeks.append({"start": chunk[0]["date"], "end": chunk[-1]["date"], "mm": round(sum(x["mm"] for x in chunk), 1)})
+
+    last30 = round(sum(x["mm"] for x in past[-30:]), 1)
+    # normal: mesma janela de 30 dias (dia/mês) nos 10 anos anteriores
+    end = date.today() - timedelta(days=1)
+    start30 = end - timedelta(days=29)
+    arch = requests.get("https://archive-api.open-meteo.com/v1/archive", timeout=60, params={
+        "latitude": lat, "longitude": lon, "timezone": tz, "daily": "precipitation_sum",
+        "start_date": date(end.year - 10, 1, 1).isoformat(), "end_date": date(end.year - 1, 12, 31).isoformat(),
+    })
+    normal = None
+    if arch.ok:
+        a = arch.json()["daily"]
+        by_day = dict(zip(a["time"], a["precipitation_sum"]))
+        totals = []
+        for yb in range(1, 11):
+            s, e = start30.replace(year=start30.year - yb), end.replace(year=end.year - yb)
+            vals = [by_day.get((s + timedelta(days=k)).isoformat()) for k in range((e - s).days + 1)]
+            if vals and all(v is not None for v in vals):
+                totals.append(sum(vals))
+        normal = round(sum(totals) / len(totals), 1) if totals else None
+    return {
+        "forecast": forecast, "weeks": weeks,
+        "last30_mm": last30, "normal30_mm": normal,
+        "pct_of_normal": round(last30 / normal * 100) if normal else None,
+        "next7_mm": round(sum(x["mm"] for x in forecast), 1),
+    }

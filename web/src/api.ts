@@ -46,6 +46,9 @@ export type Ndvi = { date: string; mean: number | null; cloud_pct: number | null
 export type Analysis<R = Record<string, unknown>> = { id: number; kind: string; params: Record<string, unknown>; result: R; file_url: string | null; created_at: string }
 export type NdviPoint = { month: string; images: number; mean: number | null; p25: number | null; p75: number | null }
 export type NdviMonth = { mean: number | null; images: number; coordinates: [number, number][] }
+export type RainDay = { date: string; mm: number; prob: number | null }
+export type RainWeek = { start: string; end: string; mm: number }
+export type Rain = { forecast: RainDay[]; weeks: RainWeek[]; last30_mm: number; normal30_mm: number | null; pct_of_normal: number | null; next7_mm: number }
 export type LoginStart = { code: string; expires_in: number; whatsapp_url: string | null; telegram_url: string }
 
 export const api = {
@@ -66,6 +69,8 @@ export const api = {
   carLookup: (lat: number, lon: number) => request<{ candidates: CarCandidate[] }>(`/car/lookup?lat=${lat}&lon=${lon}`),
   ndviSeries: (id: number, months = 24) => request<Analysis<{ series: NdviPoint[] }>>(`/properties/${id}/ndvi/series?months=${months}`),
   ndviMonth: (id: number, month: string) => request<Analysis<NdviMonth>>(`/properties/${id}/ndvi/month?month=${month}`),
+  rain: (id: number) => request<Analysis<Rain>>(`/properties/${id}/rain`),
+  mdt: (id: number, kind: '2d' | '3d') => request<Analysis<{ elev_min: number; elev_max: number; source: string }>>(`/properties/${id}/mdt?kind=${kind}`),
   analyses: (id: number) => request<Analysis[]>(`/properties/${id}/analyses`),
   zipUrl: (id: number) => `/api/v1/properties/${id}/car.zip`,
   mapUrl: (id: number) => `/api/v1/properties/${id}/map.png`,
@@ -93,3 +98,5 @@ export const LAYER_ORDER = Object.keys(LAYER_STYLE)
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 export const fmtMonth = (ym: string) => { const [y, m] = ym.split('-'); return `${MESES[Number(m) - 1]}/${y.slice(2)}` }
 export const fmtNdvi = (v: number | null | undefined) => v == null ? '—' : v.toFixed(2).replace('.', ',')
+export const fmtMm = (v: number | null | undefined) => v == null ? '—' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mm`
+export const fmtDay = (iso: string) => { const [, m, d] = iso.split('-'); return `${d}/${m}` }

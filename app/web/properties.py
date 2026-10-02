@@ -417,3 +417,52 @@ def analysis_file(property_id: int, analysis_id: int) -> tuple:
     if b64:
         return base64.b64decode(b64), row.file_type
     raise PropertyError("Arquivo da análise indisponível.")
+
+
+def rain_for(chat_id: str, property_id: int) -> dict:
+    from app.web.analytics import rain_summary
+    from app.saas.limit_engine import can_perform_action
+    from app.models import log_activity
+    cached = _cached_analysis(property_id, "rain", {}, max_age_hours=6)
+    if cached:
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    prop = get_property(property_id)
+    if prop["lat"] is None:
+        raise PropertyError("Propriedade sem localização.")
+    result = rain_summary(prop["lat"], prop["lon"])
+    log_activity(chat_id, "CLIMA", platform="web", details=prop["name"])
+    return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, "rain", {}, result)))
+
+
+def mdt_for(chat_id: str, property_id: int, kind: str = "2d") -> dict:
+    """Relevo da propriedade: '2d' = curvas de nível (PNG); '3d' = vídeo 3D com textura Sentinel-2 (MP4)."""
+    from app.gee_connector import get_terrain_data
+    from app.environmental import generate_terrain_image_2d, generate_terrain_image_3d
+    from app.saas.limit_engine import can_perform_action
+    from app.models import log_activity
+    analysis_kind = f"mdt_{kind}"
+    cached = _cached_analysis(property_id, analysis_kind, {}, max_age_hours=24 * 30)
+    if cached:
+        return _analysis_dict(cached)
+    ok, msg = can_perform_action(chat_id, "LOOKUP")
+    if not ok:
+        raise PropertyError(msg.replace("Patrão, ", ""))
+    prop = get_property(property_id)
+    if not prop["perimeter"]:
+        raise PropertyError("Vincule o CAR desta propriedade para gerar o relevo sobre o perímetro.")
+    terrain = get_terrain_data(prop["perimeter"])
+    if not terrain:
+        raise PropertyError("Não foi possível obter os dados de elevação agora.")
+    center = (prop["lat"], prop["lon"])
+    gen = generate_terrain_image_2d if kind == "2d" else generate_terrain_image_3d
+    out = gen(terrain, prop["perimeter"], "OFFICIAL", prop["name"], center)
+    if not out:
+        raise PropertyError("Não foi possível gerar o relevo.")
+    data = out.getvalue() if hasattr(out, "getvalue") else out
+    log_activity(chat_id, "MDT", platform="web", details=f"{prop['name']} ({kind})")
+    result = {"elev_min": terrain.get("elev_min"), "elev_max": terrain.get("elev_max"), "source": terrain.get("source")}
+    mime, ext = ("image/png", "png") if kind == "2d" else ("video/mp4", "mp4")
+    return _analysis_dict(_get_analysis_row(_save_analysis(property_id, chat_id, analysis_kind, {}, result, data, mime, ext)))
