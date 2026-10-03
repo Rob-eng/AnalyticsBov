@@ -503,3 +503,19 @@ def remove_improvement(property_id: int, item_id: int, user=Depends(current_user
     _own(property_id, user)
     IMP.delete_improvement(property_id, item_id)
     return RawResponse(status_code=204)
+
+
+# ── Mercado (Fase 4) ─────────────────────────────────────────────────────────
+
+from app.web import market as MK
+
+
+@router.get("/market")
+async def market(uf: Optional[str] = None, user=Depends(current_user)):
+    return await run_in_threadpool(MK.market_for, uf)
+
+
+@router.get("/properties/{property_id}/herd/value")
+async def herd_value(property_id: int, user=Depends(current_user)):
+    _own(property_id, user)
+    return await _call(MK.herd_value_for, property_id)

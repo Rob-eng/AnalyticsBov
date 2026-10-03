@@ -54,6 +54,17 @@ export type Grazing = { paddocks: GrazingPaddock[]; rest_window: [number, number
 export type ImprovementKind = { key: string; label: string; geometry: 'Point' | 'LineString'; water: boolean }
 export type ImprovementProps = { id: number; kind: string; kind_label: string; name: string | null; notes: string | null; length_m: number | null }
 export type Improvements = GeoJSON.FeatureCollection<GeoJSON.Point | GeoJSON.LineString, ImprovementProps> & { kinds: ImprovementKind[] }
+export type SpotSeries = { unit: string | null; value: number; ref_date: string; change: number | null; history: [string, number][] }
+export type CurveSession = { session_date: string; spot_date: string; spot: Record<string, number>; curve: Record<'boi' | 'vaca' | 'novilha', [string, number][]>; methods: Record<string, string> }
+export type Market = {
+  uf: string; ufs: string[]; spot: Partial<Record<'boi' | 'vaca' | 'novilha' | 'escala' | 'bonus' | 'diferencial', SpotSeries>>
+  praças: { uf: string; boi?: number; vaca?: number; novilha?: number; escala?: number }[]
+  scot: { date: string | null; countries: { country: string; usd: number; change: number | null }[] }
+  cda: { days: number; bands: { sex: 'm' | 'f'; band: string; lo: number; hi: number; heads: number; lots: number; rkg: number; avg_kg: number }[]; events: { name: string; date: string; location: string | null; lots: number; heads: number | null }[] }
+  curve: CurveSession[]
+}
+export type HerdValue = { uf: string; uf_from_property: boolean; total: number; ref_date: string | null; note: string
+  lots: { id: number; name: string; category: string; heads: number; kg: number; price: number | null; unit: string; value: number | null; per_head: number | null; method: string }[] }
 export type Alerts = { ndvi: boolean; rain: boolean; prodes: boolean }
 export type PropertyDetail = Property & { perimeter: GeoJSON.MultiPolygon | null; bbox: [number, number, number, number] | null; alerts: Alerts }
 export type HistoryItem = { id: number; kind: string; title: string; detail: string | null; created_at: string; file_type: string | null; file_url: string | null }
@@ -98,6 +109,8 @@ export const api = {
   createImprovement: (id: number, body: { kind: string; geometry: GeoJSON.Geometry; name?: string; notes?: string }) => request<unknown>(`/properties/${id}/improvements`, { method: 'POST', body: JSON.stringify(body) }),
   editImprovement: (id: number, item: number, body: { name?: string; notes?: string }) => request<unknown>(`/properties/${id}/improvements/${item}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteImprovement: (id: number, item: number) => request<void>(`/properties/${id}/improvements/${item}`, { method: 'DELETE' }),
+  market: (uf?: string) => request<Market>(`/market${uf ? `?uf=${uf}` : ''}`),
+  herdValue: (id: number) => request<HerdValue>(`/properties/${id}/herd/value`),
   herd: (id: number) => request<Herd>(`/properties/${id}/herd`),
   createLot: (id: number, body: { name: string; category: string; head_count: number; avg_weight_kg?: number | null; notes?: string }) => request<Herd>(`/properties/${id}/lots`, { method: 'POST', body: JSON.stringify(body) }),
   editLot: (id: number, lot: number, body: Partial<{ name: string; category: string; head_count: number; avg_weight_kg: number | null; notes: string }>) => request<Herd>(`/properties/${id}/lots/${lot}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -146,3 +159,5 @@ export const fmtMonth = (ym: string) => { const [y, m] = ym.split('-'); return `
 export const fmtNdvi = (v: number | null | undefined) => v == null ? '—' : v.toFixed(2).replace('.', ',')
 export const fmtMm = (v: number | null | undefined) => v == null ? '—' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mm`
 export const fmtDay = (iso: string) => { const [, m, d] = iso.split('-'); return `${d}/${m}` }
+
+export const fmtBRL = (v: number | null | undefined, nd = 2) => v == null ? '—' : 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: nd, maximumFractionDigits: nd })

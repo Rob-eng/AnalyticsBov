@@ -1,10 +1,11 @@
 import { useCallback, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, Route, Routes, useMatch, useNavigate } from 'react-router'
+import { Link, Route, Routes, useMatch, useNavigate, useSearchParams } from 'react-router'
 import { api, fmtHa, PLAN_LABEL, type Me } from './api'
 import MapView, { type Focus } from './MapView'
 import PropertyPanel from './PropertyPanel'
 import AddProperty from './AddProperty'
+import MarketBoard from './MarketBoard'
 
 export default function Workspace({ me }: { me: Me }) {
   const qc = useQueryClient()
@@ -16,9 +17,14 @@ export default function Workspace({ me }: { me: Me }) {
   const [focus, setFocus] = useState<Focus | null>(null)
   const [pick, setPick] = useState<{ active: boolean; point: { lat: number; lon: number } | null }>({ active: false, point: null })
   const openMatch = useMatch('/p/:id')
+  const marketMatch = useMatch('/mercado')
+  const [params, setParams] = useSearchParams()
   const selectedId = openMatch ? Number(openMatch.params.id) : null
   const hasConsultancy = me.organizations.some(o => o.kind === 'consultoria')
   const list = props.data ?? []
+  // praça do mercado: ?uf= na URL; padrão = UF da primeira propriedade (ou MS)
+  const marketUf = params.get('uf') || list.find(p => p.uf)?.uf || 'MS'
+  const setMarketUf = (uf: string) => setParams({ uf }, { replace: true })
 
   const onPick = useCallback((lat: number, lon: number) => {
     setPick(p => (p.active ? { ...p, point: { lat, lon } } : p))
@@ -35,7 +41,10 @@ export default function Workspace({ me }: { me: Me }) {
     <div className="workspace">
       <aside className="rail">
         <header className="rail-head">
-          <Link to="/" className="brand">Agro Analytics</Link>
+          <div className="brand-row">
+            <Link to="/" className="brand">Agro Analytics</Link>
+            <Link to="/mercado" className="rail-link" aria-current={marketMatch ? 'page' : undefined}>Mercado</Link>
+          </div>
           <div className="mode" role="tablist" aria-label="Modo de uso">
             <button role="tab" aria-selected={mode === 'produtor'} onClick={() => setMode('produtor')}>Minhas fazendas</button>
             <button role="tab" aria-selected={mode === 'consultor'} onClick={() => setMode('consultor')}>Carteira de clientes</button>
@@ -52,6 +61,22 @@ export default function Workspace({ me }: { me: Me }) {
           <Routes>
             <Route path="/p/:id" element={<PropertyPanel onFocus={setFocus} pick={pick} setPick={setPick} />} />
             <Route path="/nova" element={<AddProperty pick={pick} setPick={setPick} />} />
+            <Route path="/mercado" element={
+              <section className="panel">
+                <Link className="link back" to="/">← Propriedades</Link>
+                <h2>Mercado do boi</h2>
+                <p className="muted">Cotações da praça, curva projetada da B3, preços do mundo e reposição nos leilões, com os mesmos dados do bot.</p>
+                {list.some(p => p.uf) && (
+                  <div className="block">
+                    <h3>Praças das suas fazendas</h3>
+                    <div className="row">{[...new Set(list.map(p => p.uf).filter(Boolean))].map(uf => (
+                      <button key={uf} className={'btn btn-sm' + (uf === marketUf ? '' : ' btn-ghost')} onClick={() => setMarketUf(uf!)}>{uf}</button>
+                    ))}</div>
+                  </div>
+                )}
+                <p className="muted small">O valor estimado do rebanho de cada fazenda fica na aba Rebanho da propriedade.</p>
+              </section>
+            } />
             <Route path="*" element={
               <section className="panel">
                 <div className="panel-title">
@@ -101,6 +126,7 @@ export default function Workspace({ me }: { me: Me }) {
           picked={pick.point}
           onPick={onPick}
         />
+        {marketMatch && <div className="market-stage"><MarketBoard uf={marketUf} onUf={setMarketUf} /></div>}
         {focus?.drawing && selectedId && <div className="map-hint" role="status">Clique para marcar os cantos · clique no primeiro ponto para fechar</div>}
         {pick.active && <div className="map-hint" role="status">{selectedId ? 'Clique no ponto da fazenda que quer analisar' : 'Clique dentro da fazenda no mapa'}</div>}
       </main>

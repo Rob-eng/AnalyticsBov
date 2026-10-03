@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, fmtHa, type Herd, type Lot } from './api'
+import { api, fmtBRL, fmtHa, type Herd, type Lot } from './api'
 
 const today = () => new Date().toLocaleDateString('sv-SE')   // AAAA-MM-DD no fuso local
 const fmtDay = (d: string) => d.split('-').reverse().join('/')
@@ -13,6 +13,8 @@ const EMPTY_FORM: Form = { name: '', category: 'vaca', head_count: '', avg_weigh
 export default function HerdSection({ propertyId, active }: { propertyId: number; active: boolean }) {
   const qc = useQueryClient()
   const herd = useQuery({ queryKey: ['herd', propertyId], queryFn: () => api.herd(propertyId), enabled: active })
+  const value = useQuery({ queryKey: ['herd-value', propertyId, herd.data?.lots.map(l => `${l.id}:${l.head_count}:${l.avg_weight_kg}:${l.category}`).join(',')],
+    queryFn: () => api.herdValue(propertyId), enabled: active && !!herd.data?.lots.length, retry: false })
   const paddocks = useQuery({ queryKey: ['paddocks', propertyId], queryFn: () => api.paddocks(propertyId), enabled: active })
   const [form, setForm] = useState<Form | null>(null)
   const [editing, setEditing] = useState<number | null>(null)
@@ -88,6 +90,19 @@ export default function HerdSection({ propertyId, active }: { propertyId: number
             </div>
           )}
           {h.lots.length > 0 && <p className="muted small">Lotação sobre {h.summary.area_base} ({fmtHa(h.summary.area_ha)}). 1 UA = 450 kg de peso vivo.</p>}
+          {value.data && (
+            <details className="herd-value">
+              <summary>
+                <span className="muted small">Valor estimado do rebanho · praça {value.data.uf}</span>
+                <strong>{fmtBRL(value.data.total, 0)}</strong>
+              </summary>
+              <ul className="occ-list">{value.data.lots.map(l => (
+                <li key={l.id}><strong>{l.name}</strong>: {l.value ? `${fmtBRL(l.value, 0)} (${fmtBRL(l.per_head, 0)}/cab.)` : '—'}<br /><span>{l.method}</span></li>
+              ))}</ul>
+              <p className="muted small">{value.data.note}{!value.data.uf_from_property ? ' A UF da fazenda não tem indicador DATAGRO; usada a praça MS.' : ''}</p>
+            </details>
+          )}
+          {value.isError && <p className="notice small">{(value.error as Error).message}</p>}
           {!h.lots.length && !form && <p className="muted">Cadastre os lotes (categoria, cabeças e peso médio) para acompanhar a lotação e a rotação dos piquetes.</p>}
           {!form && <button className="btn btn-sm" onClick={() => { save.reset(); setEditing(null); setForm({ ...EMPTY_FORM }) }}>Novo lote</button>}
           {!editing && formView}
